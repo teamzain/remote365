@@ -65,6 +65,13 @@
             reverse_proxy session-service:3003
         }
 
+        # Google Play billing (/verify and the Pub/Sub /rtdn push) is served by
+        # auth-service's routes/billing.ts, not billing-service. Caddy tries the
+        # longest path first, so this wins over /api/billing* below.
+        handle /api/billing/google-play* {
+            reverse_proxy auth-service:3001
+        }
+
         # Billing API
         handle /api/billing* {
             uri strip_prefix /api
