@@ -1,0 +1,32 @@
+{
+  "name": "@remotelink/shared",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "ts-node -T src/rbac.test.ts && ts-node -T src/user-permissions.test.ts && ts-node -T src/host-credential.test.ts && ts-node -T src/plan-entitlement.test.ts",
+    "test:rbac": "ts-node -T src/rbac.test.ts",
+    "test:permissions": "ts-node -T src/user-permissions.test.ts",
+    "db:generate": "prisma generate",
+    "seed": "ts-node -T prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.3.1",
+    "fastify": "^4.28.0",
+    "ioredis": "^5.10.1",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.5",
+    "prisma": "^5.22.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  },
+  "prisma": {
+    "seed": "ts-node -T prisma/seed.ts"
+  }
+}

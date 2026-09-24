@@ -1,0 +1,1 @@
+ALTER TABLE "Device" ADD COLUMN "passwordRequired" BOOLEAN NOT NULL DEFAULT true;

@@ -1,0 +1,182 @@
+/* Mona Sans is loaded via <link> in index.html */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* ── Brand tokens (Figma) ── */
+  --primary: #FF8A00;
+  --primary-light: #FFB347;
+  --primary-gradient: linear-gradient(118.29deg, #FF8A00 38.71%, #FFB347 88.95%);
+  --ink: #111315;
+  --base-grey: #F3F4F6;
+  --border-strong: rgba(26, 29, 33, 0.3);
+
+  --snow-primary: #111315;
+  --snow-secondary: #F8F9FA;
+  --snow-accent: #FF8A00;
+  --bg-app: #F4F7F9;
+  --surface: #FFFFFF;
+  --border: rgba(0, 0, 0, 0.06);
+  --text-primary: #111315;
+  --text-secondary: #757575;
+  --base-font-size: 16px;
+  
+  font-family: 'Mona Sans', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light;
+  color: var(--text-primary);
+  background-color: var(--bg-app);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background-color: var(--bg-app);
+  overflow-x: hidden;
+  font-family: 'Mona Sans', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.dark {
+  --snow-primary: #FFFFFF;
+  --snow-secondary: #1C1C1C;
+  --snow-accent: #FF8A00;
+  --bg-app: #0A0A0A;
+  --surface: #141414;
+  --border: rgba(255, 255, 255, 0.1);
+  --text-primary: #F5F5F5;
+  --text-secondary: #A0A0A0;
+}
+
+@layer utilities {
+  /* ── Brand buttons (Figma) ── */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2.5 rounded px-4 py-2.5 text-sm font-medium leading-5 text-white transition-opacity duration-150;
+    background: var(--primary-gradient);
+  }
+  .btn-primary:hover { opacity: 0.9; }
+
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2.5 rounded bg-white px-4 py-2.5 text-sm font-medium leading-5 transition-colors duration-150;
+    color: var(--ink);
+    border: 1px solid var(--border-strong);
+  }
+  .btn-outline:hover { background: var(--base-grey); }
+
+  /* SnowUI Card styles */
+  .purity-card {
+    @apply bg-white rounded-[24px] border border-[rgba(28,28,28,0.06)] shadow-sm transition-all duration-300;
+  }
+
+  .purity-card-hover {
+    @apply bg-white rounded-[24px] border border-[rgba(28,28,28,0.06)] shadow-sm hover:shadow-xl hover:shadow-black/5 hover:-translate-y-1 transition-all duration-300 cursor-pointer;
+  }
+
+  /* SnowUI Primary Button (Squared) */
+  .snow-btn {
+    @apply px-6 py-3.5 rounded-none font-semibold text-white text-sm tracking-tight transition-all duration-200 active:scale-[0.98] flex items-center justify-center gap-2;
+    background-color: var(--snow-primary);
+  }
+
+  .snow-btn:hover {
+    @apply opacity-95 shadow-lg shadow-black/10;
+  }
+  
+  .snow-btn-secondary {
+    @apply px-6 py-3.5 rounded-none font-semibold text-[#1C1C1C] text-sm tracking-tight transition-all duration-200 active:scale-[0.98] flex items-center justify-center gap-2 bg-[#F8F9FA] border border-[rgba(28,28,28,0.08)] hover:border-[rgba(28,28,28,0.2)];
+  }
+
+  /* Input SnowUI style */
+  .purity-input {
+    @apply w-full bg-[#F8F9FA] border border-[rgba(28,28,28,0.06)] text-[#1C1C1C] rounded-[18px] px-4 py-3.5 text-sm font-medium outline-none transition-all duration-300 placeholder:text-[rgba(28,28,28,0.2)];
+  }
+
+  .purity-input:focus {
+    @apply bg-white border-[rgba(28,28,28,0.2)] ring-4 ring-black/5;
+  }
+
+  /* Scrollbar */
+  .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-[rgba(28,28,28,0.1)] rounded-full; }
+
+  /* Status badge */
+  .badge-online {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 border border-emerald-100;
+  }
+
+  .badge-offline {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-slate-50 text-slate-400 border border-slate-100;
+  }
+}
+
+/* Mobile landscape remote session: keep the bottom controls on ONE row. */
+@media (max-width: 950px) and (orientation: landscape) {
+  .session-bottom-bar {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .session-bottom-bar::-webkit-scrollbar { display: none; }
+}
+
+/* Phone drill-in embeds (Settings / Admin settings): desktop-built section
+   panels rendered full-screen on mobile. Layout softening only — no logic. */
+.mobile-embed { padding-bottom: 24px; }
+.mobile-embed input[type="text"],
+.mobile-embed input[type="password"],
+.mobile-embed input[type="email"],
+.mobile-embed input[type="number"],
+.mobile-embed select,
+.mobile-embed textarea { width: 100% !important; max-width: 100% !important; }
+.mobile-embed table { display: block; overflow-x: auto; max-width: 100%; }
+/* Desktop tables carry px-6 cells; on a phone that padding alone forces a
+   sideways pan, so compress it and let the columns fit the screen. */
+.mobile-embed table th, .mobile-embed table td { padding-left: 12px !important; padding-right: 12px !important; }
+.mobile-embed .min-w-\[480px\], .mobile-embed .min-w-\[520px\], .mobile-embed .min-w-\[600px\] { min-width: 0 !important; }
+.mobile-embed > div { padding-left: 16px !important; padding-right: 16px !important; }
+
+/* Stronger phone layout for embedded desktop panels (Settings / Admin
+   drill-ins): single-column grids, wrapping rows, no fixed widths. Layout
+   only — no logic. Scoped to .mobile-embed, which only mobile shells add. */
+.mobile-embed .grid { grid-template-columns: minmax(0, 1fr) !important; }
+.mobile-embed .flex:not(.flex-col):not(.flex-column) { flex-wrap: wrap; }
+.mobile-embed [class*="min-w-"] { min-width: 0 !important; }
+.mobile-embed [class*="w-[2"], .mobile-embed [class*="w-[3"], .mobile-embed [class*="w-[4"] { width: 100% !important; max-width: 100% !important; }
+.mobile-embed [class*="max-w-["] { max-width: 100% !important; }
+.mobile-embed button { max-width: 100%; }
+.mobile-embed img, .mobile-embed video, .mobile-embed canvas { max-width: 100%; height: auto; }
+.mobile-embed pre, .mobile-embed code { white-space: pre-wrap; word-break: break-word; }
+/* Overview slide: the illustration sat behind the copy on phones. */
+.mobile-embed .admin-slide-art { display: none; }
+.mobile-embed .admin-slide-text { width: 100% !important; padding-left: 20px !important; padding-right: 20px !important; }
+/* Wide tables opt into stacked cards (one row = one card, header hidden)
+   instead of scrolling sideways. */
+.mobile-embed table.mobile-cards { display: block; overflow: visible; }
+.mobile-embed table.mobile-cards thead { display: none; }
+.mobile-embed table.mobile-cards tbody { display: block; }
+.mobile-embed table.mobile-cards tr { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 12px; border-bottom: 1px solid rgba(26, 29, 33, 0.08); }
+.mobile-embed table.mobile-cards td { display: block; padding: 0 !important; border: 0 !important; text-align: left !important; }
+.mobile-embed table.mobile-cards td:first-child { flex: 1 1 100%; }
+
+/* Compact multi-group chip on the Devices page: the names scroll sideways. */
+.r365-marquee { display: block; overflow: hidden; white-space: nowrap; }
+.r365-marquee-track { display: inline-flex; gap: 32px; padding-right: 32px; animation: r365-marquee 9s linear infinite; }
+.r365-marquee:hover .r365-marquee-track { animation-play-state: paused; }
+@keyframes r365-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+/* Devices toolbar: group pills scroll sideways in their own strip; the
+   action buttons never shrink or wrap. */
+.r365-toolbar-actions > :not(.r365-pill-strip) { flex: 0 0 auto; }
+.r365-pill-strip { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.r365-pill-strip::-webkit-scrollbar { display: none; }
+.r365-pill-strip > * { flex: 0 0 auto; }

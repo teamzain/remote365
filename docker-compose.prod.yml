@@ -1,0 +1,141 @@
+services:
+  # Infrastructure
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-remotelink}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-remotelink}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U remotelink"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  # Backend Services
+  auth-service:
+    build: 
+      context: .
+      dockerfile: ./apps/auth-service/Dockerfile
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 3001
+      BILLING_SERVICE_URL: http://billing-service:3004
+      TURN_USER: ${TURN_USER}
+      TURN_PASSWORD: ${TURN_PASSWORD}
+      SERVER_IP: ${SERVER_IP}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_SECURE: ${SMTP_SECURE}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  signaling-service:
+    build:
+      context: .
+      dockerfile: ./apps/signaling-service/Dockerfile
+    restart: always
+    ports:
+      - "3001:3002"
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 3002
+      TURN_USER: ${TURN_USER}
+      TURN_PASSWORD: ${TURN_PASSWORD}
+      SERVER_IP: ${SERVER_IP}
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+
+  session-service:
+    build:
+      context: .
+      dockerfile: ./apps/session-service/Dockerfile
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 3003
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+
+  billing-service:
+    build:
+      context: .
+      dockerfile: ./apps/billing-service/Dockerfile
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      PORT: 3004
+    env_file: .env
+    depends_on:
+      - postgres
+
+  # TURN Server
+  coturn:
+    image: coturn/coturn:latest
+    restart: always
+    network_mode: "host"
+    command: >
+      -n --log-file=stdout --min-port=49152 --max-port=65535
+      --realm=${TURN_REALM:-remotelink.local}
+      --user=${TURN_USER}:${TURN_PASSWORD}
+      --external-ip=${SERVER_IP}
+
+  # Reverse Proxy
+  caddy:
+    image: caddy:latest
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+      CADDY_EMAIL: ${CADDY_EMAIL:-admin@remote365.ai}
+      CADDY_SITE: ${CADDY_SITE:-remote365.ai, www.remote365.ai, :80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - /var/www/downloads:/var/www/downloads
+      # Built apps/web bundle (SPA) served by the fallback handle in Caddyfile.
+      - /var/www/webapp:/var/www/webapp
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - auth-service
+      - signaling-service
+      - session-service
+      - billing-service
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

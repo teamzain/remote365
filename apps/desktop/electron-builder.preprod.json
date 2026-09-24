@@ -1,0 +1,7 @@
+{
+  "extends": "./electron-builder.json",
+  "npmRebuild": false,
+  "directories": {
+    "output": "release-preprod148"
+  }
+}

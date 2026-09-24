@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Remote365 Host</string>
+    <string name="accessibility_service_label">Remote365 Input</string>
+    <string name="accessibility_service_description">Lets an authorised Remote365 operator tap, swipe, and type on this device during a remote support session that you have approved.</string>
+</resources>

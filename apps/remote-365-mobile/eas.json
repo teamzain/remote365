@@ -1,0 +1,55 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "promptToConfigurePushNotifications": false
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://pp.remote365.ai"
+      },
+      "ios": {
+        "simulator": false
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "autoIncrement": true
+    },
+    "ios-preprod": {
+      "extends": "production",
+      "distribution": "store",
+      "environment": "preview",
+      "credentialsSource": "local",
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://pp.remote365.ai"
+      },
+      "ios": {
+        "simulator": false
+      }
+    }
+  },
+  "submit": {
+    "ios-preprod": {
+      "ios": {
+        "ascAppId": "6807023936",
+        "ascApiKeyPath": "./credentials/ios/AuthKey_AN4Z39TU7U.p8",
+        "ascApiKeyId": "AN4Z39TU7U",
+        "ascApiKeyIssuerId": "5814c691-0fc0-4848-9f39-38ad4f3eb843"
+      }
+    }
+  }
+}

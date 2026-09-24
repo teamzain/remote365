@@ -1,0 +1,563 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String          @id @default(uuid())
+  email          String          @unique
+  password       String?
+  status         String          @default("ACTIVE") // ACTIVE | INACTIVE (org admin toggle) | SUSPENDED | DELETED
+  name           String?
+  role           String          @default("VIEWER")
+  organizationId String?
+  departmentId   String?
+  allowedTags      String[]        @default([]) // Tags this user is allowed to access
+  allowedDeviceIds String[]        @default([]) // Specific device IDs this user can access
+  // Per-user permission overrides layered on top of the role defaults + org
+  // roleFeatures. Shape: { features: { chat: false, ... }, permissions: { "devices:remove": true, ... } }.
+  // Each entry is tri-state: absent = inherit, true = grant, false = revoke.
+  permissionOverrides Json?         @default("{}")
+  allowedGroups    DeviceGroup[]   @relation("MemberAllowedGroups")
+  organization   Organization?   @relation(fields: [organizationId], references: [id])
+  department     Department?     @relation(fields: [departmentId], references: [id])
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  devices        Device[]
+  savedDevices   SavedDevice[]
+  deviceGroups    UserDeviceGroup[]
+  sessions       Session[]
+  subscription   Subscription?
+  trustedDevices   TrustedDevice[]
+  twoFactorSecret  String?
+  is2FAEnabled         Boolean         @default(false)
+  notifySessionAlert    Boolean         @default(true)
+  notifyDisconnectAlert Boolean         @default(true)
+  notifySoundEffects    Boolean         @default(true)
+  language              String          @default("en")
+  avatar                String?         @db.Text
+  darkMode              Boolean         @default(false)
+  // Settings → Security (block/allow list, auth + access-control prefs),
+  // sanitized server-side in auth.ts PATCH /me.
+  securitySettings      Json?
+  searchBehavior        String          @default("Search for result")
+  useNewInterface       Boolean         @default(true)
+  marketingMessages     Boolean         @default(false)
+  fontSize              Int             @default(16)
+  startWithWindows      Boolean         @default(false)
+  useDeviceDock         Boolean         @default(false)
+  keepAgentRunning      Boolean         @default(true)
+  updatesAutomatically  Boolean         @default(true)
+  windowsNotification   Boolean         @default(true)
+  incomingSessionNotification Boolean   @default(true)
+  passwordResetToken    String?
+  passwordResetExpires  DateTime?
+  supportTickets       SupportTicket[]
+  guideRequests        GuideRequest[]
+  conversations        ConversationParticipant[]
+  messages             Message[]       @relation("SentMessages")
+  createdRemoteSessions RemoteSession[] @relation("CreatedRemoteSessions")
+  remoteSessionCollaborations RemoteSessionCollaborator[]
+}
+
+model Organization {
+  id               String          @id @default(uuid())
+  name             String
+  slug             String          @unique
+  status           String          @default("ACTIVE") // ACTIVE | SUSPENDED
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  users            User[]
+  devices          Device[]
+  departments      Department[]
+  invitations      Invitation[]
+  enrollmentTokens EnrollmentToken[]
+  deviceGroups     DeviceGroup[]
+  activityLogs     ActivityLog[]
+
+  // Org-level settings
+  defaultMemberRole String          @default("VIEWER")
+  require2FA       Boolean         @default(false)
+  // Owner-configured feature visibility per member role (ADMIN/VIEWER):
+  // { "ADMIN": { "licenses": true, ... }, "VIEWER": { ... } }
+  roleFeatures     Json?           @default("{}")
+
+  // Business accounts (sign-up "Business" tab). Personal accounts leave these null.
+  accountType      String          @default("PERSONAL") // PERSONAL | BUSINESS
+  businessNumber   String?
+  companyEmail     String?
+  website          String?
+  addressLine      String?
+  city             String?
+  state            String? // US state / Canadian province
+  country          String?
+  postalCode       String?
+}
+
+model ActivityLog {
+  id             String       @id @default(uuid())
+  organizationId String
+  actorId        String?
+  actorName      String?
+  action         String       // ORG_CREATED | ORG_SUSPENDED | ORG_ACTIVATED | ORG_DELETED | MEMBER_JOINED | DEVICE_ADDED ...
+  message        String
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+}
+
+model LoginEvent {
+  id        String   @id @default(uuid())
+  userId    String?
+  email     String
+  ip        String?
+  userAgent String?
+  result    String   // SUCCESS | INCORRECT_PASSWORD | NO_ACCOUNT | SUSPENDED | TWO_FACTOR
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model PlatformSettings {
+  id                    Int      @id @default(1)
+  defaultRelayUrl       String   @default("relay.connect-x.io")
+  maxSessionDuration    Int      @default(60)
+  maintenanceMode       Boolean  @default(false)
+  maintenanceMessage    String?
+  forceSubAdmin2FA      Boolean  @default(false)
+  globalTokenLifetime   Int      @default(24)
+  minPasswordLength     Int      @default(8)
+  maxPasswordLength     Int      @default(32)
+  defaultOrgPlan        Plan     @default(TRIAL)
+  restrictPlanChanges   Boolean  @default(false)
+  // Recording policies (super-admin console → Settings → Recording Policies).
+  // Enforced by viewers via GET /api/auth/recording-policy at session start.
+  recordingAutoRecord         String  @default("never") // always | ask | never
+  recordingQuality            String  @default("1080p") // 720p | 1080p | 1440p (recorder bitrate tier)
+  recordingStorage            String  @default("local") // local (viewer device); cloud/S3 reserved for the library
+  recordingRetentionDays      Int     @default(30) // 0 = keep forever (applies to the upcoming server library)
+  recordingOnlyAdminsDownload Boolean @default(true)
+  recordingOnlyOwnersDelete   Boolean @default(true)
+  recordingTechsViewOwn       Boolean @default(true)
+  recordingWatermark          Boolean @default(true)
+  updatedAt             DateTime @updatedAt
+}
+
+model Department {
+  id             String       @id @default(uuid())
+  name           String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  users          User[]
+  devices        Device[]
+}
+
+model Invitation {
+  id             String       @id @default(uuid())
+  email          String
+  token          String       @unique
+  role           String       @default("VIEWER")
+  organizationId String
+  departmentId   String?
+  allowedTags      String[]     @default([])
+  allowedDeviceIds String[]     @default([])
+  allowedGroupIds  String[]     @default([])
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+
+  @@index([token])
+}
+
+model EnrollmentToken {
+  id             String       @id @default(uuid())
+  token          String       @unique
+  name           String?      // Optional name for the token e.g. "Primary Enrollment"
+  organizationId String
+  departmentId   String?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime     @default(now())
+  expiresAt      DateTime?
+
+  @@index([token])
+}
+
+model Subscription {
+  id                   String             @id @default(uuid())
+  userId               String             @unique
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  plan                 Plan               @default(TRIAL)
+  // When set, the subscription is on a super-admin-created PlanDef (custom
+  // plan) and this key wins over the `plan` enum for display and limits.
+  customPlanKey        String?
+  status               SubscriptionStatus @default(ACTIVE)
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  // First moment the row moved onto a paid (non-TRIAL) plan; cleared when it
+  // drops back to TRIAL. Drives "new revenue this month" — createdAt is the
+  // trial row's birth at sign-up and never moves on upgrade.
+  paidSince            DateTime?
+  // Which system owns this subscription's money. MANUAL covers super-admin grants and
+  // the legacy test-mode plan changes, which charge nothing.
+  platform             BillingPlatform    @default(MANUAL)
+  // Google Play purchase identity. The token is unique so one purchase can never be
+  // claimed by two accounts — Play reissues a NEW token on upgrade/downgrade and points
+  // it at the old one, so a chain of tokens maps to a single paying user over time.
+  googlePlayPurchaseToken String?         @unique
+  googlePlayProductId     String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  user                 User               @relation(fields: [userId], references: [id])
+}
+
+enum BillingPlatform {
+  MANUAL
+  STRIPE
+  GOOGLE_PLAY
+}
+
+model PlanLimit {
+  plan                   Plan    @id
+  maxConcurrentSessions  Int
+  maxDevices             Int
+  sessionDurationMinutes Int
+  fileTransfer           Boolean @default(false)
+  sessionRecording       Boolean @default(false)
+  teamMembers            Int
+}
+
+// Super-admin-managed subscription plans: rows are either brand-new custom
+// plans (isCustom=true) or overrides of the built-in catalog ids from
+// packages/shared/src/plans.ts (isCustom=false). Merged via plan-catalog.ts.
+model PlanDef {
+  id                    String   @id
+  name                  String
+  price                 String // numeric string, or "Custom"
+  priceLabel            String
+  currency              String   @default("USD")
+  billingPeriod         String   @default("Monthly") // Monthly | Yearly | One-time | Custom
+  description           String   @db.Text
+  maxDevices            Int?
+  maxUsers              Int?
+  maxConcurrentSessions Int?
+  trialDays             Int?
+  autoConvert           Boolean  @default(true) // convert the trial to paid automatically when it ends
+  trialReminder         String? // e.g. "1 day before"; null = no reminder
+  auditRetentionDays    String?
+  features              String[] @default([])
+  popular               Boolean  @default(false)
+  status                String   @default("Active") // Active | Draft | Archived | Disabled (legacy)
+  isCustom              Boolean  @default(true)
+  sortOrder             Int      @default(100)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+// Super-admin override for a platform email. Rows exist only for templates
+// the admin customized or disabled; defaults live in code
+// (apps/auth-service/src/lib/emailTemplates.ts) keyed by `key`.
+model EmailTemplate {
+  key       String   @id
+  subject   String
+  html      String   @db.Text
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Device {
+  id                 String          @id @default(uuid())
+  accessKey          String          @unique
+  // Stable hardware-derived hash the desktop host sends on self-register so a
+  // machine keeps its ID even when the app's local cache is wiped/reinstalled.
+  machineFingerprint String?         @unique
+  // SHA-256 of a high-entropy credential generated and retained by the host.
+  // Access keys identify devices; they are never sufficient to register as one.
+  hostSecretHash      String?
+  accessPasswordHash String?
+  passwordRequired   Boolean         @default(true)
+  name               String?
+  deviceType         DeviceType      @default(WINDOWS)
+  status             String          @default("OFFLINE")
+  ownerId            String?
+  organizationId     String?
+  departmentId       String?
+  tags               String[]        @default([])
+  // Owner-controlled access settings (allowIncoming, accessSchedule …),
+  // enforced server-side in verify-access.
+  settings           Json?           @default("{}")
+  lastSeenAt         DateTime        @default(now())
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  owner              User?           @relation(fields: [ownerId], references: [id])
+  organization       Organization?   @relation(fields: [organizationId], references: [id])
+  department         Department?     @relation(fields: [departmentId], references: [id])
+  savedByUsers       SavedDevice[]
+  trustedByViewers   TrustedDevice[]
+  groups             DeviceGroup[]    @relation("DeviceToGroup")
+  userGroups         UserDeviceGroup[] @relation("UserDeviceGroupDevices")
+  accessCodes        DeviceAccessCode[]
+}
+
+// Single-use, time-boxed codes that stand in for the device password so the
+// owner can grant temporary access without sharing the real credentials.
+model DeviceAccessCode {
+  id          String    @id @default(uuid())
+  deviceId    String
+  codeHash    String
+  hint        String?
+  createdById String?
+  expiresAt   DateTime
+  usedAt      DateTime?
+  usedById    String?
+  createdAt   DateTime  @default(now())
+  device      Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@index([codeHash])
+}
+
+model UserDeviceGroup {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  color     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  devices   Device[] @relation("UserDeviceGroupDevices")
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model DeviceGroup {
+  id        String       @id @default(cuid())
+  orgId     String
+  name      String
+  color     String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  devices   Device[]     @relation("DeviceToGroup")
+  members   User[]       @relation("MemberAllowedGroups")
+
+  @@unique([orgId, name])
+  @@index([orgId])
+}
+
+model Session {
+  id        String    @id @default(uuid())
+  hostId    String
+  viewerId  String
+  startTime DateTime  @default(now())
+  endTime   DateTime?
+  status    String    @default("ACTIVE")
+  viewer    User      @relation(fields: [viewerId], references: [id])
+}
+
+model SupportSession {
+  id             String        @id @default(cuid())
+  code           String        @unique
+  pin            String
+  status         SessionStatus @default(CREATED)
+  orgId          String
+  customerUserId String?
+  customerName   String?
+  customerEmail  String?
+  technicianId   String?
+  deviceId       String?
+  deviceName     String?
+  issueCategory  String?
+  issueSummary   String?
+  notes          String?
+  systemInfo     Json?
+  createdAt      DateTime      @default(now())
+  acceptedAt     DateTime?
+  connectedAt    DateTime?
+  endedAt        DateTime?
+  durationSec    Int?
+  rating         Int?
+  ratingComment  String?
+  recordingUrl   String?
+
+  @@index([orgId, status])
+  @@index([technicianId])
+  @@index([deviceId])
+  @@index([code])
+}
+
+model TrustedDevice {
+  viewerUserId String
+  hostDeviceId String
+  trustedAt    DateTime @default(now())
+  hostDevice   Device   @relation(fields: [hostDeviceId], references: [id])
+  viewer       User     @relation(fields: [viewerUserId], references: [id])
+
+  @@id([viewerUserId, hostDeviceId])
+}
+
+model SavedDevice {
+  userId   String
+  deviceId String
+  savedAt  DateTime @default(now())
+  device   Device   @relation(fields: [deviceId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@id([userId, deviceId])
+}
+
+enum Plan {
+  TRIAL
+  SOLO
+  PRO
+  BUSINESS
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  TRIALING
+}
+
+enum DeviceType {
+  WINDOWS
+  MACOS
+  LINUX
+  IOS
+  ANDROID
+}
+
+enum SessionStatus {
+  CREATED
+  QUEUED
+  ASSIGNED
+  RINGING
+  CONNECTED
+  ENDED
+  RESOLVED
+  EXPIRED
+}
+
+model SupportTicket {
+  id          String   @id @default(uuid())
+  displayId   String   @unique // e.g., TIC-9821
+  subject     String
+  category    String
+  description String
+  status      String   @default("Open") // Open, In Review, Closed
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model GuideRequest {
+  id          String   @id @default(uuid())
+  description String
+  status      String   @default("Pending")
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Conversation {
+  id            String                    @id @default(uuid())
+  isGroup       Boolean                   @default(false)
+  name          String?
+  status        String                    @default("ACCEPTED") // PENDING, ACCEPTED, REJECTED, BLOCKED
+  requestedById String?
+  blockedById   String?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  participants  ConversationParticipant[]
+  messages      Message[]
+}
+
+model ConversationParticipant {
+  id             String       @id @default(uuid())
+  conversationId String
+  userId         String
+  nickname       String?
+  muted          Boolean      @default(false)
+  // Per-person chat state that must follow the person across devices: how far
+  // they have read, and when they last cleared this chat for themselves.
+  lastReadAt     DateTime?
+  clearedAt      DateTime?
+  joinedAt       DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  clientMessageId String?      @unique
+  conversationId String
+  senderId       String
+  content        String       @db.Text
+  replyToId      String?
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  pinned         Boolean      @default(false)
+  // { "👍": ["userId1", ...], ... }
+  reactions      Json?
+  attachmentUrl  String?
+  attachmentName String?
+  attachmentType String?
+  attachmentSize Int?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation("SentMessages", fields: [senderId], references: [id])
+  replyTo        Message?     @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies        Message[]    @relation("MessageReplies")
+}
+
+model RemoteSession {
+  id             String                      @id @default(uuid())
+  requestId      String?                     @unique
+  name           String
+  sessionCode    String
+  joinLink       String?                     @db.Text
+  conversationId String?
+  createdById    String?
+  type           String                      @default("REMOTE_CONTROL") // REMOTE_CONTROL or VIDEO_MEETING
+  status         String                      @default("ACTIVE")
+  // VIDEO_MEETING only: which New Meeting option created it (instant | later | calendar).
+  variant        String?
+  createdAt      DateTime                    @default(now())
+  startedAt      DateTime?
+  expiresAt      DateTime?
+  updatedAt      DateTime                    @updatedAt
+  endedAt        DateTime?
+  createdBy      User?                       @relation("CreatedRemoteSessions", fields: [createdById], references: [id], onDelete: SetNull)
+  collaborators  RemoteSessionCollaborator[]
+
+  @@index([status, expiresAt])
+}
+
+model RemoteSessionCollaborator {
+  id        String        @id @default(uuid())
+  sessionId String
+  userId    String?
+  email     String
+  name      String?
+  status    String        @default("INVITED")
+  createdAt DateTime      @default(now())
+  joinedAt  DateTime?
+  session   RemoteSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user      User?         @relation(fields: [userId], references: [id])
+
+  @@unique([sessionId, email])
+}

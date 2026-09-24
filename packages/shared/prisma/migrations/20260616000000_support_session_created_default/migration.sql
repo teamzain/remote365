@@ -1,0 +1,1 @@
+ALTER TABLE "SupportSession" ALTER COLUMN "status" SET DEFAULT 'CREATED';

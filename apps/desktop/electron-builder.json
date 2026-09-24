@@ -1,0 +1,89 @@
+{
+    "appId":  "com.connectx.desktop",
+    "productName":  "Remote 365",
+    "electronVersion":  "28.3.3",
+    "directories":  {
+                        "output":  "release48"
+                    },
+    "files":  [
+                  "dist/**/*",
+                  "dist-electron/**/*",
+                  "package.json",
+                  {
+                      "from":  "../../node_modules/@remotelink",
+                      "to":  "node_modules/@remotelink",
+                      "filter":  [
+                                     "**/*.node",
+                                     "**/*.dll"
+                                 ]
+                  },
+                  {
+                      "from":  "../../node_modules/node-datachannel",
+                      "to":  "node_modules/node-datachannel",
+                      "filter":  [
+                                     "package.json",
+                                     "dist/**/*",
+                                     "build/Release/**/*"
+                                 ]
+                  },
+                  {
+                      "from":  "../../node_modules/ws",
+                      "to":  "node_modules/ws"
+                  },
+                  {
+                      "from":  "../../node_modules/bufferutil",
+                      "to":  "node_modules/bufferutil"
+                  },
+                  {
+                      "from":  "../../node_modules/utf-8-validate",
+                      "to":  "node_modules/utf-8-validate"
+                  },
+                  {
+                      "from":  "../../node_modules/node-gyp-build",
+                      "to":  "node_modules/node-gyp-build"
+                  }
+              ],
+    "extraResources":  [
+                           {
+                               "from":  "../../node_modules/ffmpeg-static/ffmpeg.exe",
+                               "to":  "./ffmpeg.exe"
+                           },
+                           {
+                               "from":  "src/logo.png",
+                               "to":  "./logo.png"
+                           },
+                           {
+                               "from":  "../../service/Remote365InputSvc/Remote365InputSvc.exe",
+                               "to":  "./Remote365InputSvc.exe"
+                           }
+                       ],
+    "asar":  true,
+    "asarUnpack":  [
+                       "**/*.node",
+                       "**/*.dll",
+                       "**/node_modules/node-datachannel/**/*"
+                   ],
+    "win":  {
+                "icon":  "src/logo.png",
+                "target":  [
+                               {
+                                   "target":  "nsis",
+                                   "arch":  [
+                                                "x64"
+                                            ]
+                               }
+                           ]
+            },
+    "nsis":  {
+                 "oneClick":  true,
+                 "perMachine":  false,
+                 "license":  "build/license.txt",
+                 "include":  "installer/installer.nsh"
+             },
+    "publish":  [
+                    {
+                        "provider":  "generic",
+                        "url":  "https://remote365.ai/downloads/desktop/"
+                    }
+                ]
+}

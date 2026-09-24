@@ -1,0 +1,110 @@
+{
+  "expo": {
+    "name": "Remote 365 Mobile",
+    "slug": "remote-365-mobile",
+    "owner": "zainuul",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/logo.png",
+    "scheme": [
+      "remote365",
+      "remotelink"
+    ],
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.remote365.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow Remote 365 to use the camera during meetings.",
+        "NSMicrophoneUsageDescription": "Allow Remote 365 to use the microphone during meetings.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bitcode": false,
+      "buildNumber": "2"
+    },
+    "android": {
+      "package": "com.remote365.mobile",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.WAKE_LOCK",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.BLUETOOTH",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
+      ],
+      "blockedPermissions": [
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/logo.png"
+    },
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    },
+    "experiments": {
+      "reactCompiler": false
+    },
+    "plugins": [
+      "expo-web-browser",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Allow Remote 365 to use the camera during meetings.",
+          "microphonePermission": "Allow Remote 365 to use the microphone during meetings."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Remote 365 to attach photos to your chats."
+        }
+      ],
+      "expo-iap",
+      [
+        "./plugins/withIosScreenShare.js",
+        {
+          "appleTeamId": "TG52K552J4",
+          "extensionName": "BroadcastExtension",
+          "appGroup": "group.com.remote365.mobile.broadcast"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "43f2bc6b-79c6-446f-ad90-9b4752e0b976",
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "BroadcastExtension",
+                  "bundleIdentifier": "com.remote365.mobile.BroadcastExtension",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.remote365.mobile.broadcast"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

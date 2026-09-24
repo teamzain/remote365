@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Remote365Host" parent="Theme.AppCompat.DayNight.NoActionBar" />
+
+    <!--
+      Splash theme: force a white window background (light, even in dark mode) so there is no
+      flash before the Compose splash renders, and dark status-bar icons over the white.
+    -->
+    <style name="Theme.Remote365Splash" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:statusBarColor">@android:color/white</item>
+        <item name="android:navigationBarColor">@android:color/white</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

@@ -1,0 +1,66 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+
+# Production / Build
+dist/
+dist-electron/
+release/
+release2/
+release3/
+release4/
+apps/desktop/release*/
+apps/desktop/release-*
+build/
+/.cxx/
+.cxx/
+# Only the prebuilt native input addon is committed, not its build intermediates
+!packages/native-input/build/
+packages/native-input/build/*
+!packages/native-input/build/Release/
+packages/native-input/build/Release/*
+!packages/native-input/build/Release/input_injection.node
+*.exe
+*.zip
+*.dmg
+*.AppImage
+
+# Misc
+.DS_Store
+*.pem
+
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# User Data / Caches
+appData/
+C:\RemoteLinkViewer/
+.remote-link/
+.vscode/
+.antigravity/
+.env
+.env.*
+generated/
+.gradle/
+.vite/
+.expo/
+.kotlin/
+local.properties
+*.log
+*.pid
+output/
+tmp/
+
+# Local signing material (never commit)
+**/credentials.json
+**/credentials/
+*.p12
+*.p8
+*.mobileprovision

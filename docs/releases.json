@@ -1,0 +1,811 @@
+{
+  "generatedAt": "2026-05-11T14:00:24.796Z",
+  "releases": [
+    {
+      "version": "1.1.30",
+      "tag": "v1.1.30",
+      "publishedAt": "2026-05-11T14:00:24.683Z",
+      "notes": "Fix remote approval trust and no-response viewer handling",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.30.exe",
+          "size": 135265600,
+          "sha256": "f960f79f61991e18fb62af03b61922254a711fc4d1c6552eb74a1e9fbb00259a",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.30/Connect-X.Setup.1.1.30.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.30.exe.blockmap",
+          "size": 120612,
+          "sha256": "950069fabe9014190bc4b63cd11aadabf5d144ff28f442f11c28fec2ec6d3d82",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.30/Connect-X.Setup.1.1.30.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "d7ede59a73f7a69ab721ffe9042e032aaec44813117b04d7d02360965caeaaca",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.30/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.29",
+      "tag": "v1.1.29",
+      "publishedAt": "2026-05-11T13:33:29.932Z",
+      "notes": "Make session rows clickable and expire meeting links",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.29.exe",
+          "size": 135264248,
+          "sha256": "a36b8379312cf293c7f0271eacffa67d040735b336e98486b09006e7b79b94ec",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.29/Connect-X.Setup.1.1.29.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.29.exe.blockmap",
+          "size": 120674,
+          "sha256": "3a83221c58318a931b9d5baf507264807acbb0489f6b41308a7d27d9f2810012",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.29/Connect-X.Setup.1.1.29.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "e1a4174e63eb1955b7a3d3a658c4e815f4513c0a2692072818d26c2a480bd27f",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.29/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.27",
+      "tag": "v1.1.27",
+      "publishedAt": "2026-05-06T19:30:55.400Z",
+      "notes": "Fix chat toast initialization crash",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.27.exe",
+          "size": 135255425,
+          "sha256": "1bfc2924b3d1ec0dfc6b853fdc76c60537ee7b169c50b9aa875aa6aa79729cfe",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.27/Connect-X.Setup.1.1.27.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.27.exe.blockmap",
+          "size": 120520,
+          "sha256": "05d398708b0cea5406352027f201ce02c8de9ae81d0993b8166d9a43e2013783",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.27/Connect-X.Setup.1.1.27.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "b83905e830df91ec6488b266c51fe68907164abbbb7d0c5ee5dad3f6bde63ce4",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.27/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.26",
+      "tag": "v1.1.26",
+      "publishedAt": "2026-05-06T19:20:02.406Z",
+      "notes": "Fix Use PC fallback, global chat toasts, read receipts, and emoji picker",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.26.exe",
+          "size": 135255223,
+          "sha256": "92acf85cde5ba1b57e203db837d1a93ed234bdd22eb134267fbd279148232374",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.26/Connect-X.Setup.1.1.26.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.26.exe.blockmap",
+          "size": 120642,
+          "sha256": "0b4679b8ce51bc7e04b0839cc0110a9dc6ada4f7bd0401ad4e15c136f56cdf55",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.26/Connect-X.Setup.1.1.26.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "eb5012cec7f73cf043624f304c9bea5bc2c229f2c15d1e7971a302457760ee87",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.26/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.25",
+      "tag": "v1.1.25",
+      "publishedAt": "2026-05-06T16:42:54.580Z",
+      "notes": "Fix chat remote access launch, notifications, group targeting, and meeting inactivity cleanup",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.25.exe",
+          "size": 135254815,
+          "sha256": "6762646139f9d0b22b171ebbd46ca240ceb4f2356c46c6639e5dcc3c9e88a757",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.25/Connect-X.Setup.1.1.25.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.25.exe.blockmap",
+          "size": 120395,
+          "sha256": "19c52cad612400494a10a23d24df7427fce0cc36814b9b4d2cd3da78ccbdc207",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.25/Connect-X.Setup.1.1.25.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "c3e5a315716e8abe13605db9486df9a22a56d9f98c805dcb2b76c07814a9bb17",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.25/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.24",
+      "tag": "v1.1.24",
+      "publishedAt": "2026-05-06T00:32:16.480Z",
+      "notes": "Add chat action menu, meeting invites, remote access approvals, unread badges, and message toast",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.24.exe",
+          "size": 135253793,
+          "sha256": "03f112a8a6fea24c6d9ced7df2c713057ec9e00e8e374da3da776bfecbb33c61",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.24/Connect-X.Setup.1.1.24.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.24.exe.blockmap",
+          "size": 121073,
+          "sha256": "794b08d472630b6f58b7645bf7beb3507e453d0f1b8c93d2d0ece29996f5d090",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.24/Connect-X.Setup.1.1.24.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "fd0c467517dd3dc59afb1e1c04a624c1d300c6947e2f69ba3554bca59a442512",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.24/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.23",
+      "tag": "v1.1.23",
+      "publishedAt": "2026-05-05T21:09:19.405Z",
+      "notes": "Fix meeting remote video connection and fullscreen toggle",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.23.exe",
+          "size": 135250475,
+          "sha256": "f436aec43eba261b5198d15f3f0bfdbc465fe6f3ac6e82716233dd8720af50fc",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.23/Connect-X.Setup.1.1.23.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.23.exe.blockmap",
+          "size": 120693,
+          "sha256": "a52dd6b3c1979401ca0661dc4067ae9429ec5dac4a72aad3c702faf2752dfe13",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.23/Connect-X.Setup.1.1.23.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "d3634026a75db52390d788093de0e401ed00935dc36efc631cd2b6459d1dd513",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.23/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.22",
+      "tag": "v1.1.22",
+      "publishedAt": "2026-05-05T20:53:22.553Z",
+      "notes": "Fix meeting camera video on active peer connections",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.22.exe",
+          "size": 135249963,
+          "sha256": "3cb354d493601d115c3003624b967667b7f94b105c1dd16d079602802ebd27ac",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.22/Connect-X.Setup.1.1.22.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.22.exe.blockmap",
+          "size": 120503,
+          "sha256": "aa4eae3afcc15a4f3c8dbb9e1d74539f2c41d6e8f4d8e85f807fcef27fbe5043",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.22/Connect-X.Setup.1.1.22.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "c7f0784f01e1b6368eaa8fcc24d5cfadc8fa82d9b366289aea1dfbf074e08e3b",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.22/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.21",
+      "tag": "v1.1.21",
+      "publishedAt": "2026-05-05T20:26:41.745Z",
+      "notes": "Show update restart progress and fix meeting video stream attachment",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.21.exe",
+          "size": 135250059,
+          "sha256": "ed8501ccaef062e4f7ee8736ff139da43d32aa1d02f4886fecf332e5c383141b",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.21/Connect-X.Setup.1.1.21.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.21.exe.blockmap",
+          "size": 120332,
+          "sha256": "3cbf6b8236ad48f655dae4b818ede956c9f25225aa24b33377f67e3714092521",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.21/Connect-X.Setup.1.1.21.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "f1193ddfaeb2ffb2b57fb585d6a8b80e2b4e8dee724d4e3d46d89e6b3c5e2b11",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.21/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.20",
+      "tag": "v1.1.20",
+      "publishedAt": "2026-05-05T20:05:36.860Z",
+      "notes": "Fix meeting screen share visibility across devices",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.20.exe",
+          "size": 135250238,
+          "sha256": "e6abdb7eaadc363879051f60802a191587a24ae311e5a71cb9762a5dba980fbc",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.20/Connect-X.Setup.1.1.20.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.20.exe.blockmap",
+          "size": 120156,
+          "sha256": "b0b2c32b5b47e4248fc8735e41588d92d5b515e72b3659054833c95d2d6deb00",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.20/Connect-X.Setup.1.1.20.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "0c09a903fdc3f673b0d190f77ff1dba43b0797638804bd6e8ee78c88e2ab6ea0",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.20/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.19",
+      "tag": "v1.1.19",
+      "publishedAt": "2026-05-05T19:52:32.076Z",
+      "notes": "Fix meeting screen sharing visibility on participant machines",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.19.exe",
+          "size": 135249986,
+          "sha256": "22cfd5ac007c303c9c691df39283759bc2e5c0c28080d66ba78d2cd42998c066",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.19/Connect-X.Setup.1.1.19.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.19.exe.blockmap",
+          "size": 120738,
+          "sha256": "41fa7cbe59db6f50deae6e7e691f2b31fed533c2f2c48996586c6eb56fe6361a",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.19/Connect-X.Setup.1.1.19.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "7616dccdf10ad28e5963b5b87f3f0d2c4f787eb6fbe8be8fda0fc5285a5f8fac",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.19/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.18",
+      "tag": "v1.1.18",
+      "publishedAt": "2026-05-05T19:37:50.280Z",
+      "notes": "Improved meeting screen sharing layout, fullscreen, and remote input accuracy",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.18.exe",
+          "size": 135250388,
+          "sha256": "e1cd9aa223c590498a556b7f539b9ec4a7f9baf818fd89965926c445a9863dcd",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.18/Connect-X.Setup.1.1.18.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.18.exe.blockmap",
+          "size": 120280,
+          "sha256": "49956f5185d3d8132cea69b601c6a426c13bff6ed2ff7857304e7679dc21a632",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.18/Connect-X.Setup.1.1.18.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "d220abca4770c5619ec9988c89c22aade99353e6cf6c28eba5bbfb533646a393",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.18/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.17",
+      "tag": "v1.1.17",
+      "publishedAt": "2026-05-05T17:36:59.729Z",
+      "notes": "Fix meeting screen sharing, visible remote control button, and camera hardware off toggle",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.17.exe",
+          "size": 135251097,
+          "sha256": "61884b37959ae2c70d163e4983a61829e2cf2aef59265c77b5457c1108c11e2d",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.17/Connect-X.Setup.1.1.17.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.17.exe.blockmap",
+          "size": 120462,
+          "sha256": "b20cab9910ede9f05a8f7422cd2e62aaf31ae3fe805c1c92bef0c30256127090",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.17/Connect-X.Setup.1.1.17.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "26fcd9a403a2e8bc5bf32e2646d7023f726bcd060e5a4141bfc2877aef1e89ea",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.17/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.16",
+      "tag": "v1.1.16",
+      "publishedAt": "2026-05-05T17:25:29.111Z",
+      "notes": "Open meetings in separate windows, add screen sharing, meeting audio setting, and direct control requests",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.16.exe",
+          "size": 135251649,
+          "sha256": "48afb5efed2b28f3c119e51233145facdadd42667f134bae919fc70aef1c20b0",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.16/Connect-X.Setup.1.1.16.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.16.exe.blockmap",
+          "size": 120582,
+          "sha256": "24e2203788bf5a8ffdad20fe63e4a2b72d1145cb20c11306850af83d8be03cd9",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.16/Connect-X.Setup.1.1.16.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "da506a5318b7caf3a2ba3d2097f16a8ddd5d8ba86af955974e49763d01dc107a",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.16/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.15",
+      "tag": "v1.1.15",
+      "publishedAt": "2026-05-05T17:00:07.473Z",
+      "notes": "Fix device password changes and passwordless remote access",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.15.exe",
+          "size": 135250671,
+          "sha256": "bd203eccc9deedb918636c37591fb1f76999f24827c7f494ead1f28f95d43dbb",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.15/Connect-X.Setup.1.1.15.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.15.exe.blockmap",
+          "size": 120555,
+          "sha256": "3e125c1fab0f7ce1254914f6abdd0057f337b0970216c58ff8d3c19ecfad1fd1",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.15/Connect-X.Setup.1.1.15.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "59be2137921fde61169f5c2ac0c1559a5c4e27bd15cbe137295cc7171f03f8dc",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.15/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.14",
+      "tag": "v1.1.14",
+      "publishedAt": "2026-05-05T16:08:19.719Z",
+      "notes": "Add logged-out meeting invites, meeting chat, and control approval",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.14.exe",
+          "size": 135250259,
+          "sha256": "dc2a8e07b207d09155e060d2323940254669f4c2cecff6accaf5b7bcd695f05b",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.14/Connect-X.Setup.1.1.14.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.14.exe.blockmap",
+          "size": 120573,
+          "sha256": "1a2e6a1dbfa4fc5e36994a34a954f6a9fa6a9e8b230f16fc196c0284133f1e8a",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.14/Connect-X.Setup.1.1.14.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "64e7d98e3af717b082de28754fc8cbf31bf71e8731a5818fea9a1d6379789fe3",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.14/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.13",
+      "tag": "v1.1.13",
+      "publishedAt": "2026-05-05T14:27:20.014Z",
+      "notes": "Fix meeting join for logged-out users and restore hidden app window",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.13.exe",
+          "size": 135248519,
+          "sha256": "b2ffe243f4937d21364f6ed38d69b7a4e5af0c97b73ed2f09c8bb0b0a5242698",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.13/Connect-X.Setup.1.1.13.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.13.exe.blockmap",
+          "size": 120392,
+          "sha256": "0edd25ae6458122b33218ba6752ec369da7b4d75dd5637c71bafd80bdc7c8f11",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.13/Connect-X.Setup.1.1.13.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "be7b45d90438916cecddeb41acb0036d3de98b0f7654e754a726af5bcdcfb3f2",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.13/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.12",
+      "tag": "v1.1.12",
+      "publishedAt": "2026-05-05T13:19:16.283Z",
+      "notes": "Real-time update checks and smoother remote streaming",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.12.exe",
+          "size": 135248719,
+          "sha256": "ab3c0daf7f53f53f1204bcfdcfa082563669fc97928fad59f17f8794dbfaa0d4",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.12/Connect-X.Setup.1.1.12.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.12.exe.blockmap",
+          "size": 120508,
+          "sha256": "5a9c1d107c9021f5436bed241a54360049041fbc3d726a4c6ec7065e1d5e631f",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.12/Connect-X.Setup.1.1.12.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "c7ead3046b79167bbc122523b81b523bae7a03e2794a7dda06567c22df269a45",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.12/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.11",
+      "tag": "v1.1.11",
+      "publishedAt": "2026-05-05T12:41:21.873Z",
+      "notes": "Fix meeting room joining and camera state sync",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.11.exe",
+          "size": 135249021,
+          "sha256": "89875bfd1e19f97f807b4380d80e15f68cc093a869c3d8bb1ddd25e8c8d312c6",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.11/Connect-X.Setup.1.1.11.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.11.exe.blockmap",
+          "size": 120335,
+          "sha256": "b9a5e2c94f8c0a0ac5b230053ecf0724249905fa55d6d67d590279f3dcd78483",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.11/Connect-X.Setup.1.1.11.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "f296253969e0a31a2df03137fd0dfd28caa1578d72d9cc1f8c59e2f015dc4273",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.11/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.10",
+      "tag": "v1.1.10",
+      "publishedAt": "2026-05-05T11:02:37.320Z",
+      "notes": "Bump desktop updater to 1.1.10",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.10.exe",
+          "size": 135248660,
+          "sha256": "485eaee427662558a7c00f58838f48c5cbfa7ae3fbccb4f5dca4bbfff007c463",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.10/Connect-X.Setup.1.1.10.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.10.exe.blockmap",
+          "size": 120514,
+          "sha256": "a84a5404839c88b6843acd3c612d93d5641ef91e37f5414097a69016713f9787",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.10/Connect-X.Setup.1.1.10.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 350,
+          "sha256": "42452634018f78be0495d17bb3d186a603d2a53c78f4ac3210125c6a7547d5bb",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.10/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.9",
+      "tag": "v1.1.9",
+      "publishedAt": "2026-05-05T10:54:40.442Z",
+      "notes": "Fix ad-hoc meeting room joining",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.9.exe",
+          "size": 135248478,
+          "sha256": "874942b8ada17ac9678565f30f415413b2b225594d9ca85de11985b591266ec1",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.9/Connect-X.Setup.1.1.9.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.9.exe.blockmap",
+          "size": 120245,
+          "sha256": "6e2a40e3a94aafd929d552a4395895a864e77a823ce624f736763585eeb8d4f1",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.9/Connect-X.Setup.1.1.9.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 347,
+          "sha256": "11a41629fe464c17c7972aeb8afd0f995d8d4bcd1c5ce3620e1ee0cb7edf6d88",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.9/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.8",
+      "tag": "v1.1.8",
+      "publishedAt": "2026-05-04T19:34:03.596Z",
+      "notes": "Logged-out meeting creation and expanded device settings",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.8.exe",
+          "size": 135249068,
+          "sha256": "150ac50a691fa17eddb6f37f994db4bb04505c46d5a9fa3e38ab9a65bdd3040d",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.8/Connect-X.Setup.1.1.8.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.8.exe.blockmap",
+          "size": 120580,
+          "sha256": "3fc6629ee8e45af3073363085e66b0614063707e84e551d6eae5ce533a92d7cd",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.8/Connect-X.Setup.1.1.8.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 347,
+          "sha256": "4465321dec0381471d8e20c9d1775358e31c00ab9e619bc70310289344a18fd5",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.8/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.7",
+      "tag": "v1.1.7",
+      "publishedAt": "2026-05-04T18:42:31.030Z",
+      "notes": "Added Real-Time Chat feature",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.7.exe",
+          "size": 135249387,
+          "sha256": "d4d162e1f067b3af3826e387a262acfb7152345a1ddcd4f6f59b4ccc9e3360d1",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.7/Connect-X.Setup.1.1.7.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.7.exe.blockmap",
+          "size": 120253,
+          "sha256": "87f11de175f6f8323856755e707db72efd830fc90336c3a8f59e1cbd58d66404",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.7/Connect-X.Setup.1.1.7.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 347,
+          "sha256": "40be9113f91e1ece6af591a3adc7532229b10e5087007c545843879c39964644",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.7/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.6",
+      "tag": "v1.1.6",
+      "publishedAt": "2026-05-03T13:08:38.238Z",
+      "notes": "Added Real-Time Chat feature",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.6.exe",
+          "size": 135210326,
+          "sha256": "3f362dd13ba7664ff9bf2e3b9a44fbc780cc5f05e0fb883d91529ca3a3dd03a7",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.6/Connect-X.Setup.1.1.6.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.6.exe.blockmap",
+          "size": 120511,
+          "sha256": "6e9a816fabd0510ee98c8bfda3d6130e81bede82d2605553a251bd9800b82490",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.6/Connect-X.Setup.1.1.6.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 347,
+          "sha256": "3d97dee9ab230e5b103b20282dd255a515442d70e20815eb2ab805d3a9ec11ab",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.6/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.5",
+      "tag": "v1.1.5",
+      "publishedAt": "2026-05-03T00:20:49.459Z",
+      "notes": "Added Real-Time Chat feature",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.5.exe",
+          "size": 135199874,
+          "sha256": "f5a33a67253e2f76bf01d0ac48f43df731cae019cc5006e86e0b73d2e308fad3",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.5/Connect-X.Setup.1.1.5.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.5.exe.blockmap",
+          "size": 120017,
+          "sha256": "bf49bc9d440efc090c33384721ccbb803d35f958c09582218e2eea1a40359ecb",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.5/Connect-X.Setup.1.1.5.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 347,
+          "sha256": "b5dd77f5462a50ed67349ccd1e74d03bab844117c1024bd61b402aa1b6817931",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.5/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.4",
+      "tag": "v1.1.4",
+      "publishedAt": "2026-05-02T23:36:08.641Z",
+      "notes": "Added Real-Time Chat feature",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.4.exe",
+          "size": 135194764,
+          "sha256": "eb07a4df5e40bd6840c2cd7aff9c50554ab1c517a3a58d66750bd3c7f8aaa470",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.4/Connect-X.Setup.1.1.4.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.4.exe.blockmap",
+          "size": 120296,
+          "sha256": "c9dbcb62585ccc00f9551fd3bc63013733b87d61e22e810396e747435bbd83a1",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.4/Connect-X.Setup.1.1.4.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 347,
+          "sha256": "84aa561f143655c8f46b252e7df08a3e5f7044266d628e0426436ab4ec9ee672",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.4/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.3",
+      "tag": "v1.1.3",
+      "publishedAt": "2026-04-29T21:38:04.734Z",
+      "notes": "Fix Guest Connect: Auto-approval for unattended machines and optimized video stream initialization.",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.3.exe",
+          "size": 135266043,
+          "sha256": "0a5a3a13b7c31ea10625db898b1914041c89c0f5c3c70511dab9f7af7cc9850a",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.3/Connect-X.Setup.1.1.3.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.3.exe.blockmap",
+          "size": 120549,
+          "sha256": "04ba05f64fa415d5f4afe6c6ae0d6d00e62a01e3529bc32ff4e51872e9a070fa",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.3/Connect-X.Setup.1.1.3.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 347,
+          "sha256": "3091dc8bd1fdf14b0bf717eb0546219170fbf538050ece931dd7fb50f20f84ee",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.3/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.2",
+      "tag": "v1.1.2",
+      "publishedAt": "2026-04-29T19:40:05.120Z",
+      "notes": "Fix black screen: revert SDP to Baseline (fixes MUTED track); add dump_extra BSF so SPS+PPS precedes every IDR; fix pre-buffer flush race condition",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.2.exe",
+          "size": 91829483,
+          "sha256": "6a6afda23f8c3a42bd9830f725e530fba1965621a98deb7fdf2c7222ebeda4df",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.2/Connect-X.Setup.1.1.2.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.2.exe.blockmap",
+          "size": 97276,
+          "sha256": "9993c9999804daed8d2c788462a4df14a0e07029bf703308c068e2771338b68e",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.2/Connect-X.Setup.1.1.2.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 346,
+          "sha256": "cb5188c65c233d05c14fa7d1269c0613829579ee72e19ec70f2ddbfe1380194f",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.2/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.1",
+      "tag": "v1.1.1",
+      "publishedAt": "2026-04-29T15:16:33.968Z",
+      "notes": "Fix black screen: H264 High Profile SDP alignment; auto-host on launch; guest mode; host approval dialog",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.1.exe",
+          "size": 91829573,
+          "sha256": "1134f08b67b3bdba6f9f72daea226b57cd1504a1e7195c24fa0245e59921dc37",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.1/Connect-X.Setup.1.1.1.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.1.exe.blockmap",
+          "size": 96658,
+          "sha256": "61ecc54b018dc018a8bccfbe7e0c4124cb38fcdd7dd433a3111b61f0e4936532",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.1/Connect-X.Setup.1.1.1.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 346,
+          "sha256": "49ae529cf8db0b52050eba2ea2e8910a8e9b7ec26273c5076a33ddc745fb7829",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.1/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "tag": "v1.1.0",
+      "publishedAt": "2026-04-29T15:11:36.260Z",
+      "notes": "Fix black screen: align H264 SDP profile with NVENC encoder output (High Profile L5.2)",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.1.0.exe",
+          "size": 91829635,
+          "sha256": "731eb285e01957f566dfe382e5720a477ba8e3c3f0eac0d5e91a1a7903d89800",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.0/Connect-X.Setup.1.1.0.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.1.0.exe.blockmap",
+          "size": 96655,
+          "sha256": "ad94f36778e11e29647bbf173ce1d2743dcdacc0e33334feb399190b0490b51c",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.0/Connect-X.Setup.1.1.0.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 346,
+          "sha256": "4aeeba8828524b60a073d8f871e34a9c50f4a0e83668da3f406c16ba0835677d",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.1.0/latest.yml"
+        }
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "tag": "v1.0.0",
+      "publishedAt": "2026-04-28T09:47:23.061Z",
+      "notes": "Fix node-datachannel native module",
+      "assets": [
+        {
+          "name": "Connect-X Setup 1.0.0.exe",
+          "size": 91831735,
+          "sha256": "81cea8769950de01e8afadc79c7c0866e68a6b76a975af83da2567422231f737",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.0.0/Connect-X.Setup.1.0.0.exe"
+        },
+        {
+          "name": "Connect-X Setup 1.0.0.exe.blockmap",
+          "size": 97143,
+          "sha256": "830011b735924a48c28fe81605e8e354abe664b15837592682174401bc96bb4c",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.0.0/Connect-X.Setup.1.0.0.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 346,
+          "sha256": "0826caa1f9ff28f31e49f3c0551b2743da88cb5c21f326360b24b49a061eb4f2",
+          "url": "https://github.com/teamzain/RemoteLink-Desktop/releases/download/v1.0.0/latest.yml"
+        }
+      ]
+    }
+  ]
+}

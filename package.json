@@ -1,0 +1,38 @@
+{
+  "name": "remotelink-backend",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npx concurrently -n auth,signal,session,billing -c blue,green,yellow,magenta \"npm run dev -w @remotelink/auth-service\" \"npm run dev -w @remotelink/signaling-service\" \"npm run dev -w @remotelink/session-service\" \"npm run dev -w @remotelink/billing-service\"",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "rebuild:native": "npm run install --workspaces --if-present",
+    "mobile": "npm run start -w remote-365-mobile",
+    "mobile:android": "npm run android -w remote-365-mobile",
+    "desktop": "npm run dev -w remote-365",
+    "desktop:preprod": "npm run dev:preprod -w remote-365",
+    "desktop:prod": "npm run dev:prod -w remote-365",
+    "db:generate": "npm run db:generate -w @remotelink/shared",
+    "db:seed": "npm run seed -w @remotelink/shared",
+    "release:desktop": "node scripts/release-desktop.mjs",
+    "desktop:build:prod": "npm run build:prod -w remote-365",
+    "desktop:build:preprod": "npm run build:preprod -w remote-365",
+    "postinstall": "node scripts/patch-react-native-webrtc-default-display.mjs"
+  },
+  "devDependencies": {
+    "@react-native-community/cli": "^20.2.0",
+    "@types/node": "^22.10.2",
+    "concurrently": "^8.2.2",
+    "eslint": "^9.39.4",
+    "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.5"
+  }
+}
