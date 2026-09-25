@@ -11,6 +11,11 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     NODE_OPTIONS=--max-old-space-size=384
 
+# /pricing reads the plan catalogue on the server, straight from
+# billing-service on the Compose network (the same route Caddy serves as
+# /api/billing/plans). Unreachable = the built-in catalogue is shown.
+ENV PLANS_API_URL=http://billing-service:3004/billing/plans
+
 WORKDIR /app
 COPY app/ /app/
 # The server writes regenerated pages and its image/fetch cache under .next;
