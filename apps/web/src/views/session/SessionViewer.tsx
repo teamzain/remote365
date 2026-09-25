@@ -1678,6 +1678,45 @@ const SessionViewer: React.FC = () => {
     </div>
   );
 
+  // --- Remote audio: auto-play (desktop parity) ---
+  // Declared before the early returns below so the hook order never changes
+  // between the password/error screens and the full session render.
+  const remoteAudioTrackCount = remoteStream?.getAudioTracks?.().length || 0;
+
+  // Auto-play: enable sound the moment the host stream carries an audio track,
+  // unless this viewer explicitly muted. Sessions open in their own tab, which
+  // starts with NO user activation — when the browser refuses unmuted playback,
+  // arm a one-shot gesture listener and retry on the first click or keypress
+  // (in a remote-control session that's nearly immediate).
+  useEffect(() => {
+    if (!remoteAudioTrackCount || remoteAudioEnabled || userMutedAudioRef.current) return;
+    if (!videoRef.current) return;
+    const enable = () => {
+      const el = videoRef.current;
+      if (userMutedAudioRef.current || !el) return;
+      el.muted = false;
+      const attempt = el.play();
+      (attempt || Promise.resolve()).then(() => {
+        setRemoteAudioEnabled(true);
+        onControlEvent({ type: 'audio-listen', on: true });
+      }).catch(() => {
+        el.muted = true;
+        if (armAudioGestureRef.current) return;
+        armAudioGestureRef.current = true;
+        const onGesture = () => {
+          window.removeEventListener('pointerdown', onGesture, true);
+          window.removeEventListener('keydown', onGesture, true);
+          armAudioGestureRef.current = false;
+          audioEnableRetryRef.current();
+        };
+        window.addEventListener('pointerdown', onGesture, true);
+        window.addEventListener('keydown', onGesture, true);
+      });
+    };
+    audioEnableRetryRef.current = enable;
+    enable();
+  }, [remoteAudioTrackCount, remoteAudioEnabled, audioTrackRevision]);
+
   // Join/auth failed outright (expired grant, offline device, bad link…)
   if (fatalError) {
     return (
@@ -1838,8 +1877,7 @@ const SessionViewer: React.FC = () => {
         { label: 'Quick Settings', hint: 'Win+A', icon: <Sliders size={16} />, onClick: () => onControlEvent({ type: 'shortcut', key: 'control-center' }) },
         { label: 'Lock', hint: 'Win+L', icon: <Lock size={16} />, onClick: hostAction('lock') },
       ];
-  // --- Remote audio: auto-play + viewer-local mute (desktop parity) ---
-  const remoteAudioTrackCount = remoteStream?.getAudioTracks?.().length || 0;
+  // --- Remote audio: viewer-local mute (desktop parity; auto-play is above the early returns) ---
   const toggleRemoteAudio = () => {
     const next = !remoteAudioEnabled;
     // Muting is local-only (the host keeps streaming for other viewers), and
@@ -1855,40 +1893,6 @@ const SessionViewer: React.FC = () => {
     // Surfaces on the host's dock, where they can mute the share.
     onControlEvent({ type: 'audio-listen', on: next });
   };
-
-  // Auto-play: enable sound the moment the host stream carries an audio track,
-  // unless this viewer explicitly muted. Sessions open in their own tab, which
-  // starts with NO user activation — when the browser refuses unmuted playback,
-  // arm a one-shot gesture listener and retry on the first click or keypress
-  // (in a remote-control session that's nearly immediate).
-  useEffect(() => {
-    if (!remoteAudioTrackCount || remoteAudioEnabled || userMutedAudioRef.current) return;
-    if (!videoRef.current) return;
-    const enable = () => {
-      const el = videoRef.current;
-      if (userMutedAudioRef.current || !el) return;
-      el.muted = false;
-      const attempt = el.play();
-      (attempt || Promise.resolve()).then(() => {
-        setRemoteAudioEnabled(true);
-        onControlEvent({ type: 'audio-listen', on: true });
-      }).catch(() => {
-        el.muted = true;
-        if (armAudioGestureRef.current) return;
-        armAudioGestureRef.current = true;
-        const onGesture = () => {
-          window.removeEventListener('pointerdown', onGesture, true);
-          window.removeEventListener('keydown', onGesture, true);
-          armAudioGestureRef.current = false;
-          audioEnableRetryRef.current();
-        };
-        window.addEventListener('pointerdown', onGesture, true);
-        window.addEventListener('keydown', onGesture, true);
-      });
-    };
-    audioEnableRetryRef.current = enable;
-    enable();
-  }, [remoteAudioTrackCount, remoteAudioEnabled, audioTrackRevision]);
 
   const toolbarMenus: { id: string; label: string; items: { label: string; icon: React.ReactNode; onClick: () => void; danger?: boolean; active?: boolean }[] }[] = [
     {
