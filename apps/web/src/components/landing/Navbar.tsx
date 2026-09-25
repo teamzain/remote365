@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import SiteLink from '@/components/site/SiteLink'
 import { useSignedIn } from '@/lib/useSignedIn'
-import GetStartedScreen from './GetStartedScreen'
+import SignInScreen from './SignInScreen'
 
 const NAV_LINKS = [
   { label: 'Product',  path: '/product'   },
@@ -115,17 +115,17 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
               >
                 Dashboard
               </SiteLink>
+            ) : glass ? (
+              // Morphs into the full-screen sign-in panel
+              <SignInScreen variant="nav-signin" />
             ) : (
-              <SiteLink
-                href="/login"
-                className={glass ? 'navbar-btn navbar-btn-pill navbar-btn-pill-outline' : 'navbar-btn navbar-btn-outline'}
-              >
-                {glass ? 'Sign In' : 'Login'}
+              <SiteLink href="/login" className="navbar-btn navbar-btn-outline">
+                Login
               </SiteLink>
             )}
             {glass ? (
-              // Morphs into the full-screen "Get started" chooser
-              <GetStartedScreen variant="nav" />
+              // Same panel; its "Create a free account" link leads to sign-up
+              <SignInScreen variant="nav-start" />
             ) : (
               <SiteLink href="/register" className="navbar-btn navbar-btn-primary">
                 Get Started

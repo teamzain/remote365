@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { API_URL } from './env'
 
@@ -30,13 +30,17 @@ export function persistRememberMe(email: string, rememberMe: boolean) {
   } catch { /* storage unavailable */ }
 }
 
+// Shape of an axios error from the auth API.
+type ApiError = { response?: { status?: number; data?: { error?: string } } } | null | undefined
+
 export interface SignInFailure {
   title: string
   message: string
 }
 
 /** The error title/message the auth screen shows for a failed sign-in. */
-export function signInFailure(err: any): SignInFailure {
+export function signInFailure(error: unknown): SignInFailure {
+  const err = error as ApiError
   return {
     title: err?.response?.status === 401 ? 'Sign in failed' : 'Could not sign in',
     message: err?.response?.data?.error || 'Could not sign in. Check your credentials and try again.',
@@ -44,7 +48,8 @@ export function signInFailure(err: any): SignInFailure {
 }
 
 /** The error title/message for a rejected two-factor code. */
-export function twoFactorFailure(err: any): SignInFailure {
+export function twoFactorFailure(error: unknown): SignInFailure {
+  const err = error as ApiError
   return {
     title: 'Code not accepted',
     message: err?.response?.data?.error || 'Invalid 2FA code',
@@ -110,12 +115,12 @@ export function useSignIn() {
     }
   }
 
-  /** Back out of a started 2FA step (e.g. the panel was closed). */
-  const cancelTwoFactor = () => {
+  /** Back out of a started 2FA step (e.g. the panel was closed). Stable identity. */
+  const cancelTwoFactor = useCallback(() => {
     setTotpCode('')
     setError(null)
     setTemp2faToken(null)
-  }
+  }, [setTemp2faToken])
 
   return {
     email, setEmail,

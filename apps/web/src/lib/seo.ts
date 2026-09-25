@@ -4,6 +4,11 @@ export const SITE_URL = 'https://remote365.ai'
 export const SITE_NAME = 'Remote365'
 export const DEFAULT_TITLE = 'Remote365 – Secure Remote Desktop & Support'
 
+// app/opengraph-image.tsx. A page that sets openGraph in its metadata no
+// longer inherits the root file's image, so pageMetadata names it; a
+// segment's own opengraph-image file still takes precedence.
+const DEFAULT_OG_IMAGE = '/opengraph-image'
+
 interface PageSeo {
   /** Page title without the brand; the root layout's template appends " | Remote365". */
   title: string
@@ -12,13 +17,13 @@ interface PageSeo {
   path: string
   /** Use `title` as-is (no " | Remote365"), for the home page. */
   absoluteTitle?: boolean
-  /** Root-relative OG image; defaults to the section's opengraph-image. */
+  /** Root-relative OG image; defaults to the site-wide one. */
   image?: string
 }
 
 // Title, description, canonical URL and social cards for a public page, so
 // every page states the same facts to search engines and link previews.
-export function pageMetadata({ title, description, path, absoluteTitle, image }: PageSeo): Metadata {
+export function pageMetadata({ title, description, path, absoluteTitle, image = DEFAULT_OG_IMAGE }: PageSeo): Metadata {
   const fullTitle = absoluteTitle ? title : `${title} | ${SITE_NAME}`
   return {
     title: absoluteTitle ? { absolute: title } : title,
@@ -31,13 +36,13 @@ export function pageMetadata({ title, description, path, absoluteTitle, image }:
       url: path,
       title: fullTitle,
       description,
-      ...(image ? { images: [image] } : {}),
+      images: [{ url: image, width: 1200, height: 630, alt: fullTitle }],
     },
     twitter: {
       card: 'summary_large_image',
       title: fullTitle,
       description,
-      ...(image ? { images: [image] } : {}),
+      images: [image],
     },
   }
 }

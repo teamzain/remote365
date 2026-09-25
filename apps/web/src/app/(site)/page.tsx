@@ -1,6 +1,7 @@
 import SiteContent from '@/components/site/SiteContent'
 import HeroVideo from '@/components/landing/HeroVideo'
 import CapabilityMarquee from '@/components/landing/CapabilityMarquee'
+import CaseStudyFlipStack from '@/components/landing/CaseStudyFlipStack'
 import DeviceOrbitSection from '@/components/landing/DeviceOrbitSection'
 import EasyAccessSection from '@/components/landing/EasyAccessSection'
 import AccessAnywhereSection from '@/components/landing/AccessAnywhereSection'
@@ -10,7 +11,10 @@ import HomeAwaySection from '@/components/landing/HomeAwaySection'
 import SimpleReliableSection from '@/components/landing/SimpleReliableSection'
 import GetStartedCta from '@/components/landing/GetStartedCta'
 import { ScrollReveal } from '@/components/landing/ScrollReveal'
+import JsonLd from '@/components/site/JsonLd'
+import { graph, organization, softwareApplication, website } from '@/lib/jsonld'
 import { DEFAULT_TITLE, pageMetadata } from '@/lib/seo'
+import { USE_CASES } from '@/content/useCases'
 
 export const metadata = pageMetadata({
   title: DEFAULT_TITLE,
@@ -23,6 +27,7 @@ export const metadata = pageMetadata({
 export default function HomePage() {
   return (
     <SiteContent heroUnderNav>
+      <JsonLd data={graph(organization(), website(), softwareApplication())} />
       <main>
         <HeroVideo />
 
@@ -31,6 +36,24 @@ export default function HomePage() {
             <CapabilityMarquee />
           </div>
         </ScrollReveal>
+
+        {/* Scroll-driven and pinned: no ScrollReveal (its transform would
+            break the sticky stage). */}
+        <CaseStudyFlipStack
+          eyebrow="Use cases"
+          heading="One app for every kind of remote help"
+          intro="From the office help desk to a parent’s phone in another country: how people use Remote365 today."
+          items={USE_CASES.map(u => ({
+            href: `/use-cases/${u.slug}`,
+            eyebrow: u.eyebrow,
+            title: u.title,
+            description: u.summary,
+            image: u.image,
+            imageAlt: u.imageAlt,
+            background: u.background,
+            foreground: u.foreground,
+          }))}
+        />
 
         <ScrollReveal delay={0.15}>
           <DeviceOrbitSection />

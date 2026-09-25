@@ -1,5 +1,6 @@
 import React from 'react'
 import SiteLink from '@/components/site/SiteLink'
+import { REGIONS } from '@/content/regions'
 
 type Section = { heading: string; links: { label: string; to: string }[] }
 
@@ -9,6 +10,7 @@ const PRODUCT: Section = {
     { label: 'Product',  to: '/product' },
     { label: 'Pricing',  to: '/pricing' },
     { label: 'Download', to: '/downloads' },
+    { label: 'Use cases', to: '/use-cases' },
   ],
 }
 
@@ -16,8 +18,14 @@ const RESOURCES: Section = {
   heading: 'Resources',
   links: [
     { label: 'Docs',    to: '/docs' },
+    { label: 'FAQ',     to: '/faq' },
     { label: 'Contact', to: '/contact' },
   ],
+}
+
+const REGION_LINKS: Section = {
+  heading: 'Regions',
+  links: REGIONS.map(r => ({ label: r.areaServed, to: `/remote-desktop/${r.slug}` })),
 }
 
 const ACCOUNT: Section = {
@@ -32,6 +40,7 @@ const ACCOUNT: Section = {
 const COLUMNS: Section[][] = [
   [PRODUCT],
   [RESOURCES],
+  [REGION_LINKS],
   [ACCOUNT],
 ]
 

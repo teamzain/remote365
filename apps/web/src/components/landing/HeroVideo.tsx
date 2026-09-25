@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import GetStartedScreen from './GetStartedScreen'
+import SignInScreen from './SignInScreen'
 
 const ROTATING_WORDS = ['any device', 'any desktop', 'any mobile', 'any tablet', 'anywhere']
 
@@ -42,8 +42,8 @@ const HeroVideo: React.FC = () => {
           anywhere in seconds.
         </p>
 
-        {/* Morphs into the full-screen "Get started" chooser */}
-        <GetStartedScreen variant="hero" />
+        {/* Morphs into the full-screen sign-in panel */}
+        <SignInScreen variant="hero" />
       </div>
 
       <style>{`

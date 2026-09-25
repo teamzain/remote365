@@ -13,6 +13,8 @@ declare module 'framer-motion' {
   export const useMotionTemplate: any;
   export const useMotionValue: any;
   export const useReducedMotion: any;
+  export const useSpring: any;
+  export type MotionValue<T = any> = any;
 }
 
 declare module 'react-hook-form' {
