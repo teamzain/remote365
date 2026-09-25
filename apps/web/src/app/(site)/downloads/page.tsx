@@ -1,4 +1,7 @@
-import Downloads from '@/components/site/Downloads'
+import DownloadHero from '@/components/site/Downloads'
+import SiteContent from '@/components/site/SiteContent'
+import StartSteps from '@/components/landing/StartSteps'
+import PlatformVote from '@/components/site/PlatformVote'
 import JsonLd from '@/components/site/JsonLd'
 import { breadcrumbs, graph, organization, softwareApplication } from '@/lib/jsonld'
 import { pageMetadata } from '@/lib/seo'
@@ -12,9 +15,13 @@ export const metadata = pageMetadata({
 
 export default function DownloadsPage() {
   return (
-    <>
+    <SiteContent>
       <JsonLd data={graph(organization(), softwareApplication(), breadcrumbs([{ name: 'Home', path: '/' }, { name: 'Download', path: '/downloads' }]))} />
-      <Downloads />
-    </>
+      <main>
+        <DownloadHero />
+        <StartSteps />
+        <PlatformVote />
+      </main>
+    </SiteContent>
   )
 }

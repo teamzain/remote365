@@ -66,7 +66,8 @@ const PlanCard: React.FC<{ plan: ApiPlan }> = ({ plan }) => {
 
       <SiteLink
         href={isCustom ? '/contact' : '/register'}
-        className={plan.popular ? 'pp-cta pp-cta-primary' : 'pp-cta pp-cta-outline'}
+        className={plan.popular ? 'pp-cta pp-cta-primary beam' : 'pp-cta pp-cta-outline'}
+        style={plan.popular ? { ['--beam-radius' as string]: '4px' } : undefined}
       >
         {isCustom ? 'Contact Sales' : 'Get Started'}
       </SiteLink>

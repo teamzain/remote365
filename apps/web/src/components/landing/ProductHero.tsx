@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { type ReactNode } from 'react'
 import SiteLink from '@/components/site/SiteLink'
 import CapabilityMarquee from './CapabilityMarquee'
 
@@ -7,8 +7,8 @@ interface ProductHeroProps {
   description?: string
   ctaText?: string
   ctaHref?: string
-  image?: string
-  imageAlt?: string
+  /** Shown under the call to action (e.g. the connection diagram). */
+  visual?: ReactNode
 }
 
 const ProductHero: React.FC<ProductHeroProps> = ({
@@ -16,8 +16,7 @@ const ProductHero: React.FC<ProductHeroProps> = ({
   description = 'Connect to any device, from anywhere. Unique 9-digit device IDs, end-to-end encrypted sessions, and one-click remote support — no VPN, no port forwarding, no setup.',
   ctaText = 'Start your free trial',
   ctaHref = '/register',
-  image = '/product.png',
-  imageAlt = 'Remote365 Dashboard',
+  visual,
 }) => {
   return (
     <section className="ph-section">
@@ -29,14 +28,11 @@ const ProductHero: React.FC<ProductHeroProps> = ({
       </div>
 
       {/* CTA */}
-      <SiteLink href={ctaHref} className="ph-cta">{ctaText}</SiteLink>
+      <SiteLink href={ctaHref} className="ph-cta beam" style={{ ['--beam-radius' as string]: '4px' }}>{ctaText}</SiteLink>
 
-      {/* Dashboard image */}
-      <div className="ph-image-wrap">
-        <img src={image} alt={imageAlt} className="ph-image" />
-      </div>
+      {visual && <div className="ph-image-wrap">{visual}</div>}
 
-      {/* Trusted-companies marquee (same as homepage) */}
+      {/* Capability marquee (same as the home page) */}
       <CapabilityMarquee />
 
       <style>{`
@@ -91,16 +87,9 @@ const ProductHero: React.FC<ProductHeroProps> = ({
 
         .ph-image-wrap {
           width: 100%;
-          max-width: 1214px;
-          padding: 0 clamp(20px, 4vw, 40px);
+          max-width: 960px;
+          padding: 0 clamp(16px, 4vw, 40px);
           box-sizing: border-box;
-        }
-        .ph-image {
-          display: block;
-          width: 100%;
-          aspect-ratio: 1214 / 680;
-          object-fit: cover;
-          border-radius: 12px;
         }
 
         @media (max-width: 640px) {

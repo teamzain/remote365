@@ -1,7 +1,6 @@
 'use client'
 
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import SiteContent from './SiteContent'
 import { API_URL } from '@/lib/env'
 
 type PlatformId = 'macos' | 'ios' | 'windows' | 'android'
@@ -427,14 +426,6 @@ const DownloadHero: React.FC = () => {
   )
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
-
-const Downloads: React.FC = () => (
-  <SiteContent>
-    <main>
-      <DownloadHero />
-    </main>
-  </SiteContent>
-)
-
-export default Downloads
+// The page (app/(site)/downloads) places this above the start steps and the
+// platform poll.
+export default DownloadHero

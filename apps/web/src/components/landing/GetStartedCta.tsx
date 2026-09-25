@@ -21,7 +21,7 @@ const GetStartedCta: React.FC<GetStartedCtaProps> = ({
 
       <div className="cta-content">
         <h2 className="cta-heading">{heading}</h2>
-        <SiteLink href={ctaHref} className="cta-btn">{ctaText}</SiteLink>
+        <SiteLink href={ctaHref} className="cta-btn beam" style={{ ["--beam-radius" as string]: "4px" }}>{ctaText}</SiteLink>
       </div>
     </div>
 

@@ -31,7 +31,7 @@ interface Capability {
 }
 
 const CAPABILITIES: Capability[] = [
-  { Icon: KeyRound, title: 'Support with a code', text: 'Share a one-time session code; they join from the app or a browser, no install needed.' },
+  { Icon: KeyRound, title: 'Support with a code', text: 'Share a one-time session code; they join in the Remote365 app, no account needed.' },
   { Icon: MonitorSmartphone, title: 'Unattended access', text: 'Reach your own computers and Android devices by ID, even when nobody is there.' },
   { Icon: LockKeyhole, title: 'End-to-end encrypted', text: 'Every remote session is encrypted end to end. No VPN or port forwarding.' },
   { Icon: Video, title: 'Meetings built in', text: 'Video meetings with screen sharing, joined by code or link.' },

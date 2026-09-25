@@ -10,6 +10,9 @@ import ShowcaseImage from '@/components/landing/ShowcaseImage'
 import HomeAwaySection from '@/components/landing/HomeAwaySection'
 import SimpleReliableSection from '@/components/landing/SimpleReliableSection'
 import GetStartedCta from '@/components/landing/GetStartedCta'
+import DeviceIdFlap from '@/components/landing/DeviceIdFlap'
+import RegionGlobe from '@/components/landing/RegionGlobe'
+import ConnectionDiagram from '@/components/landing/ConnectionDiagram'
 import { ScrollReveal } from '@/components/landing/ScrollReveal'
 import JsonLd from '@/components/site/JsonLd'
 import { graph, organization, softwareApplication, website } from '@/lib/jsonld'
@@ -60,11 +63,11 @@ export default function HomePage() {
         </ScrollReveal>
 
         <ScrollReveal delay={0.15}>
-          <EasyAccessSection />
+          <EasyAccessSection extra={<DeviceIdFlap />} />
         </ScrollReveal>
 
         <ScrollReveal delay={0.15}>
-          <AccessAnywhereSection />
+          <AccessAnywhereSection visual={<RegionGlobe />} />
         </ScrollReveal>
 
         <ScrollReveal delay={0.15}>
@@ -100,8 +103,7 @@ export default function HomePage() {
             subtitle="Every remote session is end-to-end encrypted. Role-based access control, forced two-factor authentication, and full audit logs keep your team and every device protected."
             linkLabel="Learn more"
             linkTo="/product"
-            image="/c460f6a065169b1b08853ed8eb897298d1e73c19.png"
-            illustration
+            visual={<ConnectionDiagram />}
           />
         </ScrollReveal>
 

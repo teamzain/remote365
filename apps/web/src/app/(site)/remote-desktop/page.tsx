@@ -1,4 +1,5 @@
 import ContentPage from '@/components/site/ContentPage'
+import RegionGlobe from '@/components/landing/RegionGlobe'
 import JsonLd from '@/components/site/JsonLd'
 import { REGIONS } from '@/content/regions'
 import { breadcrumbs, graph, organization, webPage } from '@/lib/jsonld'
@@ -37,7 +38,12 @@ export default function RegionsPage() {
         ]}
         relatedTitle="Choose a country"
         related={REGIONS.map(r => ({ title: r.areaServed, text: r.metaTitle, href: `/remote-desktop/${r.slug}` }))}
-      />
+      >
+        <div className="rd-globe">
+          <RegionGlobe />
+          <style>{`.rd-globe { display: flex; justify-content: center; margin: 40px 0 8px; }`}</style>
+        </div>
+      </ContentPage>
     </>
   )
 }

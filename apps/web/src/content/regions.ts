@@ -72,7 +72,7 @@ export const REGIONS: Region[] = [
     faqs: [
       {
         question: 'Can I help someone in Pakistan from abroad?',
-        answer: 'Yes. Send them a support session code or link; they open it, approve the connection, and you see their screen. For regular help, set up unattended access once and connect by device ID.',
+        answer: 'Yes. Send them a support session code or link; they open it in the Remote365 app, approve the connection, and you see their screen. For regular help, set up unattended access once and connect by device ID.',
       },
       {
         question: 'Which devices are supported?',
@@ -120,7 +120,7 @@ export const REGIONS: Region[] = [
     faqs: [
       {
         question: 'Does the person receiving support need to install anything?',
-        answer: 'No. They can join a support session with the code from a browser. Installing the app is only needed for unattended access.',
+        answer: 'Only the free Remote365 app. They join with your code in the app and approve the connection, and they do not need an account.',
       },
       {
         question: 'Which devices are supported?',
@@ -168,7 +168,7 @@ export const REGIONS: Region[] = [
     faqs: [
       {
         question: 'Can I help my parents in Pakistan or India from the UAE?',
-        answer: 'Yes. Send a support session code or link for a one-off session, or install Remote365 on their device once and connect by device ID whenever they need help.',
+        answer: 'Yes. Send a support session code or link for a one-off session, which they join in the Remote365 app, or set up unattended access on their device once and connect by device ID whenever they need help.',
       },
       {
         question: 'Which devices are supported?',
@@ -202,7 +202,7 @@ export const REGIONS: Region[] = [
       },
       {
         heading: 'How do MSPs keep client access separate?',
-        body: 'Group each client’s devices, then grant device access per technician on top of their role. Pro adds device groups, a support queue and a scripts library; Business adds full role-based access control, connection policies, forced two-factor authentication, session recording and a one-year audit log.',
+        body: 'Group each client’s devices, then grant device access per technician on top of their role. Pro adds device groups, per-member device access and a 30-day audit log; Business adds session recording, two-factor authentication enforced for everyone and a one-year audit log.',
       },
       {
         heading: 'How do you support people across US time zones?',

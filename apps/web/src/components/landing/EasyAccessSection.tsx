@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { type ReactNode } from 'react'
 import SiteLink from '@/components/site/SiteLink'
 
 // tabler:arrow-up rotated 90° → arrow pointing right, primary orange
@@ -19,6 +19,8 @@ export interface EasyAccessSectionProps {
   subtitle?: string
   linkLabel?: string
   linkTo?: string
+  /** Extra content under the text, e.g. the device-ID board. */
+  extra?: ReactNode
 }
 
 const EasyAccessSection: React.FC<EasyAccessSectionProps> = ({
@@ -26,12 +28,14 @@ const EasyAccessSection: React.FC<EasyAccessSectionProps> = ({
   subtitle = 'Every device gets its own ID and password. Share them and anyone can connect in seconds — no VPN, no port forwarding, no configuration.',
   linkLabel = 'Learn more',
   linkTo = '/product',
+  extra,
 }) => (
   <section className="easy-section">
     <div className="easy-inner">
       <div className="easy-copy">
         <h2 className="easy-title">{title}</h2>
         <p className="easy-sub">{subtitle}</p>
+        {extra && <div className="easy-extra">{extra}</div>}
       </div>
 
       <SiteLink href={linkTo} className="easy-link">
@@ -67,6 +71,7 @@ const EasyAccessSection: React.FC<EasyAccessSectionProps> = ({
         line-height: 1.42;
         color: #1A1D21;
       }
+      .easy-extra { margin-top: 28px; max-width: 100%; }
       .easy-sub {
         margin: 0;
         font-weight: 400;

@@ -17,6 +17,7 @@ export default function SiteFrame({ children }: { children: ReactNode }) {
           ScrollReveal) would turn its position: fixed into scrolling. */}
       <LandingBackdrop />
       <Navbar variant="glass" />
+      <div className="site-topblur" aria-hidden="true" />
       {children}
       <Footer />
       <LegacyTokenHandoff />

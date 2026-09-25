@@ -16,7 +16,7 @@ export const PLATFORMS_SUMMARY =
   'Windows desktop app, Android app, Remote365 Host app for Android devices you want to control, and the web app in any modern browser. macOS and iOS apps are coming soon.'
 
 export const FEATURES = [
-  'Support sessions started with a one-time code or link, joinable from a browser without installing anything',
+  'Support sessions started with a one-time code or link; the person being helped joins in the Remote365 app, no account needed',
   'Unattended access to your own devices by permanent 9-digit ID and password',
   'Full keyboard and mouse control, multiple monitors, view-only mode',
   'Two-way file transfer and clipboard sync',

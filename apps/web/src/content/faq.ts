@@ -36,7 +36,7 @@ export const PRICING_FAQS: Faq[] = [
   },
   {
     question: 'What is the difference between Solo and Pro?',
-    answer: 'Solo is for an individual managing their own machines and has no team administration. Pro adds team roles, device groups, per-member device access, a support queue, a scripts library, and basic analytics.',
+    answer: 'Solo is for one person managing their own machines, without team administration. Pro is for small teams: more members, devices and concurrent sessions, plus device groups, per-member device access and a 30-day audit log.',
   },
   {
     question: 'Do you offer custom plans?',
@@ -77,7 +77,7 @@ export const FAQ_GROUPS: FaqGroup[] = [
     items: [
       {
         question: 'Does the person I am helping need an account?',
-        answer: 'No. Anyone can join a support session with just the code, from the app or from a browser, without installing anything.',
+        answer: 'No. They join with the code in the Remote365 app, which is a free download for Windows and Android, and approve the connection. No account is needed.',
       },
       {
         question: 'What can I do during a session?',

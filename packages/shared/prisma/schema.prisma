@@ -561,3 +561,16 @@ model RemoteSessionCollaborator {
 
   @@unique([sessionId, email])
 }
+
+// "Which app should we build next?" poll on the public Downloads page. One
+// row per browser: voterId is a random id the page keeps in localStorage, so
+// voting again changes that browser's choice. No personal data is stored.
+model PlatformVote {
+  id        String   @id @default(uuid())
+  voterId   String   @unique
+  platform  String // macos | ios | linux
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([platform])
+}

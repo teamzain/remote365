@@ -516,3 +516,60 @@
 @media (min-width: 900px) {
   .site-dark .home-marquee { padding-top: 72px; }
 }
+
+/* ── Border beam ─────────────────────────────────────────────────
+   After Cult UI's "Border Beam Button": a point of light runs around the
+   main calls to action. Add class="beam" to the button; --beam-radius
+   should match its border radius. */
+@property --beam-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+.site-dark .beam {
+  position: relative;
+  isolation: isolate;
+}
+.site-dark .beam::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: calc(var(--beam-radius, 6px) + 2px);
+  padding: 2px;
+  background: conic-gradient(from var(--beam-angle), transparent 0% 60%, rgba(255, 255, 255, 0.95) 72%, #ffd08a 78%, transparent 90% 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: beamSpin 3.2s linear infinite;
+  pointer-events: none;
+}
+@keyframes beamSpin {
+  to { --beam-angle: 360deg; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .site-dark .beam::before { animation: none; }
+}
+
+/* ── Progressive blur under the floating header ────────────────────
+   After Skiper UI's "Progressive Blur" (skiper41): content scrolling up
+   behind the header softens instead of cutting off. Desktop only; the
+   phone header is its own frosted bar. */
+.site-topblur { display: none; }
+@media (min-width: 769px) {
+  .site-topblur {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 90;
+    height: 104px;
+    pointer-events: none;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), transparent);
+    -webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent);
+    mask-image: linear-gradient(to bottom, #000 45%, transparent);
+    -webkit-backdrop-filter: blur(5px);
+    backdrop-filter: blur(5px);
+  }
+}

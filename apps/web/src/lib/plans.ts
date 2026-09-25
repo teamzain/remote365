@@ -15,6 +15,8 @@ export interface ApiPlan {
   maxConcurrentSessions: number | null
   features: string[]
   popular?: boolean
+  trialDays?: number
+  auditRetentionDays?: number | 'Custom'
 }
 
 // Snapshot of the built-in catalogue, used when the API is unreachable so

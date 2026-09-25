@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { type ReactNode } from 'react'
 import SiteLink from '@/components/site/SiteLink'
 
 // tabler:arrow-up rotated 90° → arrow pointing right, primary orange
@@ -26,6 +26,8 @@ export interface AccessAnywhereSectionProps {
   reverse?: boolean
   /** For transparent illustrations: show fully (contain) with no grey backdrop */
   illustration?: boolean
+  /** Live visual (globe, diagram) shown instead of the image */
+  visual?: ReactNode
 }
 
 const AccessAnywhereSection: React.FC<AccessAnywhereSectionProps> = ({
@@ -36,6 +38,7 @@ const AccessAnywhereSection: React.FC<AccessAnywhereSectionProps> = ({
   image='/4dd57ec67c49dd891ff516acaa8dfe8e803d0fd2.png',
   reverse = false,
   illustration = false,
+  visual,
 }) => (
   <section className="aa-section">
     <div className="aa-inner" style={reverse ? { flexDirection: 'row-reverse' } : undefined}>
@@ -55,7 +58,9 @@ const AccessAnywhereSection: React.FC<AccessAnywhereSectionProps> = ({
       </div>
 
       {/* Visual */}
-      {image
+      {visual
+        ? <div className="aa-visual">{visual}</div>
+        : image
         ? <img src={image} alt="" loading="lazy" decoding="async" className={`aa-media${illustration ? ' aa-media--contain' : ''}`} />
         : <div className="aa-media" aria-hidden="true" />}
 
@@ -125,6 +130,12 @@ const AccessAnywhereSection: React.FC<AccessAnywhereSectionProps> = ({
         flex-shrink: 1;
         object-fit: cover;
       }
+      .aa-visual {
+        display: flex;
+        justify-content: center;
+        width: min(620px, 48vw);
+        flex-shrink: 1;
+      }
       /* Transparent illustrations: no backdrop, shown in full */
       .aa-media--contain {
         background: transparent;
@@ -137,7 +148,7 @@ const AccessAnywhereSection: React.FC<AccessAnywhereSectionProps> = ({
           align-items: flex-start;
         }
         .aa-copy { gap: 44px; max-width: 100%; }
-        .aa-media { width: 100%; }
+        .aa-media, .aa-visual { width: 100%; }
       }
       @media (max-width: 640px) {
         .aa-section { padding: 40px 20px; }

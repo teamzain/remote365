@@ -25,6 +25,7 @@ import memberRoutes from './routes/members';
 import groupRoutes from './routes/groups';
 import billingRoutes from './routes/billing';
 import supportRoutes from './routes/support';
+import platformVoteRoutes from './routes/platformVotes';
 import analyticsRoutes from './routes/analytics';
 import chatRoutes from './routes/chat';
 
@@ -205,6 +206,7 @@ server.register(memberRoutes, { prefix: '/api/members' });
 server.register(groupRoutes, { prefix: '/api/groups' });
 server.register(billingRoutes, { prefix: '/api/billing' });
 server.register(supportRoutes, { prefix: '/api/support' });
+server.register(platformVoteRoutes, { prefix: '/api/support/platform-votes' });
 server.register(adminSettingsRoutes, { prefix: '/api/admin/settings' });
 server.register(analyticsRoutes, { prefix: '/api/analytics' });
 server.register(chatRoutes, { prefix: '/api/chat' });

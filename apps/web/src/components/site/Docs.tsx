@@ -77,7 +77,7 @@ const GROUPS: Group[] = [
           { steps: [
             'On the Home screen, choose “Create a Session”.',
             'Share the generated session code (and link) with the person you’re helping.',
-            'They enter the code — or open the link in their browser — and join.',
+            'They open the link, which hands over to the Remote365 app, or enter the code there, and join.',
             'Their screen opens in your session view automatically.',
           ] },
         ],
@@ -86,7 +86,7 @@ const GROUPS: Group[] = [
         id: 'join-session',
         title: 'Join a session',
         blocks: [
-          { p: 'To receive support, enter the session code your supporter shared. No install or account needed — it runs in the browser too.' },
+          { p: 'To receive support, open the link your supporter sent, or enter their session code in the Remote365 app. No account is needed; if the app is not installed yet, the link offers the download.' },
           { list: [
             'Enter the session code provided by your supporter.',
             'Approve the connection request.',

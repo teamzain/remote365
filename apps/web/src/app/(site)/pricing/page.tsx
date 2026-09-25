@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { connection } from 'next/server'
 import SiteContent from '@/components/site/SiteContent'
 import PricingPlans from '@/components/landing/PricingPlans'
+import PlanComparison from '@/components/landing/PlanComparison'
 import FaqList from '@/components/landing/FaqList'
 import { PRICING_FAQS } from '@/content/faq'
 import { getPublicPlans, type ApiPlan } from '@/lib/plans'
@@ -63,6 +64,7 @@ export default async function PricingPage() {
 
       <main>
         <PricingPlans plans={plans} />
+        <PlanComparison plans={plans} />
         <FaqList items={PRICING_FAQS} subtitle="Everything you need to know about Remote365 plans and billing." />
       </main>
 

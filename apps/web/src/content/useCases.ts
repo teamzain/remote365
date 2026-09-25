@@ -33,9 +33,9 @@ export const USE_CASES: UseCase[] = [
     eyebrow: 'IT help desk',
     title: 'Fix a colleague’s computer without walking to their desk',
     summary:
-      'They share a one-time session code, you see their screen within seconds, fix the problem and hand control back. Remote sessions are end-to-end encrypted, and nobody has to install anything to join from a browser.',
+      'Send them a one-time session code, they join in the Remote365 app and approve, and you see their screen, fix the problem and hand control back. Remote sessions are end-to-end encrypted, and they need no account.',
     answer:
-      'Remote365 lets an IT help desk support people on their own computers. The person needing help shares a one-time session code or link, joins from the app or a browser, approves the connection, and the technician gets their screen with full keyboard and mouse control, file transfer and clipboard sync.',
+      'Remote365 lets an IT help desk support people on their own computers. The technician shares a one-time session code or link, the person needing help joins in the Remote365 app and approves the connection, and the technician gets their screen with full keyboard and mouse control, file transfer and clipboard sync.',
     image: '/37e0e57e97f1972d3a302e6e086d8b5f1b920cad.png',
     imageAlt: 'Two colleagues looking at a laptop running Remote365',
     background: '#a94808',
@@ -46,7 +46,7 @@ export const USE_CASES: UseCase[] = [
         body: 'Support sessions are temporary, encrypted connections for helping someone once, without registering their device.',
         points: [
           'The technician chooses “Create a Session” and shares the code or link.',
-          'The user enters the code, or opens the link in a browser, and approves the request.',
+          'The user opens the link, which hands over to the Remote365 app, or enters the code there, then approves the request.',
           'They can keep it view-only, so the technician sees but does not control.',
           'The technician works with full keyboard and mouse control, including multiple monitors.',
         ],
@@ -68,7 +68,7 @@ export const USE_CASES: UseCase[] = [
     faqs: [
       {
         question: 'Does the person being helped need an account?',
-        answer: 'No. Anyone can join a support session with just the code, from the app or from a browser.',
+        answer: 'No. They join with the code in the Remote365 app, which is a free download, and no account is needed.',
       },
       {
         question: 'Can the user stop the session?',
@@ -104,7 +104,7 @@ export const USE_CASES: UseCase[] = [
       },
       {
         heading: 'Which plan fits an MSP?',
-        body: 'Pro includes device groups, per-member device access, a support queue and a scripts library. Business adds full role-based access control, connection policies, forced two-factor authentication, session recording and a one-year audit log. See the pricing page for current limits.',
+        body: 'Pro adds device groups, per-member device access and a 30-day audit log. Business adds session recording, two-factor authentication enforced for everyone and a one-year audit log, with higher limits. See the pricing page for current limits.',
       },
     ],
     faqs: [
@@ -170,7 +170,7 @@ export const USE_CASES: UseCase[] = [
     sections: [
       {
         heading: 'How do I help a parent once?',
-        body: 'Start a support session and send them the code or link on WhatsApp or by text. They open it, approve the connection, and you can see and control their screen.',
+        body: 'Start a support session and send them the code or link on WhatsApp or by text. They open it in the Remote365 app, approve the connection, and you can see and control their screen. If the app is not installed yet, the link offers the download.',
       },
       {
         heading: 'How do I set it up so I can help any time?',
@@ -184,7 +184,7 @@ export const USE_CASES: UseCase[] = [
     faqs: [
       {
         question: 'Does my parent need to understand the app?',
-        answer: 'For a one-off session they only need to open the link you send and approve the connection. With unattended access set up, they do not need to do anything.',
+        answer: 'For a one-off session they install Remote365 once, open the link you send and approve the connection. With unattended access set up, they do not need to do anything.',
       },
       {
         question: 'Does it work on Android phones?',
