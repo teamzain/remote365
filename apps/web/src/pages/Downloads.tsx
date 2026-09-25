@@ -4,22 +4,18 @@ import SiteLayout from '../components/landing/SiteLayout'
 
 type PlatformId = 'macos' | 'ios' | 'windows' | 'android'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://remote365.ai'
-const DESKTOP_DOWNLOADS = `${API_BASE}/downloads/desktop`
+// Deployed builds serve /downloads from the same origin (prod and preprod each
+// host their own tree); a dev build points at the API host it's configured for.
+const DOWNLOADS_ORIGIN = import.meta.env.VITE_API_URL || ''
+const DESKTOP_DOWNLOADS = `${DOWNLOADS_ORIGIN}/downloads/desktop`
 // Used when latest.yml can't be fetched (it has no CORS header, so any
 // cross-origin page — e.g. the prod site reading preprod's downloads — falls
 // back). The publish flow retargets this shell-safe alias at every release,
 // so unlike a versioned name it never goes stale.
 const FALLBACK_INSTALLER = 'Remote365-Setup.exe'
 // Stable aliases kept pointing at the newest APK by the publish scripts,
-// so the page never hardcodes a mobile version. Served same-origin when the
-// page runs on a remote365.ai domain (prod and preprod each host their own
-// /downloads tree); anywhere else (local dev) falls back to prod.
-const MOBILE_BASE =
-  typeof window !== 'undefined' && /(^|\.)remote365\.ai$/i.test(window.location.hostname)
-    ? window.location.origin
-    : 'https://remote365.ai'
-const MOBILE_DOWNLOADS = `${MOBILE_BASE}/downloads/mobile`
+// so the page never hardcodes a mobile version.
+const MOBILE_DOWNLOADS = `${DOWNLOADS_ORIGIN}/downloads/mobile`
 const ANDROID_MOBILE_APK = `${MOBILE_DOWNLOADS}/Remote365-Mobile.apk`
 const ANDROID_HOST_APK = `${MOBILE_DOWNLOADS}/Remote365-Host.apk`
 // Set to the App Store page once the iOS app is published; null renders
@@ -94,7 +90,10 @@ const detectPlatform = (): PlatformId => {
 // ── Download section ──────────────────────────────────────────────────────────
 
 const DownloadHero: React.FC = () => {
-  const [selected, setSelected] = useState<PlatformId>(detectPlatform)
+  // Windows first, then the visitor's own platform once mounted: the server
+  // can't see the user agent, and the first client render must match it.
+  const [selected, setSelected] = useState<PlatformId>('windows')
+  useEffect(() => { setSelected(detectPlatform()) }, [])
   const [installerUrl, setInstallerUrl] = useState(`${DESKTOP_DOWNLOADS}/${encodeURIComponent(FALLBACK_INSTALLER)}`)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)

@@ -57,8 +57,10 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  accessToken: localStorage.getItem(TOKEN_KEY),
-  refreshToken: localStorage.getItem(REFRESH_KEY),
+  // Guarded so the store can be imported where there is no localStorage
+  // (server rendering); the client reads the real tokens.
+  accessToken: typeof window === 'undefined' ? null : localStorage.getItem(TOKEN_KEY),
+  refreshToken: typeof window === 'undefined' ? null : localStorage.getItem(REFRESH_KEY),
   temp2faToken: null,
   isLoading: false,
   isInitialized: false,

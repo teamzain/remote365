@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { Snackbar, Alert } from '@mui/material';
 import type { AlertColor } from '@mui/material';
+import { setNotifyListener } from '../lib/notify';
 
 interface SnackbarContextType {
   showSnackbar: (message: string, severity?: AlertColor) => void;
@@ -9,14 +10,9 @@ interface SnackbarContextType {
 
 const SnackbarContext = createContext<SnackbarContextType | undefined>(undefined);
 
-// External trigger for non-React contexts (like axios interceptors)
-let externalShowSnackbar: (message: string, severity?: AlertColor) => void = () => {
-  console.warn('SnackbarProvider not initialized');
-};
-
-export const notify = (message: string, severity: AlertColor = 'error') => {
-  externalShowSnackbar(message, severity);
-};
+// Messages raised outside React (e.g. the axios interceptors) arrive through
+// lib/notify; re-exported so existing imports keep working.
+export { notify } from '../lib/notify';
 
 export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [open, setOpen] = useState(false);
@@ -29,8 +25,10 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
     setOpen(true);
   }, []);
 
-  // Register the external trigger
-  externalShowSnackbar = showSnackbar;
+  useEffect(() => {
+    setNotifyListener(showSnackbar);
+    return () => setNotifyListener(null);
+  }, [showSnackbar]);
 
   const handleClose = (_event?: React.SyntheticEvent | Event, reason?: string) => {
     if (reason === 'clickaway') return;

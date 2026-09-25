@@ -9,6 +9,7 @@ import { Languages, ChevronDown, CircleHelp } from 'lucide-react';
 import { ta } from '../../lib/authTranslations';
 import { BusinessSignupSteps, BusinessStepper } from '../../components/auth/BusinessSignupSteps';
 import { hasErrors, validateBusiness, validateBusinessEmail, validateCompanyStep } from '../../lib/businessValidation';
+import { oauthStartUrl, persistRememberMe, rememberedEmail, rememberMeDefault, signInFailure, twoFactorFailure } from '../../lib/signIn';
 
 type AuthMode = 'login' | 'signup' | 'forgot' | 'reset';
 
@@ -61,10 +62,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
       document.documentElement.dir = value === 'ar-SA' ? 'rtl' : 'ltr';
     } catch { /* not in a document */ }
   };
-  const [email, setEmail] = useState(() => localStorage.getItem('remote365_remembered_email') || '');
+  const [email, setEmail] = useState(rememberedEmail);
   const [password, setPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(() => localStorage.getItem('remote365_remember_me') === 'true');
+  const [rememberMe, setRememberMe] = useState(rememberMeDefault);
 
   const [isAwaitingVerification, setIsAwaitingVerification] = useState(false);
   const [verificationCode, setVerificationCode] = useState('');
@@ -122,24 +123,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
     try {
       holdRedirectRef.current = true;
       const result = await storeLogin(email, password);
-      try {
-        if (rememberMe) {
-          localStorage.setItem('remote365_remembered_email', email);
-          localStorage.setItem('remote365_remember_me', 'true');
-        } else {
-          localStorage.removeItem('remote365_remembered_email');
-          localStorage.setItem('remote365_remember_me', 'false');
-        }
-      } catch {
-        /* storage unavailable — non-fatal */
-      }
+      persistRememberMe(email, rememberMe);
       if (result?.twoFactorRequired) { holdRedirectRef.current = false; return; } // store sets temp2faToken → 2FA panel shows
       setAuthResult({ kind: 'success', title: 'Signed in', message: 'Welcome back. Loading your dashboard.' });
     } catch (err: any) {
       holdRedirectRef.current = false;
-      const failure = err.response?.data?.error || 'Could not sign in. Check your credentials and try again.';
-      setAuthResult({ kind: 'error', title: err.response?.status === 401 ? 'Sign in failed' : 'Could not sign in', message: failure });
-      setAuthError(failure);
+      const failure = signInFailure(err);
+      setAuthResult({ kind: 'error', ...failure });
+      setAuthError(failure.message);
     } finally {
       setLoading(false);
     }
@@ -272,25 +263,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
       setAuthResult({ kind: 'success', title: 'Signed in', message: 'Two-factor code accepted.' });
     } catch (err: any) {
       holdRedirectRef.current = false;
-      const failure = err.response?.data?.error || 'Invalid 2FA code';
-      setAuthResult({ kind: 'error', title: 'Code not accepted', message: failure });
-      setTwoFaError(failure);
+      const failure = twoFactorFailure(err);
+      setAuthResult({ kind: 'error', ...failure });
+      setTwoFaError(failure.message);
     } finally {
       setIsVerifying2fa(false);
     }
   };
 
-  const handleGoogleLogin = () => {
-    const apiUrl = import.meta.env.VITE_API_URL || window.location.origin;
-    const returnUrl = `${window.location.origin}/auth/callback`;
-    window.location.href = `${apiUrl}/api/auth/oauth/google?platform=web&returnUrl=${encodeURIComponent(returnUrl)}${authMode === 'signup' && signupAccountType === 'business' ? '&accountType=business' : ''}`;
-  };
-
-  const handleMicrosoftLogin = () => {
-    const apiUrl = import.meta.env.VITE_API_URL || window.location.origin;
-    const returnUrl = `${window.location.origin}/auth/callback`;
-    window.location.href = `${apiUrl}/api/auth/oauth/microsoft?platform=web&returnUrl=${encodeURIComponent(returnUrl)}${authMode === 'signup' && signupAccountType === 'business' ? '&accountType=business' : ''}`;
-  };
+  const oauthBusiness = authMode === 'signup' && signupAccountType === 'business';
+  const handleGoogleLogin = () => { window.location.href = oauthStartUrl('google', { business: oauthBusiness }); };
+  const handleMicrosoftLogin = () => { window.location.href = oauthStartUrl('microsoft', { business: oauthBusiness }); };
 
   const primaryButtonStyle: React.CSSProperties = {
     fontFamily: MONA,

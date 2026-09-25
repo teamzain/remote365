@@ -33,7 +33,7 @@ const processQueue = (error: unknown, token: string | null = null) => {
   failedQueue = [];
 };
 
-import { notify } from '../components/NotificationProvider';
+import { notify } from './notify';
 
 api.interceptors.response.use(
   (response: any) => {
