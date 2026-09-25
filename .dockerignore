@@ -10,6 +10,7 @@ node_modules
 **/release*
 apps/desktop
 apps/web
+web-release
 apps/remote-365-mobile
 apps/android-host
 packages/native-*

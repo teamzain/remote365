@@ -54,7 +54,12 @@ for s in $SERVICES; do
   done
 done
 
-$DC up -d postgres redis caddy $SERVICES
+# The web app image copies a prebuilt web-release/ (CI builds it on Linux).
+# Build one here if there is none; delete web-release/ to force a fresh build.
+[ -f web-release/Dockerfile ] || bash scripts/build-web-release.sh
+$DC build -q web
+
+$DC up -d postgres redis web caddy $SERVICES
 
 echo "Waiting for Postgres..."
 for _ in $(seq 1 60); do

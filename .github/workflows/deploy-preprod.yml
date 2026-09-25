@@ -1,12 +1,17 @@
-# Backend deploy to preprod (pp.remote365.ai). See deploy/README.md.
+# Deploy to preprod (pp.remote365.ai). See deploy/README.md.
 #
-# Every push to main that touches the backend packs those files, streams them
-# over SSH to the droplet and runs deploy/preprod-deploy.sh there. The deploy
-# key is restricted to that one script (forced command), so this workflow can
-# only ever deploy, roll back or ask for status. The database is never part
-# of a deploy: same Compose project, postgres/redis untouched, backup first,
-# additive-only schema changes.
-name: Deploy backend to preprod
+# Every push to main that touches the backend or the web app packs the files,
+# streams them over SSH to the droplet and runs deploy/preprod-deploy.sh there.
+# The web app (Next.js) is built here, not on the 4 GB droplet, and shipped
+# as a prebuilt standalone server in web-release/. deploy/COMPONENTS tells the
+# droplet what this push changed ("backend", "web" or both), so a web-only
+# push never rebuilds the API services or touches the database.
+#
+# The deploy key is restricted to that one script (forced command), so this
+# workflow can only ever deploy, roll back or ask for status. The database is
+# never part of a deploy: same Compose project, postgres/redis untouched,
+# backup first, additive-only schema changes.
+name: Deploy to preprod
 
 on:
   push:
@@ -16,8 +21,10 @@ on:
       - 'apps/signaling-service/**'
       - 'apps/session-service/**'
       - 'apps/billing-service/**'
+      - 'apps/web/**'
       - 'packages/shared/**'
       - 'scripts/patch-react-native-webrtc-default-display.mjs'
+      - 'scripts/build-web-release.sh'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.base.json'
@@ -29,7 +36,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'deploy = build + restart the four backend services from this commit; rollback = previous images; status = report only'
+        description: 'deploy = build + restart backend and web from this commit; rollback = previous images of the last deploy; status = report only'
         type: choice
         options: [deploy, rollback, status]
         default: deploy
@@ -54,6 +61,65 @@ jobs:
       - name: Checkout
         if: env.ACTION == 'deploy'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: What changed
+        id: changes
+        if: env.ACTION == 'deploy'
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          backend='^(apps/(auth|signaling|session|billing)-service/|packages/shared/|scripts/patch-react-native-webrtc-default-display\.mjs$|tsconfig\.base\.json$|\.dockerignore$)'
+          web='^(apps/web/|scripts/build-web-release\.sh$)'
+          # Shared by both, or the deploy machinery itself: ship everything.
+          both='^(package\.json$|package-lock\.json$|Caddyfile$|docker-compose\.prod\.yml$|deploy/|\.github/workflows/deploy-preprod\.yml$)'
+          if [ "$GITHUB_EVENT_NAME" = push ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            files=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+          else
+            files=ALL   # manual run, or a push whose base we cannot diff against
+          fi
+          components=""
+          if [ "$files" = ALL ] || grep -Eq "$backend|$both" <<<"$files"; then components="backend"; fi
+          if [ "$files" = ALL ] || grep -Eq "$web|$both" <<<"$files"; then components="$components web"; fi
+          components=$(echo $components)
+          [ -n "$components" ] || components="backend web"
+          echo "Deploying: $components"
+          echo "components=$components" >>"$GITHUB_OUTPUT"
+          echo "web=$(grep -qw web <<<"$components" && echo true || echo false)" >>"$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        if: env.ACTION == 'deploy' && steps.changes.outputs.web == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build the web app
+        if: env.ACTION == 'deploy' && steps.changes.outputs.web == 'true'
+        run: |
+          # Only the web workspace's dependencies; no install scripts (the root
+          # postinstall patches React Native, which the web build never loads).
+          npm ci --workspace @remotelink/web --ignore-scripts --no-audit --no-fund
+          bash scripts/build-web-release.sh "$GITHUB_SHA"
+
+      - name: Smoke-test the web server
+        if: env.ACTION == 'deploy' && steps.changes.outputs.web == 'true'
+        run: |
+          cd web-release/app
+          PORT=3100 HOSTNAME=127.0.0.1 node apps/web/server.js >/tmp/web.log 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:3100/healthz >/dev/null && break; sleep 1; done
+          fail() { echo "::error::$1"; cat /tmp/web.log; exit 1; }
+          sha=$(curl -sf http://127.0.0.1:3100/healthz | node -pe 'JSON.parse(require("fs").readFileSync(0)).sha') || fail "no /healthz"
+          [ "$sha" = "$GITHUB_SHA" ] || fail "/healthz reports $sha, expected $GITHUB_SHA"
+          for p in / /login /pricing /dashboard; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3100$p")
+            [ "$code" = 200 ] || fail "$p returned $code"
+          done
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/features)
+          [ "$code" = 301 ] || fail "/features returned $code, expected 301"
+          curl -sf http://127.0.0.1:3100/ | grep -q '<title>' || fail "/ has no <title>"
+          echo "web server OK on $sha"
 
       - name: Install the deploy key
         env:
@@ -65,20 +131,26 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
 
-      - name: Pack the backend tree
+      - name: Pack the release
         if: env.ACTION == 'deploy'
+        env:
+          COMPONENTS: ${{ steps.changes.outputs.components }}
+          WEB: ${{ steps.changes.outputs.web }}
         run: |
-          tar -czf /tmp/backend.tgz \
+          printf '%s\n' "$COMPONENTS" > deploy/COMPONENTS
+          extra=()
+          [ "$WEB" = true ] && extra+=(web-release)
+          tar -czf /tmp/release.tgz \
             package.json package-lock.json tsconfig.base.json .dockerignore \
             Caddyfile docker-compose.prod.yml \
             scripts packages/shared \
             apps/auth-service apps/signaling-service apps/session-service apps/billing-service \
-            deploy
-          echo "$(tar -tzf /tmp/backend.tgz | wc -l) files, $(du -h /tmp/backend.tgz | cut -f1)"
+            deploy "${extra[@]}"
+          echo "$COMPONENTS: $(tar -tzf /tmp/release.tgz | wc -l) files, $(du -h /tmp/release.tgz | cut -f1)"
 
       - name: Deploy ${{ github.sha }}
         if: env.ACTION == 'deploy'
-        run: $SSH "root@${{ secrets.PREPROD_HOST }}" "deploy ${{ github.sha }}" < /tmp/backend.tgz
+        run: $SSH "root@${{ secrets.PREPROD_HOST }}" "deploy ${{ github.sha }}" < /tmp/release.tgz
 
       - name: ${{ env.ACTION }}
         if: env.ACTION != 'deploy'

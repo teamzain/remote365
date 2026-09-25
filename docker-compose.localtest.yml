@@ -22,6 +22,8 @@ services:
     restart: "no"
     env_file: !override
       - .env.localtest
+  web:
+    restart: "no"
   caddy:
     restart: "no"
     ports: !override

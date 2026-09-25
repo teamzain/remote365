@@ -12,6 +12,15 @@
 }
 
 {$CADDY_SITE:remote365.ai, www.remote365.ai, :80} {
+    # One canonical host for search engines: www -> apex. (Preprod's
+    # CADDY_SITE has no www, so this never fires there.)
+    @www host www.remote365.ai
+    redir @www https://remote365.ai{uri} 301
+
+    # Preprod mirrors prod; keep it out of search results.
+    @preprod host pp.remote365.ai
+    header @preprod X-Robots-Tag "noindex, nofollow"
+
     # Universal API handling
     handle /api/* {
         # Auth & Admin Services
@@ -95,18 +104,11 @@
         reverse_proxy billing-service:3004
     }
 
-    # Web app (SPA): everything not matched above (site root, /meeting/CODE,
-    # /login, /dashboard …) serves the built apps/web bundle. Unknown paths
-    # fall back to index.html so client-side routes survive direct loads.
+    # Website + web app (Next.js, the `web` service): everything not matched
+    # above — site pages, /login, /dashboard, /meeting/CODE … Next sets the
+    # cache headers itself (hashed /_next/static files are immutable).
     handle {
-        root * /var/www/webapp
-        # Hashed bundles never change; the HTML that points at them must be
-        # re-checked every load, or browsers keep an old bundle after a deploy.
-        @assets path /assets/*
-        header @assets Cache-Control "public, max-age=31536000, immutable"
-        @page not path /assets/*
-        header @page Cache-Control "no-cache"
-        try_files {path} /index.html
-        file_server
+        encode zstd gzip
+        reverse_proxy web:3000
     }
 }

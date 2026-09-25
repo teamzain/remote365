@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# Preprod backend deploy. Runs ON the droplet as root, normally via
-# bin/receive.sh (the forced command of the GitHub Actions deploy key), or by
-# hand:
+# Preprod deploy. Runs ON the droplet as root, normally via bin/receive.sh (the
+# forced command of the GitHub Actions deploy key), or by hand:
 #
 #   bash /root/remote365/app/deploy/preprod-deploy.sh deploy <full-sha>  # needs releases/<sha>/
 #   bash /root/remote365/app/deploy/preprod-deploy.sh rollback           # previous images
 #   bash /root/remote365/app/deploy/preprod-deploy.sh status
 #
+# A release carries deploy/COMPONENTS, written by the workflow: "backend", "web"
+# or both. backend = the four API services; web = the Next.js site/app, shipped
+# prebuilt in web-release/. A release without the file is backend-only.
+#
 # The database stays exactly as it is. This script reuses the existing Compose
-# project so the same named volumes are used, only ever touches the four
-# backend services (+ Caddy when the Caddyfile changed), and runs schema
+# project so the same named volumes are used, only ever touches the backend
+# services, `web`, and Caddy (when the Caddyfile changed), and runs schema
 # changes only when they are purely additive. It never runs `down`, `-v`,
 # `--remove-orphans`, the seed, or `db push --accept-data-loss`, and never
 # copies /root/.env.preprod over the live .env.
@@ -21,18 +24,23 @@ APP=$ROOT/app
 # ${PROJECT}_postgres_data etc. Any other name would start a NEW, EMPTY database.
 PROJECT=remotelink-desktop
 COMPOSE_FILE=docker-compose.prod.yml
-SERVICES="auth-service signaling-service session-service billing-service"
+BACKEND="auth-service signaling-service session-service billing-service"
+WEB=web
 PG_CONTAINER=${PROJECT}-postgres-1
 PG_VOLUME=${PROJECT}_postgres_data
 SITE=pp.remote365.ai
 KEEP_BACKUPS=10
 KEEP_RELEASES=5
 HEALTH_TIMEOUT=120
+# The Caddyfile the running caddy served before this deploy, restored if the
+# deploy fails after switching it.
+CADDY_PREVIOUS=$ROOT/Caddyfile.previous
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 die() { log "FAILED: $*"; exit 1; }
 dc() { (cd "$APP" && docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"); }
 pg() { docker exec -i "$PG_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -tA -c "$1"; }
+has() { case " $COMPONENTS " in *" $1 "*) return 0 ;; esac; return 1; }
 
 db_env() {
   # DATABASE_URL exactly as Compose built it for the running auth-service; used
@@ -72,10 +80,26 @@ preflight() {
   log "Database: $DB_BEFORE; online hosts (presence keys): $PRESENCE_BEFORE"
 }
 
+web_running() {
+  [ "$(docker inspect -f '{{.State.Health.Status}}' "${PROJECT}-${WEB}-1" 2>/dev/null)" = healthy ]
+}
+
 sync_release() {
   local rel=$ROOT/releases/$1
   [ -d "$rel" ] || die "release dir $rel not found"
   [ -f "$rel/$COMPOSE_FILE" ] && [ -f "$rel/Caddyfile" ] || die "release is missing $COMPOSE_FILE or Caddyfile"
+  COMPONENTS=backend
+  [ -f "$rel/deploy/COMPONENTS" ] && COMPONENTS=$(tr -s '[:space:]' ' ' <"$rel/deploy/COMPONENTS")
+  COMPONENTS=" ${COMPONENTS# } "
+  has backend || has "$WEB" || die "deploy/COMPONENTS names nothing to deploy: '$COMPONENTS'"
+  if has "$WEB"; then
+    [ -f "$rel/web-release/Dockerfile" ] && [ -s "$rel/web-release/BUILD_SHA" ] || die "COMPONENTS includes web but the release has no web-release/"
+  fi
+  # A Caddyfile that sends the site to `web` needs a web container that is
+  # either part of this release or already serving.
+  if grep -q "reverse_proxy $WEB:3000" "$rel/Caddyfile" && ! has "$WEB" && ! web_running; then
+    die "the Caddyfile proxies to $WEB but this release has no web build and no $WEB container is running"
+  fi
   # Compare against the file the RUNNING caddy container actually mounts: a
   # bind mount keeps the path it was created with, so a container from the
   # old checkout keeps serving that copy even after app/Caddyfile is updated.
@@ -85,16 +109,24 @@ sync_release() {
   if [ "$mounted" = "$APP/Caddyfile" ] && [ -f "$mounted" ] && cmp -s "$rel/Caddyfile" "$mounted"; then
     CADDY_CHANGED=0
   fi
-  # .env is the only file in app/ that is not part of a release; keep it.
-  rsync -a --delete --exclude '.env' "$rel/" "$APP/"
+  rm -f "$CADDY_PREVIOUS"
+  if [ "$CADDY_CHANGED" = 1 ] && [ -f "$mounted" ]; then
+    cp "$mounted" "$CADDY_PREVIOUS"
+  fi
+  # .env is the only file in app/ that is not part of a release; keep it. A
+  # backend-only release has no web-release/: keep the one in place (excluded
+  # paths are never deleted by --delete).
+  local keep_web=()
+  has "$WEB" || keep_web=(--exclude /web-release)
+  rsync -a --delete --exclude '.env' "${keep_web[@]}" "$rel/" "$APP/"
   dc config -q || die "docker compose config rejected the release"
-  log "Release $1 in place (Caddyfile changed: $CADDY_CHANGED)"
+  log "Release $1 in place (components:$COMPONENTS; Caddyfile changed: $CADDY_CHANGED)"
 }
 
 tag_previous() {
   # Tag what is actually RUNNING, not :latest — after an aborted deploy
   # :latest is the unused new build, and rolling back to it would be a no-op.
-  for s in $SERVICES; do
+  for s in "$@"; do
     local img=${PROJECT}-${s} running
     running=$(docker inspect -f '{{.Image}}' "${PROJECT}-${s}-1" 2>/dev/null || true)
     if [ -n "$running" ]; then
@@ -103,7 +135,7 @@ tag_previous() {
       docker tag "$img:latest" "$img:previous"
     fi
   done
-  log "Running images tagged :previous for rollback"
+  log "Running images tagged :previous for rollback: $*"
 }
 
 build_images() {
@@ -111,7 +143,7 @@ build_images() {
   # hard enough to fail with ERR_SSL_CIPHER_OPERATION_FAILED. The old
   # containers keep serving while this runs.
   mkdir -p "$ROOT/logs"
-  for s in $SERVICES; do
+  for s in "$@"; do
     local ok=0 blog="$ROOT/logs/build-${SHA:0:7}-$s.log"
     for attempt in 1 2 3; do
       log "Building $s (attempt $attempt)"
@@ -173,14 +205,25 @@ sync_schema() {
   printf '%s' "$sql" | grep -q 'empty migration' || die "schema still differs after applying the change"
 }
 
-start_services() {
-  log "Recreating: $SERVICES"
-  # --no-deps: postgres, redis and coturn are never recreated by a deploy.
-  dc up -d --no-deps --no-build $SERVICES
-  if [ "${CADDY_CHANGED:-0}" = 1 ]; then
-    log "Caddyfile changed: recreating caddy"
-    dc up -d --no-deps --no-build --force-recreate caddy
-  fi
+web_sha() {
+  docker exec "${PROJECT}-${WEB}-1" node -e "fetch('http://127.0.0.1:3000/healthz').then(r=>r.json()).then(j=>console.log(j.sha),()=>{})" 2>/dev/null || true
+}
+
+# The new web container must be healthy and report the release's commit
+# BEFORE Caddy sends traffic to it.
+wait_web() {
+  local want waited=0
+  want=$(tr -d '[:space:]' <"$APP/web-release/BUILD_SHA")
+  until web_running && [ "$(web_sha)" = "$want" ]; do
+    [ "$waited" -ge 90 ] && { docker logs --tail 30 "${PROJECT}-${WEB}-1" 2>&1 || true; return 1; }
+    sleep 3; waited=$((waited + 3))
+  done
+  log "$WEB healthy on $want after ${waited}s"
+}
+
+recreate_caddy() {
+  log "Caddyfile changed: recreating caddy"
+  dc up -d --no-deps --no-build --force-recreate caddy
 }
 
 http_code() { curl -sS -o /dev/null -w '%{http_code}' -m 8 --resolve "$SITE:443:127.0.0.1" "https://$SITE$1" 2>/dev/null || echo 000; }
@@ -192,7 +235,10 @@ healthy() {
   # The signaling WebSocket answers a plain GET with an "upgrade required"
   # style status; a gateway error means it is down.
   case "$(http_code /api/signal)" in 000|502|503|504) return 1 ;; esac
-  for s in $SERVICES; do
+  # The site and the app shell, whoever serves them.
+  [ "$(http_code /)" = 200 ] || return 1
+  [ "$(http_code /login)" = 200 ] || return 1
+  for s in $BACKEND; do
     [ "$(docker inspect -f '{{.State.Status}}' "${PROJECT}-${s}-1" 2>/dev/null)" = running ] || return 1
   done
 }
@@ -229,6 +275,7 @@ post_checks() {
 
 cleanup() {
   printf '%s\n' "$SHA" >"$ROOT/current-sha"
+  printf '%s\n' "$COMPONENTS" >"$ROOT/current-components"
   prune_old "$ROOT/releases" '[0-9a-f]*' "$KEEP_RELEASES"
   docker image prune -f >/dev/null 2>&1 || true
   # Keep the npm-install layers (they make builds fast and reliable) but stop
@@ -237,47 +284,98 @@ cleanup() {
     || docker builder prune -f --keep-storage 20GB >/dev/null 2>&1 || true
 }
 
+# Undo whatever this deploy changed, newest first.
+undo_deploy() {
+  if [ "${CADDY_CHANGED:-0}" = 1 ] && [ "${CADDY_SWITCHED:-0}" = 1 ] && [ -f "$CADDY_PREVIOUS" ]; then
+    log "Restoring the previous Caddyfile"
+    cp "$CADDY_PREVIOUS" "$APP/Caddyfile"
+    recreate_caddy
+  fi
+  if has "$WEB" && [ "${WEB_STARTED:-0}" = 1 ]; then rollback_web; fi
+  if has backend && [ "${BACKEND_STARTED:-0}" = 1 ]; then rollback_images; fi
+  wait_healthy && log "Healthy again after undo" || log "WARNING: still unhealthy after undo"
+}
+
 deploy() {
   SHA=$1
   START_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   log "Deploying $SHA to $SITE"
   preflight
   sync_release "$SHA"
-  tag_previous
-  build_images
-  backup_db
-  sync_schema
-  start_services
+  local targets=()
+  # shellcheck disable=SC2206 # the service list is meant to split
+  has backend && targets+=($BACKEND)
+  has "$WEB" && targets+=("$WEB")
+  tag_previous "${targets[@]}"
+  build_images "${targets[@]}"
+  if has backend; then
+    backup_db
+    sync_schema
+    log "Recreating: $BACKEND"
+    # --no-deps: postgres, redis and coturn are never recreated by a deploy.
+    dc up -d --no-deps --no-build $BACKEND
+    BACKEND_STARTED=1
+  fi
+  if has "$WEB"; then
+    log "Recreating: $WEB"
+    dc up -d --no-deps --no-build "$WEB"
+    WEB_STARTED=1
+    if ! wait_web; then
+      log "$WEB did not come up on the new build — undoing"
+      undo_deploy
+      die "deploy of $SHA rolled back ($WEB unhealthy; database untouched${BACKUP:+, backup at $BACKUP})"
+    fi
+  fi
+  if [ "$CADDY_CHANGED" = 1 ]; then
+    recreate_caddy
+    CADDY_SWITCHED=1
+  fi
   if ! wait_healthy; then
-    log "Health check failed — rolling back to :previous images"
+    log "Health check failed — undoing"
     dc ps
-    rollback_images
-    die "deploy of $SHA rolled back (database untouched, backup at $BACKUP)"
+    undo_deploy
+    die "deploy of $SHA rolled back (database untouched${BACKUP:+, backup at $BACKUP})"
   fi
   if ! post_checks; then
-    rollback_images
-    die "post-deploy checks failed; rolled back (database untouched, backup at $BACKUP)"
+    undo_deploy
+    die "post-deploy checks failed; rolled back (database untouched${BACKUP:+, backup at $BACKUP})"
   fi
   cleanup
   log "DEPLOY OK $SHA"
 }
 
 rollback_images() {
-  for s in $SERVICES; do
+  for s in $BACKEND; do
     local img=${PROJECT}-${s}
     docker image inspect "$img:previous" >/dev/null 2>&1 || die "no :previous image for $s"
     docker tag "$img:previous" "$img:latest"
   done
-  dc up -d --no-deps --no-build --force-recreate $SERVICES
-  wait_healthy && log "Rolled back to previous images" || log "WARNING: still unhealthy after rollback"
+  dc up -d --no-deps --no-build --force-recreate $BACKEND
+  log "Backend services back on :previous images"
+}
+
+rollback_web() {
+  local img=${PROJECT}-${WEB}
+  if ! docker image inspect "$img:previous" >/dev/null 2>&1; then
+    # First web deploy: nothing older to go back to. Undoing the Caddyfile
+    # (above) already put the site back on the static bundle.
+    log "No :previous $WEB image (first web deploy); leaving it"
+    return 0
+  fi
+  docker tag "$img:previous" "$img:latest"
+  dc up -d --no-deps --no-build --force-recreate "$WEB"
+  log "$WEB back on its :previous image"
 }
 
 rollback() {
   exec 9>"$ROOT/deploy.lock"; flock -n 9 || die "another deploy is running"
   db_env
-  log "Rolling back $(cat "$ROOT/current-sha" 2>/dev/null || echo '?') to the previous images"
-  log "Note: app files and Caddyfile stay at the current release; only service images change"
-  rollback_images
+  COMPONENTS=" $(cat "$ROOT/current-components" 2>/dev/null || echo backend) "
+  log "Rolling back $(cat "$ROOT/current-sha" 2>/dev/null || echo '?') ($COMPONENTS) to the previous images"
+  log "Note: app files and Caddyfile stay at the current release; only images change"
+  has backend && rollback_images
+  has "$WEB" && rollback_web
+  wait_healthy && log "Rolled back" || log "WARNING: still unhealthy after rollback"
 }
 
 status() {
@@ -285,8 +383,10 @@ status() {
   # connectivity test; hence no dependence on app/docker-compose.prod.yml.
   db_env
   echo "current sha:  $(cat "$ROOT/current-sha" 2>/dev/null || echo 'none (nothing deployed through this pipeline yet)')"
+  echo "components:   $(cat "$ROOT/current-components" 2>/dev/null || echo 'backend')"
   echo "database:     $(db_fingerprint)"
   echo "online hosts: $(presence_count)"
+  echo "web build:    $(web_sha | grep . || echo 'no web container')"
   echo "last backup:  $(ls -1t "$ROOT"/backups/*.dump 2>/dev/null | head -1 || echo none)"
   echo "images:"
   docker images --format '  {{.Repository}}:{{.Tag}}  {{.CreatedSince}}' | grep "${PROJECT}-" | sort

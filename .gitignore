@@ -67,3 +67,6 @@ tmp/
 
 # Local Claude Code tooling (launch configs, permissions)
 .claude/
+
+# Assembled web app release (scripts/build-web-release.sh)
+web-release/
