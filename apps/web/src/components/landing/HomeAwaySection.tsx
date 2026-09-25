@@ -83,8 +83,10 @@ const HomeAwaySection: React.FC = () => (
       }
       .home-away-actions {
         display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
         align-items: center;
-        gap: 16px;
+        gap: 12px 16px;
       }
       .home-away-btn-primary {
         display: inline-flex;

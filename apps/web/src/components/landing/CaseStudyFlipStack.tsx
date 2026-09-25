@@ -81,7 +81,7 @@ function FlipCard({
 
   return (
     <motion.article
-      className="absolute inset-x-0 top-0 aspect-[3/4] will-change-transform sm:aspect-[1.76/1]"
+      className="absolute inset-x-0 top-0 aspect-[2/3] will-change-transform md:aspect-[1.76/1]"
       style={{
         y: exitY,
         rotateX,
@@ -92,7 +92,7 @@ function FlipCard({
       }}
     >
       <motion.div
-        className="grid h-full overflow-hidden rounded-[clamp(18px,2vw,30px)] border border-white/[0.14] shadow-[0_16px_50px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-md sm:grid-cols-[1.15fr_0.85fr]"
+        className="grid h-full overflow-hidden rounded-[clamp(18px,2vw,30px)] border border-white/[0.14] shadow-[0_16px_50px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-md grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[1.15fr_0.85fr] md:grid-rows-[minmax(0,1fr)]"
         style={{
           // The story's colour as a see-through tint: 40% top left, 12% bottom right.
           backgroundImage: `linear-gradient(145deg, ${item.background}66 0%, ${item.background}1f 100%)`,
@@ -103,7 +103,7 @@ function FlipCard({
         }}
       >
         <motion.div
-          className="flex min-w-0 flex-col p-[clamp(22px,3vw,48px)] md:pr-[clamp(22px,3vw,48px)]"
+          className="flex min-w-0 flex-col p-[clamp(24px,2.8vw,44px)]"
           style={{ opacity: contentOpacity }}
         >
           <span className="font-heading text-[clamp(24px,2.5vw,36px)] font-medium leading-none tracking-[-0.04em]">
@@ -114,15 +114,17 @@ function FlipCard({
             <p className="mb-[clamp(10px,1.5vw,22px)] text-[10px] font-semibold uppercase tracking-[0.16em] opacity-70 sm:text-xs">
               {item.eyebrow}
             </p>
-            <h3 className="max-w-[18ch] text-balance text-[clamp(24px,3vw,44px)] font-semibold leading-[1] tracking-[-0.045em]">
+            {/* Sized for Poppins (wider than the Mona Sans these were set in),
+                so title, text and link fit the card with room below the link. */}
+            <h3 className="max-w-[20ch] text-balance text-[clamp(21px,2.4vw,34px)] font-semibold leading-[1.1] tracking-[-0.03em]">
               {item.title}
             </h3>
-            <p className="mt-[clamp(12px,1.6vw,22px)] max-w-[42rem] text-[clamp(13px,1.1vw,16px)] leading-[1.5] opacity-80">
+            <p className="mt-[clamp(10px,1.3vw,18px)] max-w-[42rem] text-[clamp(13px,1vw,15px)] leading-[1.55] opacity-80">
               {item.description}
             </p>
             <SiteLink
               href={item.href}
-              className="mt-[clamp(14px,1.6vw,24px)] inline-flex items-center gap-2 text-sm font-semibold underline-offset-4 hover:underline"
+              className="mt-[clamp(12px,1.4vw,20px)] inline-flex items-center gap-2 text-sm font-semibold underline-offset-4 hover:underline"
               style={{ color: item.foreground }}
             >
               Read the story <span aria-hidden="true">→</span>
@@ -131,14 +133,14 @@ function FlipCard({
         </motion.div>
 
         <motion.div
-          className="relative m-[clamp(10px,1.2vw,18px)] min-h-[150px] overflow-hidden rounded-[clamp(12px,1.4vw,22px)] sm:ml-0"
+          className="relative m-[clamp(10px,1.2vw,18px)] min-h-0 overflow-hidden rounded-[clamp(12px,1.4vw,22px)] md:ml-0"
           style={{ opacity: contentOpacity }}
         >
           <Image
             src={item.image}
             alt={item.imageAlt}
             fill
-            sizes="(min-width: 640px) 380px, 90vw"
+            sizes="(min-width: 768px) 380px, 420px"
             className="object-cover"
             draggable={false}
           />
@@ -185,7 +187,7 @@ export default function CaseStudyFlipStack({ items, eyebrow, heading, intro }: C
           start close under the heading instead of centred a screen down. */}
       <div ref={stackRef} className="relative" style={{ height: `calc(100vh + ${Math.round((transitions * 75) / (1 - HOLD))}vh)` }}>
         <div className="sticky top-[var(--site-nav-h,88px)] flex h-[calc(100vh_-_var(--site-nav-h,88px))] flex-col justify-start overflow-hidden px-[clamp(14px,4vw,64px)] pb-8 pt-[clamp(28px,4vw,48px)]">
-          <div className="relative mx-auto aspect-[3/4] w-full max-w-[860px] [perspective:800px] sm:aspect-[1.76/1]">
+          <div className="relative mx-auto aspect-[2/3] w-full max-w-[420px] [perspective:800px] md:aspect-[1.76/1] md:max-w-[860px]">
             {[...items].reverse().map((item, reverseIndex) => {
               const index = items.length - reverseIndex - 1
               return (

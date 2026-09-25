@@ -333,21 +333,8 @@
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
-.site-dark .doc-navgroup-label,
 .site-dark .doc-empty {
   color: var(--ld-faint);
-}
-.site-dark .doc-navlink {
-  color: var(--ld-muted);
-  transition: background 0.3s, color 0.3s;
-}
-.site-dark .doc-navlink:hover {
-  background: var(--ld-glass-hover);
-  color: var(--ld-text);
-}
-.site-dark .doc-navlink.is-active {
-  color: #ff8a00;
-  background: rgba(255, 138, 0, 0.12);
 }
 .site-dark .doc-group-head {
   border-bottom-color: var(--ld-line);
@@ -525,5 +512,8 @@
     mask-image: linear-gradient(to bottom, #000 45%, transparent);
     -webkit-backdrop-filter: blur(5px);
     backdrop-filter: blur(5px);
+    transition: opacity 0.35s ease;
   }
+  /* Hidden with the navbar while scrolling down (Navbar sets the attribute). */
+  :root[data-nav-hidden] .site-topblur { opacity: 0; }
 }

@@ -26,15 +26,44 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
   const signedIn = useSignedIn()
   const pathname = usePathname()
   const [scrolled, setScrolled] = useState(false)
+  const [scrollHidden, setScrollHidden] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const glass = variant === 'glass'
   const links = glass ? [{ label: 'Home', path: '/' }, ...NAV_LINKS] : NAV_LINKS
+  // Glass (the website): out of the way while reading down the page, back
+  // on the first scroll up; always shown near the top and with the menu open.
+  const hidden = glass && scrollHidden && !menuOpen
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 10)
+    let lastY = window.scrollY
+    let frame = 0
+    const update = () => {
+      frame = 0
+      const y = window.scrollY
+      setScrolled(y > 10)
+      const delta = y - lastY
+      if (y < 80) setScrollHidden(false)
+      else if (delta > 6) setScrollHidden(true)
+      else if (delta < -6) setScrollHidden(false)
+      // Small moves (trackpad jitter, overscroll bounce) add up until they count.
+      if (y < 80 || Math.abs(delta) > 6) lastY = y
+    }
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update)
+    }
     window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      cancelAnimationFrame(frame)
+    }
   }, [])
+
+  // The top blur band (SiteFrame) goes away with the bar.
+  useEffect(() => {
+    if (!glass) return
+    document.documentElement.toggleAttribute('data-nav-hidden', hidden)
+    return () => document.documentElement.removeAttribute('data-nav-hidden')
+  }, [glass, hidden])
 
   useEffect(() => {
     document.body.style.overflow = menuOpen ? 'hidden' : ''
@@ -54,7 +83,9 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
       <header
         // Glass: its look lives in CSS (.navbar-glass) so media queries can
         // float it on desktop; the default bar keeps its inline styles.
-        className={glass ? `navbar-glass${scrolled && !menuOpen ? ' is-scrolled' : ''}` : undefined}
+        className={glass
+          ? `navbar-glass${scrolled && !menuOpen ? ' is-scrolled' : ''}${menuOpen ? ' is-menu-open' : ''}${hidden ? ' is-hidden' : ''}`
+          : undefined}
         style={glass ? { position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100 } : {
           position: 'sticky',
           top: 0,
@@ -271,8 +302,13 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
         /* ── Glass variant (the public website over the video backdrop) ── */
         .navbar-glass {
           box-sizing: border-box;
-          border-bottom: 1px solid transparent;
-          transition: background 0.3s ease, border-color 0.3s ease;
+          transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        /* Slid up out of view, shadow included; keyboard focus brings it back. */
+        .navbar-glass.is-hidden { transform: translateY(calc(-100% - 48px)); }
+        .navbar-glass.is-hidden:focus-within { transform: none; }
+        @media (prefers-reduced-motion: reduce) {
+          .navbar-glass { transition: none; }
         }
         .navbar-inner-glass {
           max-width: 80rem;
@@ -456,31 +492,37 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
           .navbar-hamburger { display: flex; }
         }
 
-        /* Glass, desktop and tablet: the bar floats as an inset glass capsule. */
-        @media (min-width: 769px) {
-          .navbar-glass { padding: 14px 24px 0; }
-          .navbar-glass .navbar-inner-glass {
-            max-width: 1200px;
-            padding: 8px 8px 8px 20px;
-            border-radius: 9999px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(14, 14, 16, 0.42);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
-            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-            transition: background 0.3s ease, box-shadow 0.3s ease;
-          }
-          .navbar-glass.is-scrolled .navbar-inner-glass {
-            background: rgba(10, 10, 12, 0.72);
-            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
-          }
-          /* The capsule is the glass now; the link group drops its own pill. */
-          .navbar-glass .navbar-pill {
-            border-color: transparent;
-            background: transparent;
-            backdrop-filter: none;
-            -webkit-backdrop-filter: none;
-          }
+        /* Glass: the bar floats as an inset glass capsule at every width. */
+        .navbar-glass { padding: 14px 24px 0; }
+        .navbar-glass .navbar-inner-glass {
+          max-width: 1200px;
+          padding: 8px 8px 8px 20px;
+          border-radius: 9999px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          background: rgba(14, 14, 16, 0.42);
+          backdrop-filter: blur(14px);
+          -webkit-backdrop-filter: blur(14px);
+          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+          transition: background 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+        }
+        .navbar-glass.is-scrolled .navbar-inner-glass {
+          background: rgba(10, 10, 12, 0.72);
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+        }
+        /* Over the full-screen phone menu only the logo and close button show. */
+        .navbar-glass.is-menu-open .navbar-inner-glass {
+          background: transparent;
+          border-color: transparent;
+          box-shadow: none;
+          backdrop-filter: none;
+          -webkit-backdrop-filter: none;
+        }
+        /* The capsule is the glass now; the link group drops its own pill. */
+        .navbar-glass .navbar-pill {
+          border-color: transparent;
+          background: transparent;
+          backdrop-filter: none;
+          -webkit-backdrop-filter: none;
         }
         /* Glass, below the width where the links fit: logo left, actions and
            the menu button right (the grid would otherwise centre the actions). */
@@ -489,15 +531,11 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
           .navbar-inner-glass .navbar-actions { margin-left: auto; }
           .navbar-inner-glass .navbar-hamburger { display: flex; margin-left: 12px; }
         }
-        /* Glass, phones: full-width bar, frosted once scrolled. */
+        /* Glass, phones: a smaller capsule closer to the edges. */
         @media (max-width: 768px) {
-          .navbar-inner-glass .navbar-hamburger { margin-left: auto; }
-          .navbar-glass.is-scrolled {
-            background: rgba(0, 0, 0, 0.55);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
-            border-bottom-color: rgba(255, 255, 255, 0.08);
-          }
+          .navbar-glass { padding: 10px 12px 0; }
+          .navbar-glass .navbar-inner-glass { padding: 6px 10px 6px 14px; }
+          .navbar-inner-glass .navbar-hamburger { margin-left: auto; padding: 8px 6px; }
         }
       `}</style>
     </>

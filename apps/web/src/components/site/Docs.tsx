@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import SiteContent from './SiteContent'
+import HookSidebar from './HookSidebar'
 
 // ── Content model ──────────────────────────────────────────────────────────────
 type Block =
@@ -247,6 +248,10 @@ const Docs: React.FC = () => {
   const [query, setQuery] = useState('')
   const [activeId, setActiveId] = useState(ALL[0]?.id)
   const refs = useRef<Record<string, HTMLElement | null>>({})
+  // While a sidebar click scrolls to its topic, the scroll position doesn't
+  // pick the active topic (the hook would sweep through every one on the way,
+  // and a topic near the page end can't reach the top).
+  const clickScroll = useRef<number | null>(null)
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -258,6 +263,7 @@ const Docs: React.FC = () => {
 
   useEffect(() => {
     const onScroll = () => {
+      if (clickScroll.current !== null) return
       let current = ALL[0]?.id
       for (const a of ALL) {
         const el = refs.current[a.id]
@@ -270,7 +276,36 @@ const Docs: React.FC = () => {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
-  const goTo = (id: string) => refs.current[id]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // The sidebar scrolls on its own when it is taller than the screen: keep
+  // the active topic inside its visible part.
+  const sidebarRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const sidebar = sidebarRef.current
+    const row = sidebar?.querySelector<HTMLElement>('.hs-item.is-active')
+    if (!sidebar || !row || sidebar.scrollHeight <= sidebar.clientHeight) return
+    const box = sidebar.getBoundingClientRect()
+    const r = row.getBoundingClientRect()
+    if (r.top < box.top + 8) sidebar.scrollTop -= box.top + 8 - r.top
+    else if (r.bottom > box.bottom - 8) sidebar.scrollTop += r.bottom - (box.bottom - 8)
+  }, [activeId])
+
+  const goTo = (id: string) => {
+    const el = refs.current[id]
+    if (!el) return
+    setActiveId(id)
+    history.replaceState(null, '', `#${id}`)
+    if (clickScroll.current !== null) clearTimeout(clickScroll.current)
+    const release = () => {
+      if (clickScroll.current !== null) clearTimeout(clickScroll.current)
+      clickScroll.current = null
+      window.removeEventListener('scrollend', release)
+    }
+    // scrollend where supported; the timer covers the rest and no-op scrolls.
+    clickScroll.current = window.setTimeout(release, 1200)
+    window.addEventListener('scrollend', release, { once: true })
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    el.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' })
+  }
 
   return (
     <SiteContent>
@@ -292,24 +327,23 @@ const Docs: React.FC = () => {
 
         <main className="doc-main">
           {/* Sidebar */}
-          <aside className="doc-sidebar">
-            <nav>
+          <aside ref={sidebarRef} className="doc-sidebar">
+            {/* One Hook Sidebar per group; only the group holding the topic
+                in view shows the hook. */}
+            <nav className="doc-toc" aria-label="Documentation topics">
               {filtered.map(group => (
-                <div key={group.label} className="doc-navgroup">
-                  <div className="doc-navgroup-label">
-                    <group.Icon size={15} strokeWidth={1.8} />
-                    {group.label}
-                  </div>
-                  {group.articles.map(a => (
-                    <button
-                      key={a.id}
-                      className={`doc-navlink${activeId === a.id ? ' is-active' : ''}`}
-                      onClick={() => goTo(a.id)}
-                    >
-                      {a.title}
-                    </button>
-                  ))}
-                </div>
+                <HookSidebar
+                  key={group.label}
+                  landmark={false}
+                  label={group.label}
+                  icon={<group.Icon size={15} strokeWidth={1.8} aria-hidden="true" />}
+                  items={group.articles.map(a => ({ label: a.title, href: `#${a.id}` }))}
+                  value={group.articles.findIndex(a => a.id === activeId)}
+                  onChange={(index, event) => {
+                    event.preventDefault()
+                    goTo(group.articles[index].id)
+                  }}
+                />
               ))}
               {filtered.length === 0 && <p className="doc-empty">No matching topics.</p>}
             </nav>
@@ -326,6 +360,7 @@ const Docs: React.FC = () => {
                 {group.articles.map(a => (
                   <section
                     key={a.id}
+                    id={a.id}
                     ref={el => { refs.current[a.id] = el }}
                     style={{ scrollMarginTop: `${NAV_OFFSET}px` }}
                     className="doc-article"
@@ -409,46 +444,20 @@ const Docs: React.FC = () => {
             box-sizing: border-box;
             flex: 1;
           }
+          /* Taller than the screen on laptops: it scrolls by itself, without
+             a visible scrollbar. */
           .doc-sidebar {
             position: sticky;
             top: 88px;
             width: 280px;
             flex-shrink: 0;
+            max-height: calc(100vh - 112px);
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            scrollbar-width: none;
           }
-          .doc-navgroup { margin-bottom: 22px; }
-          .doc-navgroup-label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-weight: 600;
-            font-size: 13px;
-            letter-spacing: 0.3px;
-            text-transform: uppercase;
-            color: rgba(26, 29, 33, 0.45);
-            margin-bottom: 8px;
-          }
-          .doc-navlink {
-            display: block;
-            width: 100%;
-            text-align: left;
-            padding: 7px 12px;
-            border: none;
-            background: none;
-            border-radius: 6px;
-            font-family: inherit;
-            font-weight: 500;
-            font-size: 14px;
-            line-height: 20px;
-            color: rgba(26, 29, 33, 0.7);
-            cursor: pointer;
-            transition: background 0.15s, color 0.15s;
-          }
-          .doc-navlink:hover { background: #F3F4F6; color: #1A1D21; }
-          .doc-navlink.is-active {
-            color: #FF8A00;
-            background: rgba(255, 138, 0, 0.08);
-            font-weight: 600;
-          }
+          .doc-sidebar::-webkit-scrollbar { display: none; }
+          .doc-toc { display: flex; flex-direction: column; gap: 20px; padding-bottom: 8px; }
           .doc-empty { font-size: 14px; color: rgba(26,29,33,0.5); }
 
           .doc-content { flex: 1; min-width: 0; }
@@ -542,6 +551,7 @@ const Docs: React.FC = () => {
               position: static;
               width: 100%;
               max-height: none;
+              overflow: visible;
               border-bottom: 1px solid rgba(26,29,33,0.1);
               padding-bottom: 16px;
             }

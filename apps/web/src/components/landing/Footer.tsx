@@ -56,6 +56,13 @@ const Footer: React.FC = () => (
             <span>Remote365</span>
           </SiteLink>
           <p className="ft-copy">© {new Date().getFullYear()} TechVision365 Inc. All rights reserved.</p>
+          {/* Required by the component licences (Rare UI: visible link to
+              rareui.com; Skiper UI free version: attribution). */}
+          <p className="ft-credits">
+            Some interface components by{' '}
+            <a href="https://rareui.com" target="_blank" rel="noopener">Rare UI</a> and{' '}
+            <a href="https://skiper-ui.com" target="_blank" rel="noopener">Skiper UI</a>.
+          </p>
         </div>
 
         <nav className="ft-cols" aria-label="Footer">
@@ -125,6 +132,14 @@ const Footer: React.FC = () => (
         line-height: 1.5;
         color: rgba(255, 255, 255, 0.55);
       }
+      .ft-credits {
+        margin: -6px 0 0;
+        font-size: 12px;
+        line-height: 1.5;
+        color: rgba(255, 255, 255, 0.4);
+      }
+      .ft-credits a { color: rgba(255, 255, 255, 0.6); text-decoration: none; }
+      .ft-credits a:hover { color: #fff; text-decoration: underline; }
       .ft-cols {
         display: grid;
         grid-template-columns: repeat(4, auto);

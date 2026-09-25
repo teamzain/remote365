@@ -15,6 +15,15 @@ const RETIRED_PAGES = [
   ['/customers', '/'],
 ]
 
+// Local previews of a production build (`next build && next start`) have no
+// backend: on the servers Caddy routes /api to the API services before a
+// request ever reaches Next, and builds use the same origin for the API. Set
+// API_PROXY_ORIGIN (e.g. https://pp.remote365.ai) when building locally to
+// forward /api there instead, so sign-in, Google/Microsoft sign-in and the
+// dashboard work on localhost. CI never sets it, so deployed builds have no
+// such rewrite.
+const API_PROXY_ORIGIN = process.env.API_PROXY_ORIGIN?.replace(/\/+$/, '')
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
@@ -24,6 +33,9 @@ const nextConfig = {
   poweredByHeader: false,
   // Caddy compresses responses; don't do the work twice on the server.
   compress: false,
+  async rewrites() {
+    return API_PROXY_ORIGIN ? [{ source: '/api/:path*', destination: `${API_PROXY_ORIGIN}/api/:path*` }] : []
+  },
   async redirects() {
     return RETIRED_PAGES.flatMap(([source, destination]) => [
       { source, destination, statusCode: 301 },
