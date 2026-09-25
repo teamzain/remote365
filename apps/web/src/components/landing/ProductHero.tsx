@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link as RouterLink } from 'react-router-dom'
-import CompanyMarquee from './CompanyMarquee'
+import CapabilityMarquee from './CapabilityMarquee'
 
 interface ProductHeroProps {
   heading?: string
@@ -37,7 +37,7 @@ const ProductHero: React.FC<ProductHeroProps> = ({
       </div>
 
       {/* Trusted-companies marquee (same as homepage) */}
-      <CompanyMarquee />
+      <CapabilityMarquee />
 
       <style>{`
         .ph-section {

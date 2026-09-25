@@ -3,13 +3,8 @@ import { useAuthStore } from './store/authStore'
 import { useChatStore } from './store/chatStore'
 import Landing from './pages/Landing'
 import Downloads from './pages/Downloads'
-import FeaturesPage from './pages/landing/FeaturesPage'
-import SolutionsPage from './pages/landing/SolutionsPage'
 import PricingPage from './pages/landing/PricingPage'
-import ResourcesPage from './pages/landing/ResourcesPage'
-import EnterprisePage from './pages/landing/EnterprisePage'
 import ProductPage from './pages/landing/ProductPage'
-import CustomersPage from './pages/landing/CustomersPage'
 import WebDashboardPage from './pages/dashboard/WebDashboardPage'
 import SessionViewer from './pages/session/SessionViewer'
 import AuthScreen from './pages/auth/AuthScreen'
@@ -125,12 +120,13 @@ function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/downloads" element={<Downloads />} />
-      <Route path="/features" element={<FeaturesPage />} />
-      <Route path="/solutions" element={<SolutionsPage />} />
+      {/* Retired pages. Temporary client redirects until the server sends 301s. */}
+      <Route path="/features" element={<Navigate to="/product" replace />} />
+      <Route path="/solutions" element={<Navigate to="/product" replace />} />
       <Route path="/pricing" element={<PricingPage />} />
-      <Route path="/resources" element={<ResourcesPage />} />
-      <Route path="/enterprise" element={<EnterprisePage />} />
-      <Route path="/customers" element={<CustomersPage />} />
+      <Route path="/resources" element={<Navigate to="/docs" replace />} />
+      <Route path="/enterprise" element={<Navigate to="/pricing" replace />} />
+      <Route path="/customers" element={<Navigate to="/" replace />} />
       <Route path="/product" element={<ProductPage />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/terms" element={<TermsOfService />} />

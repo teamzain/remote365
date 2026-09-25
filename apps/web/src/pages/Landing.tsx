@@ -2,7 +2,7 @@ import React from 'react'
 import { Box } from '@mui/material'
 import SiteLayout from '../components/landing/SiteLayout'
 import HeroVideo from '../components/landing/HeroVideo'
-import CompanyMarquee from '../components/landing/CompanyMarquee'
+import CapabilityMarquee from '../components/landing/CapabilityMarquee'
 import DeviceOrbitSection from '../components/landing/DeviceOrbitSection'
 import EasyAccessSection from '../components/landing/EasyAccessSection'
 import AccessAnywhereSection from '../components/landing/AccessAnywhereSection'
@@ -10,7 +10,6 @@ import CloudOrbitSection from '../components/landing/CloudOrbitSection'
 import ShowcaseImage from '../components/landing/ShowcaseImage'
 import HomeAwaySection from '../components/landing/HomeAwaySection'
 import SimpleReliableSection from '../components/landing/SimpleReliableSection'
-import StatsCounterSection from '../components/landing/StatsCounterSection'
 import GetStartedCta from '../components/landing/GetStartedCta'
 import { ScrollReveal } from '../components/landing/ScrollReveal'
 
@@ -22,7 +21,7 @@ const Landing: React.FC = () => {
 
         <ScrollReveal delay={0.1}>
           <Box sx={{ pt: { xs: 6, md: 9 } }}>
-            <CompanyMarquee />
+            <CapabilityMarquee />
           </Box>
         </ScrollReveal>
 
@@ -66,13 +65,9 @@ const Landing: React.FC = () => {
         <SimpleReliableSection />
 
         <ScrollReveal delay={0.15}>
-          <StatsCounterSection />
-        </ScrollReveal>
-
-        <ScrollReveal delay={0.15}>
           <AccessAnywhereSection
             title="Security you can trust"
-            subtitle="Every session is end-to-end encrypted. Role-based access control, forced two-factor authentication, and full audit logs keep your team and every device protected."
+            subtitle="Every remote session is end-to-end encrypted. Role-based access control, forced two-factor authentication, and full audit logs keep your team and every device protected."
             linkLabel="Learn more"
             linkTo="/product"
             image="/c460f6a065169b1b08853ed8eb897298d1e73c19.png"

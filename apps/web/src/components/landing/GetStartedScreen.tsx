@@ -21,8 +21,8 @@ import { useAuthStore } from '../../store/authStore'
 // Points and copy are the site's existing claims (hero + feature cards).
 const POINTS = [
   { Icon: Zap, text: 'Install Remote365, register your device, and start accepting remote connections — no IT department needed.' },
-  { Icon: MonitorSmartphone, text: 'Runs on Windows, macOS, Linux, iOS, and Android.' },
-  { Icon: ShieldCheck, text: 'End-to-end encrypted sessions, role-based access, and forced two-factor authentication.' },
+  { Icon: MonitorSmartphone, text: 'Apps for Windows and Android, plus access from any modern browser. macOS and iOS are coming soon.' },
+  { Icon: ShieldCheck, text: 'End-to-end encrypted remote sessions, role-based access, and forced two-factor authentication.' },
 ]
 
 interface Action {

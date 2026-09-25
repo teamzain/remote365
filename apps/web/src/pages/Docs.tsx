@@ -34,7 +34,7 @@ const GROUPS: Group[] = [
         id: 'overview',
         title: 'What is Remote365?',
         blocks: [
-          { p: 'Remote365 is a secure remote access and support platform. Connect to any computer from anywhere, provide live support, run video meetings, and chat with your team — all from one app, protected with end-to-end encryption.' },
+          { p: 'Remote365 is a secure remote access and support platform. Connect to any computer from anywhere, provide live support, run video meetings, and chat with your team — all from one app, with remote sessions protected by end-to-end encryption.' },
           { p: 'You can connect two ways: instantly with a one-time session code for on-demand support, or permanently to your own registered devices using their unique 9-digit ID and password.' },
         ],
       },
@@ -44,7 +44,7 @@ const GROUPS: Group[] = [
         blocks: [
           { p: 'Download the desktop app for your platform, then sign in or create a free account. Your workspace starts on a 15-day trial with full features.' },
           { steps: [
-            'Go to the Downloads page and grab the installer for Windows, macOS, or Linux.',
+            'Go to the Downloads page and grab the installer for Windows (or the Android app for phones and tablets).',
             'Run the installer and launch Remote365.',
             'Sign in with your email, or choose “Sign Up” to create an account.',
             'Your device is registered automatically and gets its own ID and password.',

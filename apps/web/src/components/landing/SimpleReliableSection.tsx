@@ -17,15 +17,15 @@ const CARDS: ScrollSplitCardItem[] = [
     icon: <Zap {...ICON} />,
   },
   {
-    title: 'Any device, any OS',
-    description: 'Remote365 runs on Windows, macOS, Linux, iOS, and Android. Access and support devices across every platform.',
+    title: 'Desktop, mobile and web',
+    description: 'Apps for Windows and Android, and access from any modern browser. macOS and iOS apps are coming soon.',
     bgColor: '#FF8A00',
     textColor: '#111315',
     icon: <MonitorSmartphone {...ICON} />,
   },
   {
     title: 'Secure by design',
-    description: 'End-to-end encrypted sessions, role-based access, and forced two-factor authentication keep every device safe.',
+    description: 'End-to-end encrypted remote sessions, role-based access, and forced two-factor authentication keep every device safe.',
     bgColor: '#141416',
     textColor: '#FFFFFF',
     icon: <ShieldCheck {...ICON} />,

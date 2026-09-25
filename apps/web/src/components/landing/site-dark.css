@@ -160,24 +160,6 @@
   filter: invert(1) hue-rotate(180deg) saturate(1.2);
 }
 
-/* ── Stats band ─────────────────────────────────────────────────── */
-.site-dark .stats-section {
-  background: var(--ld-glass);
-  border-top: 1px solid var(--ld-line);
-  border-bottom: 1px solid var(--ld-line);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-.site-dark .stat-value {
-  background-image: var(--ld-accent);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-.site-dark .stat-label {
-  color: var(--ld-muted);
-}
-
 /* ── Closing CTA card ───────────────────────────────────────────── */
 .site-dark .cta-card {
   background: rgba(255, 255, 255, 0.04);

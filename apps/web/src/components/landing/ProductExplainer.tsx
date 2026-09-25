@@ -231,7 +231,7 @@ const ProductExplainer: React.FC = () => {
           <p className="px-sub">
             Remote365 is a secure remote access platform that lets you connect to any device from
             anywhere. Start a session with a code, access devices by ID, run meetings, and chat with
-            your team — all protected with end-to-end encryption.
+            your team — with remote sessions protected by end-to-end encryption.
           </p>
         </div>
 
