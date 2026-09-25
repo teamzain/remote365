@@ -139,6 +139,7 @@ const PricingPlans: React.FC<{ plans: ApiPlan[] }> = ({ plans }) => {
           gap: 11px;
         }
         .pp-price {
+          font-family: var(--font-heading);
           font-weight: 500;
           font-size: 36px;
           line-height: 44px;

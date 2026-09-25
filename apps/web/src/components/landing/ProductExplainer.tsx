@@ -20,7 +20,7 @@ const STEPS = [
   },
 ]
 
-const FONT = "'Mona Sans', sans-serif"
+const FONT = "'Lato', sans-serif"
 
 // ── Scene 1: Start a remote session ────────────────────────────────────────────
 const SessionScene: React.FC = () => (

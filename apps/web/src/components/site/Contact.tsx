@@ -116,7 +116,7 @@ const Contact: React.FC = () => {
 
         <style>{`
           .ct-page {
-            font-family: 'Mona Sans', system-ui, -apple-system, sans-serif;
+            font-family: var(--font-body);
           }
           .ct-main {
             flex: 1;

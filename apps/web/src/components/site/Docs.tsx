@@ -341,7 +341,7 @@ const Docs: React.FC = () => {
 
         <style>{`
           .doc-page {
-            font-family: 'Mona Sans', system-ui, -apple-system, sans-serif;
+            font-family: var(--font-body);
           }
 
           .doc-hero {

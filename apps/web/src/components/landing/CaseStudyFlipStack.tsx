@@ -21,7 +21,10 @@ import SiteLink from '@/components/site/SiteLink'
 //    (the page already has its H1, so card titles are H3)
 //  - the last card stays put, so the section never ends on an empty stage
 //  - Remote365's own images through next/image, and a link to each story
-//  - transparent background over the site's video backdrop
+//  - transparent background over the site's video backdrop, and glass cards
+//    tinted with each story's colour instead of solid ones; since the cards
+//    are see-through, a card's text and image fade in only as it comes to
+//    the front (the waiting cards show just their edges)
 //  - no cn()/tailwind-merge dependency; opacity-82 (not a Tailwind step) → 80
 
 export interface CaseStudyFlipItem {
@@ -73,6 +76,8 @@ function FlipCard({
   const opacity = useTransform(progress, exitRange, reduceMotion && !isLast ? [1, 0] : [1, 1])
   const entryScale = useTransform(progress, [entryStart, entryEnd], index === 0 ? [1, 1] : [restingScale, 1])
   const entryY = useTransform(progress, [entryStart, entryEnd], index === 0 ? [0, 0] : [restingOffset, 0])
+  // Hidden while the card waits behind a see-through one.
+  const contentOpacity = useTransform(progress, [entryStart, entryEnd], index === 0 ? [1, 1] : [0, 1])
 
   return (
     <motion.article
@@ -83,22 +88,25 @@ function FlipCard({
         opacity,
         zIndex: total - index,
         transformOrigin: '50% 50%',
-        transformStyle: 'preserve-3d',
         backfaceVisibility: 'hidden',
       }}
     >
       <motion.div
-        className="grid h-full overflow-hidden rounded-[clamp(18px,2vw,30px)] shadow-[0_16px_50px_rgba(0,0,0,0.45)] sm:grid-cols-[1.15fr_0.85fr]"
+        className="grid h-full overflow-hidden rounded-[clamp(18px,2vw,30px)] border border-white/[0.14] shadow-[0_16px_50px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-md sm:grid-cols-[1.15fr_0.85fr]"
         style={{
-          backgroundColor: item.background,
+          // The story's colour as a see-through tint: 40% top left, 12% bottom right.
+          backgroundImage: `linear-gradient(145deg, ${item.background}66 0%, ${item.background}1f 100%)`,
           color: item.foreground,
           y: entryY,
           scale: entryScale,
           transformOrigin: '50% 100%',
         }}
       >
-        <div className="flex min-w-0 flex-col p-[clamp(22px,3vw,48px)] md:pr-[clamp(22px,3vw,48px)]">
-          <span className="text-[clamp(24px,2.5vw,36px)] font-medium leading-none tracking-[-0.06em]">
+        <motion.div
+          className="flex min-w-0 flex-col p-[clamp(22px,3vw,48px)] md:pr-[clamp(22px,3vw,48px)]"
+          style={{ opacity: contentOpacity }}
+        >
+          <span className="font-heading text-[clamp(24px,2.5vw,36px)] font-medium leading-none tracking-[-0.04em]">
             {String(index + 1).padStart(2, '0')}
           </span>
 
@@ -120,9 +128,12 @@ function FlipCard({
               Read the story <span aria-hidden="true">→</span>
             </SiteLink>
           </div>
-        </div>
+        </motion.div>
 
-        <div className="relative m-[clamp(10px,1.2vw,18px)] min-h-[150px] overflow-hidden rounded-[clamp(12px,1.4vw,22px)] sm:ml-0">
+        <motion.div
+          className="relative m-[clamp(10px,1.2vw,18px)] min-h-[150px] overflow-hidden rounded-[clamp(12px,1.4vw,22px)] sm:ml-0"
+          style={{ opacity: contentOpacity }}
+        >
           <Image
             src={item.image}
             alt={item.imageAlt}
@@ -132,7 +143,7 @@ function FlipCard({
             draggable={false}
           />
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-black/20 via-transparent to-white/10" />
-        </div>
+        </motion.div>
       </motion.div>
     </motion.article>
   )
@@ -169,9 +180,11 @@ export default function CaseStudyFlipStack({ items, eyebrow, heading, intro }: C
         {intro && <p className="cs-intro">{intro}</p>}
       </header>
 
-      {/* Scroll distance: ~75vh per fold, plus the hold on the last card. */}
+      {/* Scroll distance: ~75vh per fold, plus the hold on the last card. The
+          stage pins just below the navbar with the cards at its top, so they
+          start close under the heading instead of centred a screen down. */}
       <div ref={stackRef} className="relative" style={{ height: `calc(100vh + ${Math.round((transitions * 75) / (1 - HOLD))}vh)` }}>
-        <div className="sticky top-0 flex h-screen flex-col justify-center overflow-hidden px-[clamp(14px,4vw,64px)] pb-8 pt-[var(--site-nav-h,88px)]">
+        <div className="sticky top-[var(--site-nav-h,88px)] flex h-[calc(100vh_-_var(--site-nav-h,88px))] flex-col justify-start overflow-hidden px-[clamp(14px,4vw,64px)] pb-8 pt-[clamp(28px,4vw,48px)]">
           <div className="relative mx-auto aspect-[3/4] w-full max-w-[860px] [perspective:800px] sm:aspect-[1.76/1]">
             {[...items].reverse().map((item, reverseIndex) => {
               const index = items.length - reverseIndex - 1

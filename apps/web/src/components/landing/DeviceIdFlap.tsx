@@ -7,17 +7,29 @@ import SplitFlapBoard from './SplitFlapBoard'
 // "Every device gets its own ID": an airport-style board that flips between
 // example device IDs (the same ones as the orbit above) while on screen.
 const IDS = ['123 456 789', '987 654 321', '456 789 123', '789 123 456']
+// The first flip comes right after the board appears (once the section's
+// fade-in has mostly run), not a whole cycle later.
+const FIRST_FLIP_MS = 400
+const CYCLE_MS = 3200
 
 export default function DeviceIdFlap() {
   const ref = useRef<HTMLDivElement>(null)
-  const inView = useInView(ref, { amount: 0.6 })
+  const inView = useInView(ref, { amount: 0.5 })
   const reduceMotion = useReducedMotion() ?? false
   const [index, setIndex] = useState(0)
 
   useEffect(() => {
     if (!inView || reduceMotion) return
-    const id = setInterval(() => setIndex(i => (i + 1) % IDS.length), 3200)
-    return () => clearInterval(id)
+    const next = () => setIndex(i => (i + 1) % IDS.length)
+    let cycle: ReturnType<typeof setInterval> | undefined
+    const first = setTimeout(() => {
+      next()
+      cycle = setInterval(next, CYCLE_MS)
+    }, FIRST_FLIP_MS)
+    return () => {
+      clearTimeout(first)
+      clearInterval(cycle)
+    }
   }, [inView, reduceMotion])
 
   return (

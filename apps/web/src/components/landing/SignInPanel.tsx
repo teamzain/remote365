@@ -261,8 +261,11 @@ export default function SignInPanel() {
           grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
           min-height: 100%;
           color: #fff;
-          font-family: 'Mona Sans', system-ui, -apple-system, sans-serif;
+          font-family: var(--font-body);
         }
+        /* The panel is portalled outside .site-dark, so it sets its own heading font. */
+        .si-title,
+        .si-card-title { font-family: var(--font-heading); }
         .si-left {
           display: flex;
           align-items: center;

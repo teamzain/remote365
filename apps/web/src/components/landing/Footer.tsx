@@ -86,7 +86,7 @@ const Footer: React.FC = () => (
         backdrop-filter: blur(16px);
         -webkit-backdrop-filter: blur(16px);
         color: #fff;
-        font-family: 'Mona Sans', system-ui, -apple-system, sans-serif;
+        font-family: var(--font-body);
       }
       .ft-inner {
         max-width: 1200px;
@@ -112,6 +112,7 @@ const Footer: React.FC = () => (
         align-items: center;
         gap: 10px;
         align-self: flex-start;
+        font-family: var(--font-heading);
         font-size: 16px;
         font-weight: 600;
         color: #fff;
@@ -157,12 +158,13 @@ const Footer: React.FC = () => (
 
       /* The name across the full width: sized to the container (fallback:
          the viewport), faint at the top and a little stronger at the foot.
-         "Remote365" in Mona Sans Bold at -0.04em is 5.33 × its font size
-         wide; 5.45 leaves a sliver of room either side. */
+         "Remote365" in Poppins Bold at -0.04em is 5.52 × its font size
+         wide; 5.65 leaves a sliver of room either side. */
       .ft-wordmark {
         margin-top: clamp(48px, 8vw, 96px);
+        font-family: var(--font-heading);
         font-size: clamp(52px, 15vw, 200px);
-        font-size: calc(100cqw / 5.45);
+        font-size: calc(100cqw / 5.65);
         font-weight: 700;
         line-height: 0.82;
         letter-spacing: -0.04em;

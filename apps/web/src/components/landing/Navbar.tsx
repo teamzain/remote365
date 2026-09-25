@@ -215,6 +215,7 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
           object-fit: contain;
         }
         .navbar-brand span {
+          font-family: var(--font-heading);
           font-weight: 600;
           font-size: 16px;
           line-height: 23px;

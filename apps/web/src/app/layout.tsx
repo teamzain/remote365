@@ -30,9 +30,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
-        {/* Mona Sans is self-hosted (@font-face in index.css); fetch the
-            latin file with the HTML instead of after the CSS is parsed. */}
-        <link rel="preload" href="/fonts/mona-sans-latin.v4.woff2" as="font" type="font/woff2" crossOrigin="" />
+        {/* Fonts are preloaded per section: (site)/layout.tsx for the
+            website's Poppins and Lato, (app)/layout.tsx for the app's Mona Sans. */}
         {/* Without JavaScript, scroll-reveal sections never animate in. */}
         <noscript>
           <style>{'[data-reveal]{opacity:1!important;transform:none!important}'}</style>

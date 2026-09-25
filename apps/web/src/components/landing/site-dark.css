@@ -14,6 +14,7 @@
   min-height: 100vh;
   background: #000;
   color: #fff;
+  font-family: var(--font-body);
 
   /* Space the fixed glass header takes (the floating capsule plus a gap on
      desktop); page content and ScrollSplitCard's pinned stage start below it. */
@@ -27,6 +28,13 @@
   --ld-glass-hover: rgba(255, 255, 255, 0.08);
   --ld-heading: linear-gradient(180deg, #ffffff 0%, #b8bec8 100%);
   --ld-accent: linear-gradient(90deg, #ff8a00 0%, #ea580c 100%);
+}
+
+/* Poppins for headings (and a few display lines that opt in with
+   .font-heading); everything else inherits Lato from .site-dark. */
+.site-dark :is(h1, h2, h3, h4, h5, h6),
+.font-heading {
+  font-family: var(--font-heading);
 }
 
 /* Content stacks above the fixed backdrop (z-index 0). */
