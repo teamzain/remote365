@@ -1,0 +1,21 @@
+# Keep the Docker build context to what the service Dockerfiles COPY:
+# package.json, package-lock.json, tsconfig.base.json, scripts/, packages/shared/
+# and the service's own apps/<service>/ directory.
+.git
+.github
+node_modules
+**/node_modules
+**/dist
+**/dist-electron
+**/release*
+apps/desktop
+apps/web
+apps/remote-365-mobile
+apps/android-host
+packages/native-*
+docs
+deploy
+.env
+.env.*
+!.env*.example
+*.log

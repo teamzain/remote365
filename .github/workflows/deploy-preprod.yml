@@ -1,0 +1,85 @@
+# Backend deploy to preprod (pp.remote365.ai). See deploy/README.md.
+#
+# Every push to main that touches the backend packs those files, streams them
+# over SSH to the droplet and runs deploy/preprod-deploy.sh there. The deploy
+# key is restricted to that one script (forced command), so this workflow can
+# only ever deploy, roll back or ask for status. The database is never part
+# of a deploy: same Compose project, postgres/redis untouched, backup first,
+# additive-only schema changes.
+name: Deploy backend to preprod
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/auth-service/**'
+      - 'apps/signaling-service/**'
+      - 'apps/session-service/**'
+      - 'apps/billing-service/**'
+      - 'packages/shared/**'
+      - 'scripts/patch-react-native-webrtc-default-display.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.base.json'
+      - 'Caddyfile'
+      - 'docker-compose.prod.yml'
+      - '.dockerignore'
+      - 'deploy/**'
+      - '.github/workflows/deploy-preprod.yml'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'deploy = build + restart the four backend services from this commit; rollback = previous images; status = report only'
+        type: choice
+        options: [deploy, rollback, status]
+        default: deploy
+
+# One deploy at a time, and a queued one is never cancelled half-way.
+concurrency:
+  group: preprod-backend
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  preprod:
+    name: ${{ inputs.action || 'deploy' }} on pp.remote365.ai
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ACTION: ${{ inputs.action || 'deploy' }}
+      SSH: ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=6
+    steps:
+      - name: Checkout
+        if: env.ACTION == 'deploy'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install the deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.PREPROD_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PREPROD_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+      - name: Pack the backend tree
+        if: env.ACTION == 'deploy'
+        run: |
+          tar -czf /tmp/backend.tgz \
+            package.json package-lock.json tsconfig.base.json .dockerignore \
+            Caddyfile docker-compose.prod.yml \
+            scripts packages/shared \
+            apps/auth-service apps/signaling-service apps/session-service apps/billing-service \
+            deploy
+          echo "$(tar -tzf /tmp/backend.tgz | wc -l) files, $(du -h /tmp/backend.tgz | cut -f1)"
+
+      - name: Deploy ${{ github.sha }}
+        if: env.ACTION == 'deploy'
+        run: $SSH "root@${{ secrets.PREPROD_HOST }}" "deploy ${{ github.sha }}" < /tmp/backend.tgz
+
+      - name: ${{ env.ACTION }}
+        if: env.ACTION != 'deploy'
+        run: $SSH "root@${{ secrets.PREPROD_HOST }}" "$ACTION" < /dev/null

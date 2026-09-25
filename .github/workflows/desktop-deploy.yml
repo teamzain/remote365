@@ -1,9 +1,11 @@
 name: Build and Deploy Desktop App
 
+# Manual only. This builds the Windows app on a GitHub runner and copies the
+# result to PROD's download folder (159.65.84.190). The desktop app is built
+# and published from a developer machine instead, so this must never run on
+# its own. It needs the SERVER_SSH_KEY secret, which is not set.
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   build:
