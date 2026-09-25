@@ -1,0 +1,545 @@
+/*
+ * The public website on the fixed video backdrop (SiteLayout + LandingBackdrop).
+ *
+ * The section components are light by default and some are still rendered
+ * outside SiteLayout (the unlinked Features/Enterprise/... pages), so nothing
+ * here edits them in place: everything is scoped to .site-dark (SiteLayout's
+ * root) and only recolours — sections go transparent so the video shows
+ * through, text turns light, cards and bands become dark glass. Layout,
+ * spacing and animation stay in the components.
+ */
+
+.site-dark {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: #000;
+  color: #fff;
+
+  /* Space the fixed glass header takes (the floating capsule plus a gap on
+     desktop); page content and ScrollSplitCard's pinned stage start below it. */
+  --site-nav-h: 88px;
+
+  --ld-text: #ffffff;
+  --ld-muted: rgba(255, 255, 255, 0.64);
+  --ld-faint: rgba(255, 255, 255, 0.5);
+  --ld-line: rgba(255, 255, 255, 0.12);
+  --ld-glass: rgba(255, 255, 255, 0.05);
+  --ld-glass-hover: rgba(255, 255, 255, 0.08);
+  --ld-heading: linear-gradient(180deg, #ffffff 0%, #b8bec8 100%);
+  --ld-accent: linear-gradient(90deg, #ff8a00 0%, #ea580c 100%);
+}
+
+/* Content stacks above the fixed backdrop (z-index 0). */
+.site-dark > .site-content,
+.site-dark > footer {
+  position: relative;
+  z-index: 1;
+}
+.site-dark > .site-content {
+  flex-grow: 1;
+}
+/* Pages other than home start below the fixed glass header. */
+.site-dark > .site-content--below-nav {
+  padding-top: var(--site-nav-h);
+}
+@media (max-width: 768px) {
+  .site-dark { --site-nav-h: 68px; }
+}
+
+/* ── Sections let the video through ─────────────────────────────── */
+.site-dark .orbit-section,
+.site-dark .easy-section,
+.site-dark .aa-section,
+.site-dark .showcase-section,
+.site-dark .cloud-orbit-section,
+.site-dark .home-away-section,
+.site-dark .cta-section {
+  background: transparent;
+}
+
+/* Headings: the same white→grey fade as the hero's first line. */
+.site-dark .easy-title,
+.site-dark .aa-title,
+.site-dark .home-away-title,
+.site-dark .cta-heading {
+  background-image: var(--ld-heading);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: -0.02em;
+}
+
+.site-dark .easy-sub,
+.site-dark .aa-sub,
+.site-dark .home-away-sub {
+  color: var(--ld-muted);
+}
+
+/* Orange text links keep their colour; soften the hover wash for dark. */
+.site-dark .easy-link,
+.site-dark .aa-link,
+.site-dark .home-away-btn-ghost {
+  transition: background 0.3s;
+}
+.site-dark .easy-link:hover,
+.site-dark .aa-link:hover,
+.site-dark .home-away-btn-ghost:hover {
+  background: rgba(255, 138, 0, 0.12);
+}
+
+/* ── Trusted-by marquee ─────────────────────────────────────────── */
+.site-dark .cm-title {
+  color: var(--ld-text);
+}
+.site-dark .cm-strip {
+  background: var(--ld-glass);
+  border-top: 1px solid var(--ld-line);
+  border-bottom: 1px solid var(--ld-line);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  /* The light theme fades the edges into a solid colour; over video the
+     strip itself has to fade out instead. */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%);
+}
+.site-dark .cm-fade {
+  display: none;
+}
+.site-dark .cm-item {
+  color: var(--ld-faint);
+}
+
+/* ── Device-ID orbit ────────────────────────────────────────────── */
+.site-dark .orbit-ring {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+.site-dark .orbit-pill {
+  box-shadow: 0 8px 28px rgba(255, 138, 0, 0.28);
+}
+
+/* ── Deployment orbit ───────────────────────────────────────────── */
+.site-dark .cloud-orbit-ring {
+  border-color: rgba(255, 255, 255, 0.28);
+}
+.site-dark .cloud-orbit-hub {
+  box-shadow: 0 0 70px rgba(255, 138, 0, 0.35);
+}
+.site-dark .cloud-orbit-badge {
+  background: var(--ld-glass-hover);
+  border: 1px solid var(--ld-line);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+/* The badge icons are drawn in near-black via SVG attributes; CSS wins. */
+.site-dark .cloud-orbit-badge svg [stroke] {
+  stroke: #ffffff;
+}
+.site-dark .cloud-orbit-badge svg [fill]:not([fill='none']) {
+  fill: #ffffff;
+}
+
+/* ── Images and media cards ─────────────────────────────────────── */
+.site-dark .aa-media,
+.site-dark .home-away-media,
+.site-dark .showcase-img {
+  background: var(--ld-glass);
+  border: 1px solid var(--ld-line);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.5);
+}
+/* The line illustrations are PNGs on solid white. Inverting them (then
+   rotating the hue back so orange stays orange) turns them into dark-mode
+   drawings on black, shown as rounded "screen" panels. mix-blend-mode can't
+   dissolve the black instead: <main> is its own stacking context, so a blend
+   never reaches the video behind it. */
+.site-dark .aa-media--contain {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 16px;
+  filter: invert(1) hue-rotate(180deg) saturate(1.2);
+}
+
+/* ── Stats band ─────────────────────────────────────────────────── */
+.site-dark .stats-section {
+  background: var(--ld-glass);
+  border-top: 1px solid var(--ld-line);
+  border-bottom: 1px solid var(--ld-line);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.site-dark .stat-value {
+  background-image: var(--ld-accent);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.site-dark .stat-label {
+  color: var(--ld-muted);
+}
+
+/* ── Closing CTA card ───────────────────────────────────────────── */
+.site-dark .cta-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--ld-line);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* ── Footer ─────────────────────────────────────────────────────── */
+.site-dark .lf-footer {
+  background: rgba(0, 0, 0, 0.6);
+  border-top: 1px solid var(--ld-line);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.site-dark .lf-heading,
+.site-dark .lf-brand span {
+  color: var(--ld-text);
+}
+.site-dark .lf-link {
+  color: var(--ld-muted);
+  transition: color 0.3s;
+}
+.site-dark .lf-link:hover {
+  color: var(--ld-text);
+}
+.site-dark .lf-divider {
+  border-top-color: var(--ld-line);
+}
+.site-dark .lf-socialBtn {
+  background: var(--ld-glass-hover);
+  color: var(--ld-text);
+  transition: background 0.3s;
+}
+.site-dark .lf-socialBtn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.site-dark .lf-legalLink,
+.site-dark .lf-copy {
+  color: var(--ld-faint);
+}
+
+/* ══ Other pages ═══════════════════════════════════════════════════
+   Component <style> blocks render after this stylesheet, so when one of
+   their selectors ties with one of these on specificity it wins; the rules
+   below add a class (or state) wherever that matters. */
+
+/* Shared: page-level gradient headings and body copy */
+.site-dark .ph-title,
+.site-dark .px-title,
+.site-dark .gi-title,
+.site-dark .faq-title,
+.site-dark .ct-title,
+.site-dark .doc-title,
+.site-dark .dl-title,
+.site-dark .legal-title {
+  background-image: var(--ld-heading);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: -0.02em;
+}
+.site-dark .ph-sub,
+.site-dark .px-sub,
+.site-dark .gi-sub,
+.site-dark .faq-subtitle,
+.site-dark .ct-lede,
+.site-dark .ct-para,
+.site-dark .doc-lede,
+.site-dark .dl-subtitle,
+.site-dark .legal-intro {
+  color: var(--ld-muted);
+}
+
+/* ── Product ────────────────────────────────────────────────────── */
+.site-dark .ph-section,
+.site-dark .px-section,
+.site-dark .gi-section {
+  background: transparent;
+}
+.site-dark .ph-image,
+.site-dark .px-diagram,
+.site-dark .gi-media {
+  border: 1px solid var(--ld-line);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.5);
+}
+.site-dark .gi-media {
+  background: var(--ld-glass);
+}
+.site-dark .px-tab {
+  border-top-color: rgba(255, 255, 255, 0.18);
+}
+.site-dark .px-tab.is-active {
+  border-top-color: #ff8a00;
+}
+.site-dark .px-tab .px-tab-title {
+  color: var(--ld-faint);
+}
+.site-dark .px-tab.is-active .px-tab-title {
+  color: var(--ld-text);
+}
+.site-dark .px-tab-desc {
+  color: var(--ld-muted);
+}
+.site-dark .gi-link {
+  transition: background 0.3s;
+}
+.site-dark .gi-link:hover {
+  background: rgba(255, 138, 0, 0.12);
+}
+
+/* ── Pricing ────────────────────────────────────────────────────── */
+.site-dark .pp-card {
+  background: var(--ld-glass);
+  border: 1px solid var(--ld-line);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.site-dark .pp-card.pp-card-popular {
+  border: 1px solid rgba(255, 138, 0, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 138, 0, 0.18), 0 24px 70px rgba(255, 138, 0, 0.14);
+}
+.site-dark .pp-name,
+.site-dark .pp-starts,
+.site-dark .pp-price,
+.site-dark .pp-price-suffix,
+.site-dark .pp-tick-row {
+  color: var(--ld-text);
+}
+.site-dark .pp-desc {
+  color: var(--ld-muted);
+}
+.site-dark .pp-ticks-label {
+  color: var(--ld-faint);
+}
+.site-dark .pp-divider {
+  border-top-color: var(--ld-line);
+}
+.site-dark .pp-cta.pp-cta-outline {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: var(--ld-text);
+  transition: background 0.3s, border-color 0.3s;
+}
+.site-dark .pp-cta.pp-cta-outline:hover {
+  background: var(--ld-glass-hover);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+.site-dark .pp-card.pp-skeleton {
+  border-color: var(--ld-line);
+}
+.site-dark .pp-skeleton-block {
+  background: rgba(255, 255, 255, 0.08);
+}
+.site-dark .faq-item {
+  background: var(--ld-glass);
+  border: 1px solid var(--ld-line);
+  border-radius: 12px;
+}
+.site-dark .faq-question {
+  color: var(--ld-text);
+}
+.site-dark .faq-answer {
+  color: var(--ld-muted);
+}
+.site-dark .faq-item svg [stroke] {
+  stroke: #ffffff;
+}
+
+/* ── Contact ────────────────────────────────────────────────────── */
+.site-dark .ct-para strong,
+.site-dark .ct-subhead,
+.site-dark .ct-card-title,
+.site-dark .ct-field label,
+.site-dark .ct-success h2 {
+  color: var(--ld-text);
+}
+.site-dark .ct-email {
+  color: var(--ld-text);
+  transition: color 0.3s;
+}
+.site-dark .ct-email:hover {
+  color: #ff8a00;
+}
+.site-dark .ct-privacy,
+.site-dark .ct-success p {
+  color: var(--ld-faint);
+}
+.site-dark .ct-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--ld-line);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.site-dark .ct-field input,
+.site-dark .ct-field textarea,
+.site-dark .doc-search {
+  background: rgba(0, 0, 0, 0.35);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--ld-text);
+}
+.site-dark .ct-field input::placeholder,
+.site-dark .ct-field textarea::placeholder,
+.site-dark .doc-search::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+.site-dark .ct-field input:focus,
+.site-dark .ct-field textarea:focus,
+.site-dark .doc-search:focus {
+  border-color: #ff8a00;
+  box-shadow: 0 0 0 3px rgba(255, 138, 0, 0.2);
+}
+
+/* ── Docs ───────────────────────────────────────────────────────── */
+.site-dark .doc-hero {
+  background: radial-gradient(ellipse at top, rgba(255, 138, 0, 0.14) 0%, transparent 65%);
+}
+/* Long-form reading over moving video: the article sits on a dark panel. */
+.site-dark .doc-content {
+  padding: 32px clamp(20px, 3vw, 40px);
+  background: rgba(8, 8, 10, 0.55);
+  border: 1px solid var(--ld-line);
+  border-radius: 16px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.site-dark .doc-navgroup-label,
+.site-dark .doc-empty {
+  color: var(--ld-faint);
+}
+.site-dark .doc-navlink {
+  color: var(--ld-muted);
+  transition: background 0.3s, color 0.3s;
+}
+.site-dark .doc-navlink:hover {
+  background: var(--ld-glass-hover);
+  color: var(--ld-text);
+}
+.site-dark .doc-navlink.is-active {
+  color: #ff8a00;
+  background: rgba(255, 138, 0, 0.12);
+}
+.site-dark .doc-group-head {
+  border-bottom-color: var(--ld-line);
+}
+.site-dark .doc-group-head h2,
+.site-dark .doc-article-title {
+  color: var(--ld-text);
+}
+.site-dark .doc-p,
+.site-dark .doc-steps,
+.site-dark .doc-ul {
+  color: rgba(255, 255, 255, 0.74);
+}
+.site-dark .doc-code {
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--ld-line);
+}
+.site-dark .doc-callout.doc-callout--tip {
+  background: rgba(255, 138, 0, 0.1);
+  color: #ffc98f;
+}
+.site-dark .doc-callout.doc-callout--note {
+  background: var(--ld-glass);
+  border-left-color: rgba(255, 255, 255, 0.35);
+  color: var(--ld-muted);
+}
+@media (max-width: 860px) {
+  .site-dark .doc-sidebar {
+    border-bottom-color: var(--ld-line);
+  }
+}
+
+/* ── Download ───────────────────────────────────────────────────── */
+.site-dark .dl-card {
+  background: var(--ld-glass);
+  border: 1px solid var(--ld-line);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.site-dark .dl-card:hover {
+  background: var(--ld-glass-hover);
+}
+.site-dark .dl-card span {
+  color: var(--ld-text);
+}
+/* Inactive platform icons are drawn near-black via the SVG fill attribute. */
+.site-dark .dl-card:not(.dl-card-active) svg {
+  fill: #ffffff;
+}
+.site-dark .dl-card.dl-card-active {
+  background: linear-gradient(180deg, #ff8a00 0%, #ffb347 100%);
+  border-color: transparent;
+  box-shadow: 0 12px 36px rgba(255, 138, 0, 0.3);
+}
+.site-dark .dl-btn-primary.dl-btn-disabled {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ld-faint);
+}
+.site-dark .dl-menu {
+  background: rgba(20, 20, 22, 0.94);
+  border-color: var(--ld-line);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.site-dark .dl-menu-item:hover {
+  background: var(--ld-glass-hover);
+}
+.site-dark .dl-menu-item + .dl-menu-item {
+  border-top-color: var(--ld-line);
+}
+.site-dark .dl-menu-title {
+  color: var(--ld-text);
+}
+.site-dark .dl-menu-sub,
+.site-dark .dl-requirement {
+  color: var(--ld-muted);
+}
+
+/* ── Privacy / Terms / Delete account ───────────────────────────── */
+.site-dark .legal-hero {
+  background: radial-gradient(ellipse at top, rgba(255, 138, 0, 0.16) 0%, transparent 65%);
+}
+.site-dark .legal-date {
+  color: var(--ld-faint);
+}
+.site-dark .legal-sidebar {
+  background: var(--ld-glass);
+  border: 1px solid var(--ld-line);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.site-dark .legal-nav-btn {
+  color: var(--ld-muted);
+  transition: background 0.3s, color 0.3s;
+}
+.site-dark .legal-nav-btn:hover {
+  background: var(--ld-glass-hover);
+  color: var(--ld-text);
+}
+.site-dark .legal-nav-btn.is-active {
+  background: linear-gradient(110.89deg, #ff8a00 36.19%, #ffb347 93.55%);
+  color: #ffffff;
+}
+/* Long-form reading over moving video: the text sits on a dark panel. */
+.site-dark .legal-content {
+  background: rgba(8, 8, 10, 0.55);
+  border: 1px solid var(--ld-line);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.site-dark .legal-heading,
+.site-dark .legal-sub {
+  color: var(--ld-text);
+}
+.site-dark .legal-p,
+.site-dark .legal-ul {
+  color: rgba(255, 255, 255, 0.74);
+}
+.site-dark .legal-divider {
+  border-top-color: var(--ld-line);
+}

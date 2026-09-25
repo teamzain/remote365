@@ -1,7 +1,6 @@
 import React from 'react'
 import { Box } from '@mui/material'
-import Navbar from '../../components/landing/Navbar'
-import Footer from '../../components/landing/Footer'
+import SiteLayout from '../../components/landing/SiteLayout'
 import ProductHero from '../../components/landing/ProductHero'
 import ProductExplainer from '../../components/landing/ProductExplainer'
 import AccessAnywhereSection from '../../components/landing/AccessAnywhereSection'
@@ -11,9 +10,8 @@ import GetStartedCta from '../../components/landing/GetStartedCta'
 import { ScrollReveal } from '../../components/landing/ScrollReveal'
 
 const ProductPage: React.FC = () => (
-  <Box sx={{ bgcolor: '#FFFFFF', display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-    <Navbar />
-    <Box component="main" sx={{ flexGrow: 1 }}>
+  <SiteLayout>
+    <Box component="main">
       <ScrollReveal delay={0.1}>
         <ProductHero
           heading="Remote access for everyone, everywhere"
@@ -61,8 +59,7 @@ const ProductPage: React.FC = () => (
         <GetStartedCta />
       </ScrollReveal>
     </Box>
-    <Footer />
-  </Box>
+  </SiteLayout>
 )
 
 export default ProductPage

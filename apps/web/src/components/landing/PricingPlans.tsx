@@ -153,7 +153,7 @@ const PricingPlans: React.FC = () => {
   }, [])
 
   return (
-    <section style={{ background: '#FFFFFF', padding: '32px clamp(16px, 4vw, 40px) 80px' }}>
+    <section style={{ padding: '32px clamp(16px, 4vw, 40px) 80px' }}>
       <div className="pp-grid">
         {plans === null
           ? Array.from({ length: 4 }, (_, i) => <SkeletonCard key={i} />)

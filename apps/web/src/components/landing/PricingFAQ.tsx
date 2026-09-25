@@ -65,7 +65,7 @@ const FAQRow: React.FC<{ question: string; answer: string }> = ({ question, answ
 }
 
 const PricingFAQ: React.FC = () => (
-  <section style={{ background: '#FFFFFF', padding: '78px clamp(20px, 4vw, 40px) 100px' }}>
+  <section style={{ padding: '78px clamp(20px, 4vw, 40px) 100px' }}>
     <div className="faq-container">
 
       <div className="faq-heading">

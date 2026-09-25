@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import Navbar from './Navbar'
-import Footer from './Footer'
+import SiteLayout from './SiteLayout'
 
 // Shared layout for legal documents (Privacy Policy, Terms of Service):
 // gradient hero, sticky sidebar nav, white content card with sections.
@@ -57,8 +56,7 @@ const LegalPage: React.FC<LegalPageProps> = ({ title, intro, effectiveDate, sect
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: '#F3F4F6' }}>
-      <Navbar />
+    <SiteLayout>
 
       {/* Gradient hero */}
       <section className="legal-hero">
@@ -109,8 +107,6 @@ const LegalPage: React.FC<LegalPageProps> = ({ title, intro, effectiveDate, sect
           ))}
         </article>
       </main>
-
-      <Footer />
 
       <style>{`
         .legal-hero {
@@ -271,7 +267,7 @@ const LegalPage: React.FC<LegalPageProps> = ({ title, intro, effectiveDate, sect
           .legal-content { padding: 32px 20px; }
         }
       `}</style>
-    </div>
+    </SiteLayout>
   )
 }
 

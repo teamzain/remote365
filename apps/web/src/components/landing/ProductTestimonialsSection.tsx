@@ -39,9 +39,11 @@ const ProductTestimonialsSection: React.FC = () => {
         padding: '20.25px 21px 21px',
         width: 'min(400px, 82vw)',
         minWidth: 'min(400px, 82vw)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
         borderRadius: '12px',
-        background: '#252222',
+        // Dark glass over the site's video backdrop. No backdrop blur: a few
+        // dozen cards scrolling over moving video is too costly on phones.
+        background: 'rgba(18, 16, 16, 0.6)',
         flexShrink: 0
       }}
     >
@@ -186,7 +188,6 @@ const ProductTestimonialsSection: React.FC = () => {
         padding: 0,
         width: '100%',
         minHeight: 'auto',
-        background: '#252222',
         position: 'relative',
         overflow: 'hidden'
       }}
@@ -219,20 +220,6 @@ const ProductTestimonialsSection: React.FC = () => {
           }
         `}
       </style>
-
-      {/* Top gradient fade */}
-      <div
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          top: 0,
-          height: '100px',
-          background: 'linear-gradient(180deg, #252222 0%, rgba(37, 34, 34, 0) 100%)',
-          zIndex: 1,
-          pointerEvents: 'none'
-        }}
-      />
 
       {/* Main content — full-bleed so the marquee rows run edge to edge */}
       <div
@@ -274,19 +261,6 @@ const ProductTestimonialsSection: React.FC = () => {
         </div>
       </div>
 
-      {/* Bottom gradient fade */}
-      <div
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: 0,
-          height: '100px',
-          background: 'linear-gradient(0deg, #252222 0%, rgba(37, 34, 34, 0) 100%)',
-          zIndex: 1,
-          pointerEvents: 'none'
-        }}
-      />
     </section>
   )
 }

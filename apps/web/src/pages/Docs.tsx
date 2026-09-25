@@ -3,8 +3,7 @@ import {
   Rocket, LifeBuoy, MonitorSmartphone, Video, Users, ShieldCheck, CreditCard,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import Navbar from '../components/landing/Navbar'
-import Footer from '../components/landing/Footer'
+import SiteLayout from '../components/landing/SiteLayout'
 
 // ── Content model ──────────────────────────────────────────────────────────────
 type Block =
@@ -272,287 +271,282 @@ const Docs: React.FC = () => {
   const goTo = (id: string) => refs.current[id]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
   return (
-    <div className="doc-page">
-      <Navbar />
+    <SiteLayout>
+      <div className="doc-page">
 
-      {/* Header */}
-      <section className="doc-hero">
-        <span className="doc-eyebrow">Documentation</span>
-        <h1 className="doc-title">Everything you need to run Remote365</h1>
-        <p className="doc-lede">Guides for connecting, supporting, collaborating, and securing your devices and team.</p>
-        <input
-          className="doc-search"
-          type="search"
-          placeholder="Search the docs…"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-        />
-      </section>
+        {/* Header */}
+        <section className="doc-hero">
+          <span className="doc-eyebrow">Documentation</span>
+          <h1 className="doc-title">Everything you need to run Remote365</h1>
+          <p className="doc-lede">Guides for connecting, supporting, collaborating, and securing your devices and team.</p>
+          <input
+            className="doc-search"
+            type="search"
+            placeholder="Search the docs…"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
+        </section>
 
-      <main className="doc-main">
-        {/* Sidebar */}
-        <aside className="doc-sidebar">
-          <nav>
-            {filtered.map(group => (
-              <div key={group.label} className="doc-navgroup">
-                <div className="doc-navgroup-label">
-                  <group.Icon size={15} strokeWidth={1.8} />
-                  {group.label}
+        <main className="doc-main">
+          {/* Sidebar */}
+          <aside className="doc-sidebar">
+            <nav>
+              {filtered.map(group => (
+                <div key={group.label} className="doc-navgroup">
+                  <div className="doc-navgroup-label">
+                    <group.Icon size={15} strokeWidth={1.8} />
+                    {group.label}
+                  </div>
+                  {group.articles.map(a => (
+                    <button
+                      key={a.id}
+                      className={`doc-navlink${activeId === a.id ? ' is-active' : ''}`}
+                      onClick={() => goTo(a.id)}
+                    >
+                      {a.title}
+                    </button>
+                  ))}
+                </div>
+              ))}
+              {filtered.length === 0 && <p className="doc-empty">No matching topics.</p>}
+            </nav>
+          </aside>
+
+          {/* Content */}
+          <article className="doc-content">
+            {GROUPS.map(group => (
+              <section key={group.label} className="doc-group">
+                <div className="doc-group-head">
+                  <span className="doc-group-icon"><group.Icon size={18} strokeWidth={2} /></span>
+                  <h2>{group.label}</h2>
                 </div>
                 {group.articles.map(a => (
-                  <button
+                  <section
                     key={a.id}
-                    className={`doc-navlink${activeId === a.id ? ' is-active' : ''}`}
-                    onClick={() => goTo(a.id)}
+                    ref={el => { refs.current[a.id] = el }}
+                    style={{ scrollMarginTop: `${NAV_OFFSET}px` }}
+                    className="doc-article"
                   >
-                    {a.title}
-                  </button>
+                    <h3 className="doc-article-title">{a.title}</h3>
+                    {a.blocks.map((b, i) => <BlockView key={i} block={b} />)}
+                  </section>
                 ))}
-              </div>
+              </section>
             ))}
-            {filtered.length === 0 && <p className="doc-empty">No matching topics.</p>}
-          </nav>
-        </aside>
+          </article>
+        </main>
 
-        {/* Content */}
-        <article className="doc-content">
-          {GROUPS.map(group => (
-            <section key={group.label} className="doc-group">
-              <div className="doc-group-head">
-                <span className="doc-group-icon"><group.Icon size={18} strokeWidth={2} /></span>
-                <h2>{group.label}</h2>
-              </div>
-              {group.articles.map(a => (
-                <section
-                  key={a.id}
-                  ref={el => { refs.current[a.id] = el }}
-                  style={{ scrollMarginTop: `${NAV_OFFSET}px` }}
-                  className="doc-article"
-                >
-                  <h3 className="doc-article-title">{a.title}</h3>
-                  {a.blocks.map((b, i) => <BlockView key={i} block={b} />)}
-                </section>
-              ))}
-            </section>
-          ))}
-        </article>
-      </main>
-
-      <Footer />
-
-      <style>{`
-        .doc-page {
-          display: flex;
-          flex-direction: column;
-          min-height: 100vh;
-          background: #FFFFFF;
-          font-family: 'Mona Sans', system-ui, -apple-system, sans-serif;
-        }
-
-        .doc-hero {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 16px;
-          text-align: center;
-          padding: clamp(56px, 8vw, 96px) clamp(20px, 5vw, 40px) clamp(40px, 6vw, 64px);
-          background: linear-gradient(180deg, #FFF7ED 0%, #FFFFFF 100%);
-        }
-        .doc-eyebrow {
-          font-weight: 600;
-          font-size: 14px;
-          letter-spacing: 0.4px;
-          text-transform: uppercase;
-          color: #FF8A00;
-        }
-        .doc-title {
-          margin: 0;
-          max-width: 760px;
-          font-weight: 600;
-          font-size: clamp(2rem, 4.5vw, 48px);
-          line-height: 1.2;
-          letter-spacing: -0.5px;
-          color: #1A1D21;
-        }
-        .doc-lede {
-          margin: 0;
-          max-width: 620px;
-          font-weight: 400;
-          font-size: 18px;
-          line-height: 26px;
-          color: rgba(26, 29, 33, 0.65);
-        }
-        .doc-search {
-          margin-top: 12px;
-          width: 100%;
-          max-width: 460px;
-          height: 48px;
-          padding: 0 18px;
-          box-sizing: border-box;
-          font-family: inherit;
-          font-size: 15px;
-          color: #1A1D21;
-          background: #FFFFFF;
-          border: 1px solid rgba(26, 29, 33, 0.18);
-          border-radius: 8px;
-          outline: none;
-          transition: border-color 0.15s, box-shadow 0.15s;
-        }
-        .doc-search:focus {
-          border-color: #FF8A00;
-          box-shadow: 0 0 0 3px rgba(255, 138, 0, 0.15);
-        }
-
-        .doc-main {
-          display: flex;
-          align-items: flex-start;
-          gap: 64px;
-          width: 100%;
-          max-width: 1440px;
-          margin: 0 auto;
-          padding: 48px clamp(20px, 4vw, 48px) 96px;
-          box-sizing: border-box;
-          flex: 1;
-        }
-        .doc-sidebar {
-          position: sticky;
-          top: 88px;
-          width: 280px;
-          flex-shrink: 0;
-        }
-        .doc-navgroup { margin-bottom: 22px; }
-        .doc-navgroup-label {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-weight: 600;
-          font-size: 13px;
-          letter-spacing: 0.3px;
-          text-transform: uppercase;
-          color: rgba(26, 29, 33, 0.45);
-          margin-bottom: 8px;
-        }
-        .doc-navlink {
-          display: block;
-          width: 100%;
-          text-align: left;
-          padding: 7px 12px;
-          border: none;
-          background: none;
-          border-radius: 6px;
-          font-family: inherit;
-          font-weight: 500;
-          font-size: 14px;
-          line-height: 20px;
-          color: rgba(26, 29, 33, 0.7);
-          cursor: pointer;
-          transition: background 0.15s, color 0.15s;
-        }
-        .doc-navlink:hover { background: #F3F4F6; color: #1A1D21; }
-        .doc-navlink.is-active {
-          color: #FF8A00;
-          background: rgba(255, 138, 0, 0.08);
-          font-weight: 600;
-        }
-        .doc-empty { font-size: 14px; color: rgba(26,29,33,0.5); }
-
-        .doc-content { flex: 1; min-width: 0; }
-        .doc-group { margin-bottom: 56px; }
-        .doc-group-head {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding-bottom: 16px;
-          margin-bottom: 24px;
-          border-bottom: 1px solid rgba(26, 29, 33, 0.1);
-        }
-        .doc-group-icon {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 40px;
-          height: 40px;
-          border-radius: 10px;
-          color: #FFFFFF;
-          background: linear-gradient(118.29deg, #FF8A00 38.71%, #FFB347 88.95%);
-        }
-        .doc-group-head h2 {
-          margin: 0;
-          font-weight: 600;
-          font-size: 24px;
-          line-height: 32px;
-          color: #1A1D21;
-        }
-        .doc-article { margin-bottom: 36px; }
-        .doc-article-title {
-          margin: 0 0 12px;
-          font-weight: 600;
-          font-size: 19px;
-          line-height: 27px;
-          color: #1A1D21;
-        }
-        .doc-p {
-          margin: 0 0 12px;
-          font-weight: 400;
-          font-size: 16px;
-          line-height: 26px;
-          color: rgba(26, 29, 33, 0.8);
-        }
-        .doc-steps, .doc-ul {
-          margin: 0 0 12px;
-          padding-left: 22px;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          font-size: 16px;
-          line-height: 25px;
-          color: rgba(26, 29, 33, 0.8);
-        }
-        .doc-steps li::marker { color: #FF8A00; font-weight: 700; }
-        .doc-ul li::marker { color: #FF8A00; }
-        .doc-code {
-          margin: 0 0 14px;
-          padding: 16px 18px;
-          background: #1A1D21;
-          border-radius: 8px;
-          color: #F3F4F6;
-          font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-          font-size: 14px;
-          line-height: 22px;
-          white-space: pre-wrap;
-          overflow-x: auto;
-        }
-        .doc-callout {
-          margin: 0 0 14px;
-          padding: 14px 16px;
-          border-radius: 8px;
-          font-size: 15px;
-          line-height: 23px;
-          border-left: 3px solid;
-        }
-        .doc-callout--tip {
-          background: rgba(255, 138, 0, 0.07);
-          border-left-color: #FF8A00;
-          color: #7a4a00;
-        }
-        .doc-callout--note {
-          background: #F3F4F6;
-          border-left-color: rgba(26, 29, 33, 0.35);
-          color: rgba(26, 29, 33, 0.8);
-        }
-
-        @media (max-width: 860px) {
-          .doc-main { flex-direction: column; gap: 24px; }
-          .doc-sidebar {
-            position: static;
-            width: 100%;
-            max-height: none;
-            border-bottom: 1px solid rgba(26,29,33,0.1);
-            padding-bottom: 16px;
+        <style>{`
+          .doc-page {
+            font-family: 'Mona Sans', system-ui, -apple-system, sans-serif;
           }
-        }
-      `}</style>
-    </div>
+
+          .doc-hero {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            text-align: center;
+            padding: clamp(56px, 8vw, 96px) clamp(20px, 5vw, 40px) clamp(40px, 6vw, 64px);
+            background: linear-gradient(180deg, #FFF7ED 0%, #FFFFFF 100%);
+          }
+          .doc-eyebrow {
+            font-weight: 600;
+            font-size: 14px;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            color: #FF8A00;
+          }
+          .doc-title {
+            margin: 0;
+            max-width: 760px;
+            font-weight: 600;
+            font-size: clamp(2rem, 4.5vw, 48px);
+            line-height: 1.2;
+            letter-spacing: -0.5px;
+            color: #1A1D21;
+          }
+          .doc-lede {
+            margin: 0;
+            max-width: 620px;
+            font-weight: 400;
+            font-size: 18px;
+            line-height: 26px;
+            color: rgba(26, 29, 33, 0.65);
+          }
+          .doc-search {
+            margin-top: 12px;
+            width: 100%;
+            max-width: 460px;
+            height: 48px;
+            padding: 0 18px;
+            box-sizing: border-box;
+            font-family: inherit;
+            font-size: 15px;
+            color: #1A1D21;
+            background: #FFFFFF;
+            border: 1px solid rgba(26, 29, 33, 0.18);
+            border-radius: 8px;
+            outline: none;
+            transition: border-color 0.15s, box-shadow 0.15s;
+          }
+          .doc-search:focus {
+            border-color: #FF8A00;
+            box-shadow: 0 0 0 3px rgba(255, 138, 0, 0.15);
+          }
+
+          .doc-main {
+            display: flex;
+            align-items: flex-start;
+            gap: 64px;
+            width: 100%;
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 48px clamp(20px, 4vw, 48px) 96px;
+            box-sizing: border-box;
+            flex: 1;
+          }
+          .doc-sidebar {
+            position: sticky;
+            top: 88px;
+            width: 280px;
+            flex-shrink: 0;
+          }
+          .doc-navgroup { margin-bottom: 22px; }
+          .doc-navgroup-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 13px;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+            color: rgba(26, 29, 33, 0.45);
+            margin-bottom: 8px;
+          }
+          .doc-navlink {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 7px 12px;
+            border: none;
+            background: none;
+            border-radius: 6px;
+            font-family: inherit;
+            font-weight: 500;
+            font-size: 14px;
+            line-height: 20px;
+            color: rgba(26, 29, 33, 0.7);
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+          }
+          .doc-navlink:hover { background: #F3F4F6; color: #1A1D21; }
+          .doc-navlink.is-active {
+            color: #FF8A00;
+            background: rgba(255, 138, 0, 0.08);
+            font-weight: 600;
+          }
+          .doc-empty { font-size: 14px; color: rgba(26,29,33,0.5); }
+
+          .doc-content { flex: 1; min-width: 0; }
+          .doc-group { margin-bottom: 56px; }
+          .doc-group-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding-bottom: 16px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid rgba(26, 29, 33, 0.1);
+          }
+          .doc-group-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            color: #FFFFFF;
+            background: linear-gradient(118.29deg, #FF8A00 38.71%, #FFB347 88.95%);
+          }
+          .doc-group-head h2 {
+            margin: 0;
+            font-weight: 600;
+            font-size: 24px;
+            line-height: 32px;
+            color: #1A1D21;
+          }
+          .doc-article { margin-bottom: 36px; }
+          .doc-article-title {
+            margin: 0 0 12px;
+            font-weight: 600;
+            font-size: 19px;
+            line-height: 27px;
+            color: #1A1D21;
+          }
+          .doc-p {
+            margin: 0 0 12px;
+            font-weight: 400;
+            font-size: 16px;
+            line-height: 26px;
+            color: rgba(26, 29, 33, 0.8);
+          }
+          .doc-steps, .doc-ul {
+            margin: 0 0 12px;
+            padding-left: 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            font-size: 16px;
+            line-height: 25px;
+            color: rgba(26, 29, 33, 0.8);
+          }
+          .doc-steps li::marker { color: #FF8A00; font-weight: 700; }
+          .doc-ul li::marker { color: #FF8A00; }
+          .doc-code {
+            margin: 0 0 14px;
+            padding: 16px 18px;
+            background: #1A1D21;
+            border-radius: 8px;
+            color: #F3F4F6;
+            font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+            font-size: 14px;
+            line-height: 22px;
+            white-space: pre-wrap;
+            overflow-x: auto;
+          }
+          .doc-callout {
+            margin: 0 0 14px;
+            padding: 14px 16px;
+            border-radius: 8px;
+            font-size: 15px;
+            line-height: 23px;
+            border-left: 3px solid;
+          }
+          .doc-callout--tip {
+            background: rgba(255, 138, 0, 0.07);
+            border-left-color: #FF8A00;
+            color: #7a4a00;
+          }
+          .doc-callout--note {
+            background: #F3F4F6;
+            border-left-color: rgba(26, 29, 33, 0.35);
+            color: rgba(26, 29, 33, 0.8);
+          }
+
+          @media (max-width: 860px) {
+            .doc-main { flex-direction: column; gap: 24px; }
+            .doc-sidebar {
+              position: static;
+              width: 100%;
+              max-height: none;
+              border-bottom: 1px solid rgba(26,29,33,0.1);
+              padding-bottom: 16px;
+            }
+          }
+        `}</style>
+      </div>
+    </SiteLayout>
   )
 }
 

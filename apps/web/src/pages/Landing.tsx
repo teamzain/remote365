@@ -1,7 +1,8 @@
 import React from 'react'
 import { Box } from '@mui/material'
-import Navbar from '../components/landing/Navbar'
-import Hero from '../components/landing/Hero'
+import SiteLayout from '../components/landing/SiteLayout'
+import HeroVideo from '../components/landing/HeroVideo'
+import CompanyMarquee from '../components/landing/CompanyMarquee'
 import DeviceOrbitSection from '../components/landing/DeviceOrbitSection'
 import EasyAccessSection from '../components/landing/EasyAccessSection'
 import AccessAnywhereSection from '../components/landing/AccessAnywhereSection'
@@ -11,16 +12,18 @@ import HomeAwaySection from '../components/landing/HomeAwaySection'
 import SimpleReliableSection from '../components/landing/SimpleReliableSection'
 import StatsCounterSection from '../components/landing/StatsCounterSection'
 import GetStartedCta from '../components/landing/GetStartedCta'
-import Footer from '../components/landing/Footer'
 import { ScrollReveal } from '../components/landing/ScrollReveal'
 
 const Landing: React.FC = () => {
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', bgcolor: '#FFFFFF' }}>
-      <Navbar />
-      <Box component="main" sx={{ flexGrow: 1 }}>
+    <SiteLayout heroUnderNav>
+      <Box component="main">
+        <HeroVideo />
+
         <ScrollReveal delay={0.1}>
-          <Hero heroImage="/hero.png" />
+          <Box sx={{ pt: { xs: 6, md: 9 } }}>
+            <CompanyMarquee />
+          </Box>
         </ScrollReveal>
 
         <ScrollReveal delay={0.15}>
@@ -59,9 +62,8 @@ const Landing: React.FC = () => {
           <HomeAwaySection />
         </ScrollReveal>
 
-        <ScrollReveal delay={0.15}>
-          <SimpleReliableSection />
-        </ScrollReveal>
+        {/* Scroll-driven and several screens tall: no ScrollReveal here. */}
+        <SimpleReliableSection />
 
         <ScrollReveal delay={0.15}>
           <StatsCounterSection />
@@ -83,8 +85,7 @@ const Landing: React.FC = () => {
         </ScrollReveal>
 
       </Box>
-      <Footer />
-    </Box>
+    </SiteLayout>
   )
 }
 

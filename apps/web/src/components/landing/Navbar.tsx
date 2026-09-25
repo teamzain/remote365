@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Link as RouterLink, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import GetStartedScreen from './GetStartedScreen'
 
 const NAV_LINKS = [
   { label: 'Product',  path: '/product'   },
@@ -13,13 +14,18 @@ const NAV_LINKS = [
 export interface NavbarProps {
   heroBg?: string
   heroDark?: boolean
+  // 'glass': fixed header for the dark video landing page — centred blurred
+  // pill menu, outline "Sign In" pill, and a dark frosted bar once scrolled.
+  variant?: 'default' | 'glass'
 }
 
-const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false }) => {
+const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, variant = 'default' }) => {
   const { accessToken, user } = useAuthStore()
   const { pathname } = useLocation()
   const [scrolled, setScrolled] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const glass = variant === 'glass'
+  const links = glass ? [{ label: 'Home', path: '/' }, ...NAV_LINKS] : NAV_LINKS
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10)
@@ -32,7 +38,8 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false })
     return () => { document.body.style.overflow = '' }
   }, [menuOpen])
 
-  const isLight = !menuOpen && (scrolled || !heroDark)
+  // The glass variant sits on a dark page throughout, so it never goes light.
+  const isLight = !glass && !menuOpen && (scrolled || !heroDark)
   const fg = isLight ? '#111315' : 'rgba(255, 255, 255, 0.9)'
   const logoColor = menuOpen ? '#FFFFFF' : (isLight ? '#111315' : '#FFFFFF')
 
@@ -41,26 +48,49 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false })
 
   return (
     <>
-      <header style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 100,
-        background: menuOpen ? 'transparent' : (scrolled ? '#FFFFFF' : heroBg),
-        borderBottom: (!menuOpen && scrolled) ? '1px solid rgba(26,29,33,0.1)' : 'none',
-        boxShadow: (!menuOpen && scrolled) ? '0 1px 12px rgba(0,0,0,0.06)' : 'none',
-        transition: 'background 0.25s ease, border-bottom 0.25s ease, box-shadow 0.25s ease',
-      }}>
-        <div className="navbar-inner">
+      <header
+        // Glass: its look lives in CSS (.navbar-glass) so media queries can
+        // float it on desktop; the default bar keeps its inline styles.
+        className={glass ? `navbar-glass${scrolled && !menuOpen ? ' is-scrolled' : ''}` : undefined}
+        style={glass ? { position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100 } : {
+          position: 'sticky',
+          top: 0,
+          zIndex: 100,
+          background: menuOpen ? 'transparent' : (scrolled ? '#FFFFFF' : heroBg),
+          borderBottom: (!menuOpen && scrolled) ? '1px solid rgba(26,29,33,0.1)' : 'none',
+          boxShadow: (!menuOpen && scrolled) ? '0 1px 12px rgba(0,0,0,0.06)' : 'none',
+          transition: 'background 0.3s ease, border-bottom 0.3s ease, box-shadow 0.3s ease',
+        }}
+      >
+        <div className={glass ? 'navbar-inner navbar-inner-glass' : 'navbar-inner'}>
 
           {/* Logo + links */}
           <div className="navbar-left">
-            <RouterLink to="/" className="navbar-brand">
+            <RouterLink to="/" className={glass ? 'navbar-brand navbar-brand-glass' : 'navbar-brand'}>
               <img src="/logo.png" alt="Remote365" width={36} height={36} />
               <span style={{ color: logoColor }}>Remote365</span>
             </RouterLink>
 
-            <nav className="navbar-links">
-              {NAV_LINKS.map(item => (
+            {!glass && (
+              <nav className="navbar-links">
+                {links.map(item => (
+                  <RouterLink
+                    key={item.label}
+                    to={item.path}
+                    className="navbar-link"
+                    style={{ color: isActive(item.path) ? '#FF8A00' : fg }}
+                  >
+                    {item.label}
+                  </RouterLink>
+                ))}
+              </nav>
+            )}
+          </div>
+
+          {/* Centred glass pill menu */}
+          {glass && (
+            <nav className="navbar-links navbar-pill">
+              {links.map(item => (
                 <RouterLink
                   key={item.label}
                   to={item.path}
@@ -71,22 +101,33 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false })
                 </RouterLink>
               ))}
             </nav>
-          </div>
+          )}
 
           {/* Actions */}
           <div className="navbar-actions">
             {accessToken ? (
-              <RouterLink to="/dashboard" className="navbar-btn navbar-btn-outline">
+              <RouterLink
+                to="/dashboard"
+                className={glass ? 'navbar-btn navbar-btn-pill navbar-btn-pill-outline' : 'navbar-btn navbar-btn-outline'}
+              >
                 {user?.name ? user.name : 'Dashboard'}
               </RouterLink>
             ) : (
-              <RouterLink to="/login" className="navbar-btn navbar-btn-outline">
-                Login
+              <RouterLink
+                to="/login"
+                className={glass ? 'navbar-btn navbar-btn-pill navbar-btn-pill-outline' : 'navbar-btn navbar-btn-outline'}
+              >
+                {glass ? 'Sign In' : 'Login'}
               </RouterLink>
             )}
-            <RouterLink to="/register" className="navbar-btn navbar-btn-primary">
-              Get Started
-            </RouterLink>
+            {glass ? (
+              // Morphs into the full-screen "Get started" chooser
+              <GetStartedScreen variant="nav" />
+            ) : (
+              <RouterLink to="/register" className="navbar-btn navbar-btn-primary">
+                Get Started
+              </RouterLink>
+            )}
           </div>
 
           {/* Hamburger / close button (mobile) */}
@@ -115,7 +156,7 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false })
               onClick={() => setMenuOpen(false)}
               className="tri-link-btn tri-link-outline"
             >
-              Login
+              {glass ? 'Sign In' : 'Login'}
             </RouterLink>
             <RouterLink
               to="/register"
@@ -128,7 +169,7 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false })
 
           {/* Nav links — in the bottom-left orange zone */}
           <div className="tri-bottom-left-content">
-            {NAV_LINKS.map(item => (
+            {links.map(item => (
               <RouterLink
                 key={item.label}
                 to={item.path}
@@ -222,6 +263,66 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false })
           color: #FFFFFF;
         }
         .navbar-btn-primary:hover { opacity: 0.9; }
+
+        /* ── Glass variant (the public website over the video backdrop) ── */
+        .navbar-glass {
+          box-sizing: border-box;
+          border-bottom: 1px solid transparent;
+          transition: background 0.3s ease, border-color 0.3s ease;
+        }
+        .navbar-inner-glass {
+          max-width: 80rem;
+          display: grid;
+          grid-template-columns: 1fr auto 1fr;
+          padding: 14px 24px;
+        }
+        .navbar-inner-glass .navbar-left { gap: 0; grid-column: 1; }
+        .navbar-inner-glass .navbar-pill { grid-column: 2; }
+        .navbar-inner-glass .navbar-actions { grid-column: 3; justify-self: end; }
+        .navbar-inner-glass .navbar-hamburger {
+          grid-column: 3;
+          justify-self: end;
+          margin-left: 0;
+        }
+        .navbar-brand-glass span {
+          font-size: 17px;
+          letter-spacing: -0.04em;
+        }
+        .navbar-pill {
+          gap: 2px;
+          padding: 5px 6px;
+          border-radius: 9999px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          background: rgba(255, 255, 255, 0.05);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          transition: background 0.3s ease, border-color 0.3s ease;
+        }
+        .navbar-pill .navbar-link {
+          padding: 8px 14px;
+          border-radius: 9999px;
+          transition: color 0.3s ease, background 0.3s ease;
+        }
+        .navbar-pill .navbar-link:hover { background: rgba(255, 255, 255, 0.08); }
+        .navbar-btn-pill {
+          padding: 9px 18px;
+          border-radius: 9999px;
+          transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease, opacity 0.3s ease;
+        }
+        .navbar-btn-pill-outline {
+          background: transparent;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          color: #FFFFFF;
+        }
+        .navbar-btn-pill-outline:hover {
+          background: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.45);
+        }
+        .navbar-btn-pill-primary {
+          background: linear-gradient(90deg, #FF8A00 0%, #EA580C 100%);
+          color: #FFFFFF;
+        }
+        .navbar-btn-pill-primary:hover { opacity: 0.9; }
 
         .navbar-hamburger {
           display: none;
@@ -349,6 +450,50 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false })
           .navbar-inner { padding: 16px 20px; }
           .navbar-actions { display: none; }
           .navbar-hamburger { display: flex; }
+        }
+
+        /* Glass, desktop and tablet: the bar floats as an inset glass capsule. */
+        @media (min-width: 769px) {
+          .navbar-glass { padding: 14px 24px 0; }
+          .navbar-glass .navbar-inner-glass {
+            max-width: 1200px;
+            padding: 8px 8px 8px 20px;
+            border-radius: 9999px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(14, 14, 16, 0.42);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+            transition: background 0.3s ease, box-shadow 0.3s ease;
+          }
+          .navbar-glass.is-scrolled .navbar-inner-glass {
+            background: rgba(10, 10, 12, 0.72);
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+          }
+          /* The capsule is the glass now; the link group drops its own pill. */
+          .navbar-glass .navbar-pill {
+            border-color: transparent;
+            background: transparent;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+          }
+        }
+        /* Glass, below the width where the links fit: logo left, actions and
+           the menu button right (the grid would otherwise centre the actions). */
+        @media (max-width: 1024px) {
+          .navbar-inner-glass { display: flex; align-items: center; }
+          .navbar-inner-glass .navbar-actions { margin-left: auto; }
+          .navbar-inner-glass .navbar-hamburger { display: flex; margin-left: 12px; }
+        }
+        /* Glass, phones: full-width bar, frosted once scrolled. */
+        @media (max-width: 768px) {
+          .navbar-inner-glass .navbar-hamburger { margin-left: auto; }
+          .navbar-glass.is-scrolled {
+            background: rgba(0, 0, 0, 0.55);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border-bottom-color: rgba(255, 255, 255, 0.08);
+          }
         }
       `}</style>
     </>

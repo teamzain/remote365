@@ -1,130 +1,70 @@
 import React from 'react'
+import { MonitorSmartphone, ShieldCheck, Zap } from 'lucide-react'
+import ScrollSplitCard, { type ScrollSplitCardItem } from './ScrollSplitCard'
+import splitImage from '../../assets/landing/split-card.jpg'
 
-interface FeatureCard {
-  image: string
-  title: string
-  description: string
-}
+const ICON = { size: 28, strokeWidth: 1.75 } as const
 
-// Illustrations are the unDraw exports named in the design. Drop the SVGs into
-// apps/web/public/ with these filenames and they render automatically.
-const CARDS: FeatureCard[] = [
+// Light, brand orange and dark backs, echoing the component's original
+// three-tone set. Text is near-black on the two light cards: white on
+// #FF8A00 is too low-contrast for body copy.
+const CARDS: ScrollSplitCardItem[] = [
   {
-    image: '/111.png',
     title: 'Up in minutes',
     description: 'Install Remote365, register your device, and start accepting remote connections — no IT department needed.',
+    bgColor: '#EDEDED',
+    textColor: '#111315',
+    icon: <Zap {...ICON} />,
   },
   {
-    image: '/222.png',
     title: 'Any device, any OS',
     description: 'Remote365 runs on Windows, macOS, Linux, iOS, and Android. Access and support devices across every platform.',
+    bgColor: '#FF8A00',
+    textColor: '#111315',
+    icon: <MonitorSmartphone {...ICON} />,
   },
   {
-    image: '/333.png',
     title: 'Secure by design',
     description: 'End-to-end encrypted sessions, role-based access, and forced two-factor authentication keep every device safe.',
+    bgColor: '#141416',
+    textColor: '#FFFFFF',
+    icon: <ShieldCheck {...ICON} />,
   },
 ]
 
+// "Simple, Powerful, and Reliable": a photo of Remote365 in use that splits
+// into three panels and flips over to the three reasons as you scroll.
+// Scroll-driven and several screens tall, so it must not sit inside a
+// ScrollReveal (that would hide it until it was 15% in view).
 const SimpleReliableSection: React.FC = () => (
   <section className="sr-section">
-    <h2 className="sr-heading">Simple, Powerful, and Reliable</h2>
-
-    <div className="sr-cards">
-      {CARDS.map(card => (
-        <div key={card.title} className="sr-card">
-          <div className="sr-illustration">
-            <img src={card.image} alt="" />
-          </div>
-          <div className="sr-card-text">
-            <h3 className="sr-card-title">{card.title}</h3>
-            <p className="sr-card-desc">{card.description}</p>
-          </div>
-        </div>
-      ))}
-    </div>
+    <ScrollSplitCard
+      imageSrc={splitImage}
+      cards={CARDS}
+      intro={<span className="sr-eyebrow">Why Remote365</span>}
+      outro={<h2 className="sr-heading">Simple, Powerful, and Reliable</h2>}
+    />
 
     <style>{`
-      .sr-section {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 58px;
-        padding: 36px clamp(20px, 8vw, 123px);
-        background: #FFFFFF;
+      .sr-eyebrow {
+        display: inline-block;
+        margin-bottom: 24px; /* on top of the component's gap above the image */
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: rgba(255, 255, 255, 0.8);
       }
       .sr-heading {
         margin: 0;
-        max-width: 1440px;
+        padding: 0 16px;
         font-weight: 600;
         font-size: clamp(2rem, 4.5vw, 55px);
-        line-height: 1.42;
-        text-align: center;
-        color: #1A1D21;
-      }
-      .sr-cards {
-        display: flex;
-        justify-content: center;
-        align-items: stretch;
-        flex-wrap: wrap;
-        gap: 38px;
-        width: 100%;
-        max-width: 1440px;
-      }
-      .sr-card {
-        flex: 1 1 340px;
-        max-width: 390px;
-        min-height: 390px;
-        box-sizing: border-box;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        gap: 45px;
-        padding: 24px;
-        border: 1px solid rgba(26, 29, 33, 0.3);
-        border-radius: 4px;
-      }
-      .sr-illustration {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-        height: 170px;
-      }
-      .sr-illustration img {
-        max-width: 100%;
-        max-height: 100%;
-        object-fit: contain;
-      }
-      .sr-card-text {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 14px;
-        width: 100%;
-        max-width: 328px;
-      }
-      .sr-card-title {
-        margin: 0;
-        font-weight: 500;
-        font-size: 24px;
-        line-height: 34px;
-        text-align: center;
-        color: #000000;
-      }
-      .sr-card-desc {
-        margin: 0;
-        font-weight: 400;
-        font-size: 14px;
-        line-height: 20px;
-        text-align: center;
-        color: #000000;
-      }
-
-      @media (max-width: 640px) {
-        .sr-section { gap: 40px; padding: 36px 20px; }
-        .sr-card { min-height: 0; padding: 32px 24px; gap: 32px; }
+        line-height: 1.2;
+        letter-spacing: -0.02em;
+        background-image: linear-gradient(180deg, #ffffff 0%, #b8bec8 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
       }
     `}</style>
   </section>

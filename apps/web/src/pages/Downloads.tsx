@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Box } from '@mui/material'
-import Navbar from '../components/landing/Navbar'
-import Footer from '../components/landing/Footer'
+import SiteLayout from '../components/landing/SiteLayout'
 
 type PlatformId = 'macos' | 'ios' | 'windows' | 'android'
 
@@ -154,7 +153,7 @@ const DownloadHero: React.FC = () => {
   }
 
   return (
-    <section style={{ background: '#FFFFFF' }}>
+    <section>
       <div className="dl-wrap">
 
         {/* Heading */}
@@ -426,13 +425,11 @@ const DownloadHero: React.FC = () => {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 const Downloads: React.FC = () => (
-  <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', bgcolor: '#FFFFFF' }}>
-    <Navbar />
-    <Box component="main" sx={{ flexGrow: 1 }}>
+  <SiteLayout>
+    <Box component="main">
       <DownloadHero />
     </Box>
-    <Footer />
-  </Box>
+  </SiteLayout>
 )
 
 export default Downloads

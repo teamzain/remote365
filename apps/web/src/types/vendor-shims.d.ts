@@ -10,6 +10,9 @@ declare module 'framer-motion' {
   export const useAnimation: any;
   export const useScroll: any;
   export const useTransform: any;
+  export const useMotionTemplate: any;
+  export const useMotionValue: any;
+  export const useReducedMotion: any;
 }
 
 declare module 'react-hook-form' {
