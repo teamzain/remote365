@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Menu, ChevronLeft, ChevronRight, ChevronDown, Settings, LogOut,
 } from 'lucide-react';
-import logo from '../../assets/logo.png';
+import logoAsset from '../../assets/logo.png';
 import { HomeIcon, OrganizationIcon, UserIcon, DeviceIcon, RemoteIcon, SubscriptionIcon, BillingIcon } from './icons';
 import { StatusFooter } from '../shell/StatusFooter';
 import HomePage from './pages/HomePage';
@@ -14,6 +14,8 @@ import SubscriptionPlansPage from './pages/SubscriptionPlansPage';
 import BillingRevenuePage from './pages/BillingRevenuePage';
 import SettingsPage from './pages/SettingsPage';
 import SuperAdminSearch from './SuperAdminSearch';
+
+const logo = logoAsset.src;
 
 export type NavKey = 'home' | 'organizations' | 'users' | 'devices' | 'sessions' | 'subscriptions' | 'billing' | 'settings';
 

@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Download, LayoutDashboard, MonitorUp } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
-import logo from '../../assets/logo.png';
+import logoAsset from '../../assets/logo.png';
+
+const logo = logoAsset.src;
 
 /**
  * Public join page for a remote-support session invite (the "Join session"

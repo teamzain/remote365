@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { X, MoreHorizontal, ChevronDown, Check, Trash2 } from 'lucide-react';
-import notificationImg from '../../assets/notification.png';
+import notificationImgAsset from '../../assets/notification.png';
 import type { WebNotification } from '../../store/notificationStore';
+
+const notificationImg = notificationImgAsset.src;
 
 interface WebNotificationPanelProps {
   isOpen: boolean;

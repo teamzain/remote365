@@ -38,7 +38,7 @@ import {
   ChevronRight, Check } from 'lucide-react';
 import { LottieScene } from './lottie/LottieScene';
 import callAndVideoChatAnimation from '../assets/animations/callAndVideoChat.json';
-import groupIcon from '../assets/group.svg';
+import groupIconAsset from '../assets/group.svg';
 import { PendingInvitation } from './PendingInvitation';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
@@ -47,6 +47,8 @@ import { translateStaticText } from '../lib/translations';
 import { preferredAudioConstraints } from '../lib/mediaPreferences';
 import { DEFAULT_SERVER_HOST } from '../utils/server';
 import { buildWebMeetingUrl } from '../lib/meetingLinks';
+
+const groupIcon = groupIconAsset.src;
 
 const CHAT_FILTER_OPTIONS: { id: 'all' | 'unread' | 'direct' | 'groups' | 'online'; label: string }[] = [
   { id: 'all', label: 'All chats' },

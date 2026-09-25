@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { buildSignalUrl } from '../utils/server';
+import { SIGNAL_URL } from '../lib/env';
 
 interface Session {
   id: string;
@@ -71,7 +72,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     // Use the same secure signaling URL resolver as chat/meetings. On the
     // deployed HTTPS web app, mobile browsers block insecure ws:// fallbacks,
     // which leaves the viewer stuck on "Connecting".
-    const wsUrl = buildSignalUrl(import.meta.env.VITE_SIGNAL_URL);
+    const wsUrl = buildSignalUrl(SIGNAL_URL);
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {

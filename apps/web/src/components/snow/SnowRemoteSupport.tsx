@@ -25,13 +25,15 @@ import { useAuthStore } from '../../store/authStore';
 import { buildWebSessionJoinUrl } from '../../lib/meetingLinks';
 import { LottieScene } from '../lottie/LottieScene';
 import devicesChangingAnimation from '../../assets/animations/devicesChanging.json';
-import collaboratorIcon from '../../assets/collaborator.svg';
+import collaboratorIconAsset from '../../assets/collaborator.svg';
 import {
   formatAccessKey,
   getRecentConnections,
   removeRecentConnection,
 } from '../../lib/recentConnections';
 import type { RecentConnection } from '../../lib/recentConnections';
+
+const collaboratorIcon = collaboratorIconAsset.src;
 
 interface SnowRemoteSupportProps {
   localAuthKey: string | null;

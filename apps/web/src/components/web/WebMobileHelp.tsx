@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Archive, Copy, Download, FileText, Info, RefreshCw, ShieldCheck, X } from 'lucide-react';
-import logo from '../../assets/logo.png';
+import logoAsset from '../../assets/logo.png';
 import { useAuthStore } from '../../store/authStore';
 import { useDeviceStore } from '../../store/deviceStore';
 import { copyText, formatAccessCode } from '../../lib/webPlatform';
 import { notify } from '../NotificationProvider';
+
+const logo = logoAsset.src;
 
 /**
  * Phone Help sheet — the same entries as the desktop web sidebar's Help

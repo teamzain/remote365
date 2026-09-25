@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { API_URL } from '../../lib/env'
 import { useNavigate } from 'react-router-dom'
 
 // Shape of GET /api/billing/plans — the merged catalog (built-ins plus any
@@ -137,7 +138,7 @@ const PricingPlans: React.FC = () => {
     // Plain fetch (not the shared axios client) so a failed/unreachable request
     // falls back silently to the built-in catalog without firing the global
     // "Cannot connect to server" toast on this public marketing page.
-    const base = import.meta.env.VITE_API_URL || ''
+    const base = API_URL
     fetch(`${base}/api/billing/plans`)
       .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((data: { plans?: ApiPlan[] }) => {

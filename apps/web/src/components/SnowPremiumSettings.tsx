@@ -5,8 +5,8 @@ import { t } from '../lib/translations';
 import { TEXT_SIZE_OPTIONS, readTextScale, setTextScale } from '../lib/textSize';
 import api from '../lib/api';
 import { LicensesPanel } from './settings/LicensesPanel';
-import desktopDarkPreview from '../assets/desktop-dark.png';
-import desktopLightPreview from '../assets/desktop-light.png';
+import desktopDarkPreviewAsset from '../assets/desktop-dark.png';
+import desktopLightPreviewAsset from '../assets/desktop-light.png';
 import { applyStartWithWindowsPreference, readStartWithWindowsPreference } from '../lib/startupPreferences';
 import { applyCustomizationPreferences, readCustomizationPreferences, type SearchBehavior } from '../lib/customizationPreferences';
 import { MEETING_PREF_KEYS } from './MeetingPreviewModal';
@@ -14,6 +14,9 @@ import { readPreferredDevice, writePreferredDevice } from '../lib/mediaPreferenc
 import { applyEasyAccess, isEasyAccessEnabled, subscribeEasyAccess } from '../lib/easyAccess';
 import { addTempCode, getActiveTempCodes, removeTempCode } from '../lib/tempAccessCodes';
 import { hasUserFeature, hasUserPermission } from '../lib/permissions';
+
+const desktopDarkPreview = desktopDarkPreviewAsset.src;
+const desktopLightPreview = desktopLightPreviewAsset.src;
 
 interface SnowPremiumSettingsProps {
   user: any;

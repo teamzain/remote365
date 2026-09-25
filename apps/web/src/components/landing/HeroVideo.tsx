@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import GetStartedScreen from './GetStartedScreen'
 // Self-hosted copy of the design hand-off image (see LandingBackdrop).
-import communityImage from '../../assets/landing/community.png'
+import communityImageAsset from '../../assets/landing/community.png'
+
+const communityImage = communityImageAsset.src
 
 const ROTATING_WORDS = ['any device', 'any desktop', 'any mobile', 'any tablet', 'anywhere']
 

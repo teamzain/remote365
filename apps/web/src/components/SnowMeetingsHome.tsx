@@ -17,6 +17,7 @@ import api from '../lib/api';
 import { MeetingPreviewModal } from './MeetingPreviewModal';
 import { MeetingReadyModal } from './MeetingReadyModal';
 import { buildSignalUrl } from '../utils/server';
+import { SIGNAL_URL } from '../lib/env';
 import { buildWebMeetingUrl } from '../lib/meetingLinks';
 import { buildGoogleCalendarEventUrl } from '../lib/googleCalendar';
 import { LottieScene } from './lottie/LottieScene';
@@ -30,7 +31,7 @@ interface SnowMeetingsHomeProps {
 }
 
 const getMeetingsSignalUrl = () => {
-  const envUrl = import.meta.env.VITE_SIGNAL_URL;
+  const envUrl = SIGNAL_URL;
   try {
     return buildSignalUrl(envUrl);
   } catch {

@@ -4,8 +4,10 @@ import React, { useEffect, useRef } from 'react'
 // refused that host. Remuxed without the unused audio track and with
 // +faststart so playback starts before the whole file has arrived; the
 // poster is its first frame, shown until then (and for reduced motion).
-import backgroundVideo from '../../assets/landing/hero-video.mp4'
-import backgroundPoster from '../../assets/landing/hero-poster.jpg'
+// Files live in public/media with a version in the name, so they can be
+// cached forever (see next.config.mjs); bump the version when replacing one.
+const backgroundVideo = '/media/hero-video.v1.mp4'
+const backgroundPoster = '/media/hero-poster.v1.jpg'
 
 // Overlay opacity at the top of the page and once the first screen has
 // scrolled away. The home hero is designed for 40%; other pages open

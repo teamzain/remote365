@@ -1,11 +1,13 @@
+import { API_URL, IS_DEV, SERVER_HOST } from '../lib/env';
+
 export const PRODUCTION_SERVER_HOST = 'remote365.ai';
 // Deployed builds talk to the origin that served them (works unchanged on
-// remote365.ai AND pp.remote365.ai); `vite dev` keeps hitting prod unless
-// VITE_SERVER_HOST/VITE_API_URL override it.
+// remote365.ai AND pp.remote365.ai); `next dev` keeps hitting prod unless
+// NEXT_PUBLIC_SERVER_HOST/NEXT_PUBLIC_API_URL override it.
 export const DEFAULT_SERVER_HOST =
-  import.meta.env.VITE_SERVER_HOST
-  || import.meta.env.VITE_API_URL
-  || (!import.meta.env.DEV && typeof window !== 'undefined' && window.location.host
+  SERVER_HOST
+  || API_URL
+  || (!IS_DEV && typeof window !== 'undefined' && window.location.host
     ? window.location.host
     : PRODUCTION_SERVER_HOST);
 

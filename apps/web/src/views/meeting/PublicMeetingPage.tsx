@@ -5,8 +5,11 @@ import { MeetingPreviewModal } from '../../components/MeetingPreviewModal';
 import { SnowMeeting } from '../../components/SnowMeeting';
 import { normalizeMeetingCode } from '../../lib/meetingLinks';
 import { useAuthStore } from '../../store/authStore';
-import logo from '../../assets/logo.png';
-import faultIllustration from '../../assets/fault.png';
+import logoAsset from '../../assets/logo.png';
+import faultIllustrationAsset from '../../assets/fault.png';
+
+const logo = logoAsset.src;
+const faultIllustration = faultIllustrationAsset.src;
 
 /**
  * Public meeting landing page (Zoom-style). Anyone with the link lands here —

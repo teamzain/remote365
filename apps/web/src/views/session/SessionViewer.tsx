@@ -41,7 +41,7 @@ import {
 import { useSessionStore } from '../../store/sessionStore';
 import api from '../../lib/api';
 import { publishActiveSession } from '../../lib/activeSessions';
-import waitIllustration from '../../assets/wait.png';
+import waitIllustrationAsset from '../../assets/wait.png';
 import {
   clearDeviceNeedsPasswordUpdate,
   clearDeviceRemembered,
@@ -49,6 +49,8 @@ import {
   markDeviceNeedsPasswordUpdate,
   markDeviceRemembered,
 } from '../../lib/devicePasswordStatus';
+
+const waitIllustration = waitIllustrationAsset.src;
 
 // Generate a stable client ID for this session to handle React StrictMode double-mounts
 const viewerClientId = Math.random().toString(36).substring(7);

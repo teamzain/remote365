@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import api from '../lib/api';
 import { useAuthStore } from './authStore';
 import { buildSignalUrl } from '../utils/server';
+import { SIGNAL_URL } from '../lib/env';
 
 export interface ChatUser {
   id: string;
@@ -92,7 +93,7 @@ const getAuthToken = async (): Promise<string | null> => {
 };
 
 const getWsUrl = (): string => {
-  const envUrl = import.meta.env.VITE_SIGNAL_URL;
+  const envUrl = SIGNAL_URL;
   return normalizeSignalUrl(envUrl);
 };
 

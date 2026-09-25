@@ -1,8 +1,9 @@
 import axios from 'axios';
+import { API_URL, IS_DEV } from './env';
 
 // Deployed builds call the same origin that served the page (empty baseURL);
-// `vite dev` falls back to prod unless VITE_API_URL points elsewhere.
-const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'https://remote365.ai' : '');
+// `next dev` falls back to prod unless NEXT_PUBLIC_API_URL points elsewhere.
+const API_BASE_URL = API_URL || (IS_DEV ? 'https://remote365.ai' : '');
 
 const api = axios.create({
   baseURL: API_BASE_URL,

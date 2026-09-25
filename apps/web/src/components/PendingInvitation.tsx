@@ -1,5 +1,7 @@
 import React from 'react';
-import pendingIllustration from '../assets/pending.jpeg';
+import pendingIllustrationAsset from '../assets/pending.jpeg';
+
+const pendingIllustration = pendingIllustrationAsset.src;
 
 interface PendingInvitationProps {
   /** Name of the other person in the conversation. */

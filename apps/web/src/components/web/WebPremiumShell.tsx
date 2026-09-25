@@ -21,8 +21,8 @@ import {
   Video,
   X,
 } from 'lucide-react';
-import logo from '../../assets/logo.png';
-import upgradeIcon from '../../assets/upgrade.svg';
+import logoAsset from '../../assets/logo.png';
+import upgradeIconAsset from '../../assets/upgrade.svg';
 import { useAuthStore } from '../../store/authStore';
 import { useDeviceStore } from '../../store/deviceStore';
 import { copyText, formatAccessCode } from '../../lib/webPlatform';
@@ -35,6 +35,9 @@ import { useShellChatEvents } from '../../lib/useShellChatEvents';
 import { useNotificationStore, type WebNotification } from '../../store/notificationStore';
 import { useChatStore } from '../../store/chatStore';
 import { WebNotificationPanel } from './WebNotificationPanel';
+
+const logo = logoAsset.src;
+const upgradeIcon = upgradeIconAsset.src;
 
 interface WebPremiumShellProps {
   view: string;

@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Box } from '@mui/material'
 import SiteLayout from '../components/landing/SiteLayout'
+import { API_URL } from '../lib/env'
 
 type PlatformId = 'macos' | 'ios' | 'windows' | 'android'
 
 // Deployed builds serve /downloads from the same origin (prod and preprod each
 // host their own tree); a dev build points at the API host it's configured for.
-const DOWNLOADS_ORIGIN = import.meta.env.VITE_API_URL || ''
+const DOWNLOADS_ORIGIN = API_URL
 const DESKTOP_DOWNLOADS = `${DOWNLOADS_ORIGIN}/downloads/desktop`
 // Used when latest.yml can't be fetched (it has no CORS header, so any
 // cross-origin page — e.g. the prod site reading preprod's downloads — falls

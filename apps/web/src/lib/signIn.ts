@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuthStore } from '../store/authStore'
+import { API_URL } from './env'
 
 // Sign-in rules shared by the /login screen (views/auth/AuthScreen) and the
 // sign-in panel on the public site, so both behave identically: same API
@@ -54,7 +55,7 @@ export type OAuthProvider = 'google' | 'microsoft'
 
 /** Where to send the browser to start Google / Microsoft sign-in. */
 export function oauthStartUrl(provider: OAuthProvider, options: { business?: boolean } = {}) {
-  const apiUrl = import.meta.env.VITE_API_URL || window.location.origin
+  const apiUrl = API_URL || window.location.origin
   const returnUrl = `${window.location.origin}/auth/callback`
   return `${apiUrl}/api/auth/oauth/${provider}?platform=web&returnUrl=${encodeURIComponent(returnUrl)}${options.business ? '&accountType=business' : ''}`
 }

@@ -1,7 +1,9 @@
 import React from 'react'
 import { MonitorSmartphone, ShieldCheck, Zap } from 'lucide-react'
 import ScrollSplitCard, { type ScrollSplitCardItem } from './ScrollSplitCard'
-import splitImage from '../../assets/landing/split-card.jpg'
+import splitImageAsset from '../../assets/landing/split-card.jpg'
+
+const splitImage = splitImageAsset.src
 
 const ICON = { size: 28, strokeWidth: 1.75 } as const
 

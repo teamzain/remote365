@@ -5,7 +5,7 @@ import {
   MoreVertical, X, Copy, Mail, CheckCircle2, RefreshCw, MousePointer2, Send,
   ScreenShare, ScreenShareOff, Volume2, User, Info, Pause, Play, Check, Maximize2
 } from 'lucide-react';
-import logo from '../assets/logo.png';
+import logoAsset from '../assets/logo.png';
 
 const formatElapsed = (totalSeconds: number) => {
   const h = Math.floor(totalSeconds / 3600);
@@ -42,7 +42,10 @@ import ParticipantAudioMixer from './meeting/ParticipantAudioMixer';
 import { ScreenShareModal } from './ScreenShareModal';
 import { MeetingSettingsPanel } from './MeetingSettingsPanel';
 import { buildSignalUrl, DEFAULT_SERVER_HOST } from '../utils/server';
+import { SIGNAL_URL } from '../lib/env';
 import { buildWebMeetingUrl } from '../lib/meetingLinks';
+
+const logo = logoAsset.src;
 
 const readMeetingPref = (key: string, fallback = '') => {
   try {
@@ -95,7 +98,7 @@ interface ControlRequest {
 const normalizeMeetingCode = (value: string) => String(value || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
 const getMeetingWsUrl = () => {
-  const envUrl = import.meta.env.VITE_SIGNAL_URL;
+  const envUrl = SIGNAL_URL;
   return normalizeMeetingSignalUrl(envUrl);
 };
 

@@ -14,9 +14,13 @@ import { LicenseUsageTab } from './admin-settings/LicenseUsageTab';
 import { AdminDeviceGroupsTab } from './admin-settings/AdminDeviceGroupsTab';
 import { AdminDevicesTab } from './admin-settings/AdminDevicesTab';
 import { PoliciesTab } from './admin-settings/PoliciesTab';
-import cardImage22 from '../assets/22.png';
-import cardImage33 from '../assets/33.png';
-import cardImage11 from '../assets/11.png';
+import cardImage22Asset from '../assets/22.png';
+import cardImage33Asset from '../assets/33.png';
+import cardImage11Asset from '../assets/11.png';
+
+const cardImage22 = cardImage22Asset.src;
+const cardImage33 = cardImage33Asset.src;
+const cardImage11 = cardImage11Asset.src;
 
 const DEFAULTS = {
   defaultRelayUrl: 'relay.connect-x.io',

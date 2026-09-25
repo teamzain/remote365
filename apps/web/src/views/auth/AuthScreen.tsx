@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Eye, EyeOff, RefreshCw, ShieldCheck } from 'lucide-react';
-import logo from '../../assets/logo.png';
+import logoAsset from '../../assets/logo.png';
 import api from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import AuthResultModal, { type AuthResultState } from '../../components/auth/AuthResultModal';
@@ -10,6 +10,8 @@ import { ta } from '../../lib/authTranslations';
 import { BusinessSignupSteps, BusinessStepper } from '../../components/auth/BusinessSignupSteps';
 import { hasErrors, validateBusiness, validateBusinessEmail, validateCompanyStep } from '../../lib/businessValidation';
 import { oauthStartUrl, persistRememberMe, rememberedEmail, rememberMeDefault, signInFailure, twoFactorFailure } from '../../lib/signIn';
+
+const logo = logoAsset.src;
 
 type AuthMode = 'login' | 'signup' | 'forgot' | 'reset';
 

@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import logo from '../../assets/logo.png';
+import logoAsset from '../../assets/logo.png';
+
+const logo = logoAsset.src;
 
 export const WebSplashScreen: React.FC<{ isReady: boolean; onFinished?: () => void }> = ({ isReady, onFinished }) => {
   const [shouldRender, setShouldRender] = useState(true);

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, Video, VideoOff, Volume2, Check, ChevronDown } from 'lucide-react';
-import logo from '../assets/logo.png';
+import logoAsset from '../assets/logo.png';
+
+const logo = logoAsset.src;
 
 /**
  * Pre-join "Meeting preview" dialog (Figma: join meeting preview, 854 x 390).
