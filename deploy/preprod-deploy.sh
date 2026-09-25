@@ -76,8 +76,15 @@ sync_release() {
   local rel=$ROOT/releases/$1
   [ -d "$rel" ] || die "release dir $rel not found"
   [ -f "$rel/$COMPOSE_FILE" ] && [ -f "$rel/Caddyfile" ] || die "release is missing $COMPOSE_FILE or Caddyfile"
+  # Compare against the file the RUNNING caddy container actually mounts: a
+  # bind mount keeps the path it was created with, so a container from the
+  # old checkout keeps serving that copy even after app/Caddyfile is updated.
+  local mounted
+  mounted=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/etc/caddy/Caddyfile"}}{{.Source}}{{end}}{{end}}' "${PROJECT}-caddy-1" 2>/dev/null || true)
   CADDY_CHANGED=1
-  [ -f "$APP/Caddyfile" ] && cmp -s "$rel/Caddyfile" "$APP/Caddyfile" && CADDY_CHANGED=0
+  if [ "$mounted" = "$APP/Caddyfile" ] && [ -f "$mounted" ] && cmp -s "$rel/Caddyfile" "$mounted"; then
+    CADDY_CHANGED=0
+  fi
   # .env is the only file in app/ that is not part of a release; keep it.
   rsync -a --delete --exclude '.env' "$rel/" "$APP/"
   dc config -q || die "docker compose config rejected the release"
@@ -122,7 +129,15 @@ backup_db() {
   [ -s "$BACKUP" ] || die "backup file is empty"
   docker exec -i "$PG_CONTAINER" pg_restore -l <"$BACKUP" >/dev/null || die "backup does not verify"
   log "Database backed up to $BACKUP ($(du -h "$BACKUP" | cut -f1))"
-  ls -1t "$ROOT"/backups/*.dump 2>/dev/null | tail -n +$((KEEP_BACKUPS + 1)) | xargs -r rm -f
+  prune_old "$ROOT/backups" '*.dump' "$KEEP_BACKUPS"
+}
+
+# Delete all but the newest N entries matching a glob. Tolerates no matches
+# (a bare `ls glob | ...` exits non-zero under pipefail and would abort).
+prune_old() {
+  local dir=$1 glob=$2 keep=$3
+  find "$dir" -maxdepth 1 -name "$glob" -printf '%T@ %p\n' 2>/dev/null \
+    | sort -rn | tail -n +$((keep + 1)) | cut -d' ' -f2- | xargs -r rm -rf
 }
 
 prisma() {
@@ -214,8 +229,7 @@ post_checks() {
 
 cleanup() {
   printf '%s\n' "$SHA" >"$ROOT/current-sha"
-  ls -1dt "$ROOT"/releases/*/ 2>/dev/null | tail -n +$((KEEP_RELEASES + 1)) | xargs -r rm -rf
-  ls -1t "$ROOT"/releases/*.tgz 2>/dev/null | tail -n +$((KEEP_RELEASES + 1)) | xargs -r rm -f
+  prune_old "$ROOT/releases" '[0-9a-f]*' "$KEEP_RELEASES"
   docker image prune -f >/dev/null 2>&1 || true
   # Keep the npm-install layers (they make builds fast and reliable) but stop
   # the build cache growing without bound. Flag name depends on the version.
