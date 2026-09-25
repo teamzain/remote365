@@ -1,25 +1,17 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
 import { useChatStore } from './store/chatStore'
-import Landing from './views/Landing'
-import Downloads from './views/Downloads'
-import PricingPage from './views/landing/PricingPage'
-import ProductPage from './views/landing/ProductPage'
 import WebDashboardPage from './views/dashboard/WebDashboardPage'
 import SessionViewer from './views/session/SessionViewer'
 import AuthScreen from './views/auth/AuthScreen'
 import AuthCallback from './views/auth/AuthCallback'
 import Onboard from './views/auth/Onboard'
-import PrivacyPolicy from './views/legal/PrivacyPolicy'
-import TermsOfService from './views/legal/TermsOfService'
-import DeleteAccount from './views/legal/DeleteAccount'
-import Docs from './views/Docs'
-import Contact from './views/Contact'
 import PublicMeetingPage from './views/meeting/PublicMeetingPage'
 import PublicSessionJoinPage from './views/session/PublicSessionJoinPage'
 import SuperAdminPage from './views/admin/SuperAdminPage'
 import { WebSplashScreen } from './components/web/WebSplashScreen'
 import HostMachineLockOverlay from './components/HostMachineLockOverlay'
+import ExitToSite from './spa/ExitToSite'
 
 import React, { useEffect } from 'react'
 
@@ -118,22 +110,8 @@ function App() {
       <WebSplashScreen isReady={isInitialized} onFinished={() => setShowDashboardSplash(false)} />
     )}
     <Routes>
-      <Route path="/" element={<Landing />} />
-      <Route path="/downloads" element={<Downloads />} />
-      {/* Retired pages. Temporary client redirects until the server sends 301s. */}
-      <Route path="/features" element={<Navigate to="/product" replace />} />
-      <Route path="/solutions" element={<Navigate to="/product" replace />} />
-      <Route path="/pricing" element={<PricingPage />} />
-      <Route path="/resources" element={<Navigate to="/docs" replace />} />
-      <Route path="/enterprise" element={<Navigate to="/pricing" replace />} />
-      <Route path="/customers" element={<Navigate to="/" replace />} />
-      <Route path="/product" element={<ProductPage />} />
-      <Route path="/privacy" element={<PrivacyPolicy />} />
-      <Route path="/terms" element={<TermsOfService />} />
-      {/* Linked from Google Play Data safety as the account-deletion request URL. */}
-      <Route path="/delete-account" element={<DeleteAccount />} />
-      <Route path="/docs" element={<Docs />} />
-      <Route path="/contact" element={<Contact />} />
+      {/* The website pages (/, /pricing, /docs …) are server-rendered by Next,
+          outside this app; see src/app/(site). */}
       <Route path="/meeting/:meetingId" element={<PublicMeetingPage />} />
       {/* Support-session invite link (email "Join session", Share) */}
       <Route path="/join/:code" element={<PublicSessionJoinPage />} />
@@ -165,6 +143,9 @@ function App() {
       <Route path="/2fa" element={<AuthScreen initialMode="login" />} />
       <Route path="/onboard" element={<Onboard />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
+
+      {/* Anything else: a website page (full load) or an in-app 404. */}
+      <Route path="*" element={<ExitToSite />} />
     </Routes>
     </>
   )

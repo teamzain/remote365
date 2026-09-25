@@ -1,3 +1,5 @@
+'use client'
+
 import React, {
   createContext,
   useCallback,
@@ -11,6 +13,7 @@ import React, {
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { useHydrated } from '@/lib/useHydrated'
 
 // Port of Cult UI's "Expandable Screen" (MIT, github.com/nolly-studio/cult-ui,
 // registry item cult-ui.com/r/expandable-screen.json): a trigger whose
@@ -35,7 +38,8 @@ interface ExpandableScreenContextValue {
   contentRadius: string
   animationDuration: number
   triggerId: string
-  restoreFocus: React.MutableRefObject<boolean>
+  /** True once after a collapse: the trigger should take focus back. */
+  takeFocusBack: () => boolean
 }
 
 const ExpandableScreenContext = createContext<ExpandableScreenContextValue | null>(null)
@@ -84,6 +88,12 @@ export function ExpandableScreen({
     onExpandChange?.(false)
   }, [onExpandChange])
 
+  const takeFocusBack = useCallback(() => {
+    const pending = restoreFocus.current
+    restoreFocus.current = false
+    return pending
+  }, [])
+
   useEffect(() => {
     if (!isExpanded) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') collapse() }
@@ -108,7 +118,7 @@ export function ExpandableScreen({
         contentRadius,
         animationDuration,
         triggerId: `${layoutId}-trigger`,
-        restoreFocus,
+        takeFocusBack,
       }}
     >
       {children}
@@ -121,24 +131,46 @@ interface ExpandableScreenTriggerProps {
   className?: string
   /** Accessible name when the children are not plain text. */
   ariaLabel?: string
+  /**
+   * Render a link to this page instead of a button. A plain click opens the
+   * screen; before hydration, without JavaScript, or with a modifier key
+   * (open in a new tab) it is an ordinary link.
+   */
+  href?: string
 }
 
 export function ExpandableScreenTrigger({
   children,
   className = '',
   ariaLabel,
+  href,
 }: ExpandableScreenTriggerProps) {
-  const { isExpanded, expand, layoutId, triggerRadius, triggerId, restoreFocus } = useExpandableScreen()
-  const buttonRef = useRef<HTMLButtonElement>(null)
+  const { isExpanded, expand, layoutId, triggerRadius, triggerId, takeFocusBack } = useExpandableScreen()
+  const triggerRef = useRef<HTMLElement>(null)
 
   // The trigger unmounts while the screen is open; hand focus back to it
   // when it returns after a close.
   useEffect(() => {
-    if (!isExpanded && restoreFocus.current) {
-      restoreFocus.current = false
-      buttonRef.current?.focus()
-    }
-  }, [isExpanded, restoreFocus])
+    if (!isExpanded && takeFocusBack()) triggerRef.current?.focus()
+  }, [isExpanded, takeFocusBack])
+
+  const onLinkClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    e.preventDefault()
+    expand()
+  }
+
+  const common = {
+    id: triggerId,
+    'aria-haspopup': 'dialog' as const,
+    'aria-label': ariaLabel,
+    initial: { opacity: 0, scale: 0.8 },
+    animate: { opacity: 1, scale: 1 },
+    transition: { delay: 0.2 },
+    exit: { opacity: 0, scale: 0.8 },
+    layout: false,
+    className: 'xs-trigger-button',
+  }
 
   return (
     <>
@@ -154,22 +186,15 @@ export function ExpandableScreenTrigger({
               className="xs-trigger-bg"
             />
             {/* Content layer, faded out while the background expands */}
-            <motion.button
-              ref={buttonRef}
-              id={triggerId}
-              type="button"
-              aria-haspopup="dialog"
-              aria-label={ariaLabel}
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.2 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              layout={false}
-              onClick={expand}
-              className="xs-trigger-button"
-            >
-              {children}
-            </motion.button>
+            {href ? (
+              <motion.a ref={triggerRef} href={href} onClick={onLinkClick} {...common}>
+                {children}
+              </motion.a>
+            ) : (
+              <motion.button ref={triggerRef} type="button" onClick={expand} {...common}>
+                {children}
+              </motion.button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -194,6 +219,10 @@ export function ExpandableScreenContent({
   ariaLabel,
 }: ExpandableScreenContentProps) {
   const { isExpanded, collapse, layoutId, contentRadius, animationDuration } = useExpandableScreen()
+  // There is no <body> to portal into on the server; the panel is closed on
+  // first render anyway, so nothing is lost by waiting for hydration.
+  const hydrated = useHydrated()
+  if (!hydrated) return null
 
   return createPortal(
     <AnimatePresence initial={false}>
@@ -256,6 +285,7 @@ const TRIGGER_STYLES = `
     background: none;
     color: inherit;
     font: inherit;
+    text-decoration: none;
     cursor: pointer;
   }
   .xs-trigger-button:focus-visible {

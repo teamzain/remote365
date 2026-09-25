@@ -1,6 +1,8 @@
+'use client'
+
 import React from 'react'
 import { Eye, Database, Lock, Cookie, UserCheck, Shield, MessageSquare } from 'lucide-react'
-import LegalPage, { type LegalSection } from '../../components/landing/LegalPage'
+import LegalPage, { type LegalSection } from '@/components/landing/LegalPage'
 
 const SECTIONS: LegalSection[] = [
   {

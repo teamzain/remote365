@@ -1,5 +1,5 @@
 import React from 'react'
-import { Link as RouterLink } from 'react-router-dom'
+import SiteLink from '@/components/site/SiteLink'
 
 // tabler:arrow-up rotated 90° → arrow pointing right, primary orange
 const ArrowRightIcon: React.FC = () => (
@@ -20,18 +20,18 @@ const HomeAwaySection: React.FC = () => (
       <div className="home-away-text">
         <h2 className="home-away-title">Your home, always within reach</h2>
         <p className="home-away-sub">
-          Reach your home PC, media server, or family's computers from anywhere and help them out in a click. Free forever for personal use.
+          Reach your home PC, media server, or family’s computers from anywhere and help them out in a click. Start with a 15-day free trial.
         </p>
       </div>
 
       <div className="home-away-actions">
-        <RouterLink to="/register" className="home-away-btn-primary">
+        <SiteLink href="/register" className="home-away-btn-primary">
           Get started for free
-        </RouterLink>
-        <RouterLink to="/product" className="home-away-btn-ghost">
+        </SiteLink>
+        <SiteLink href="/product" className="home-away-btn-ghost">
           Learn more
           <ArrowRightIcon />
-        </RouterLink>
+        </SiteLink>
       </div>
     </div>
 
@@ -39,6 +39,8 @@ const HomeAwaySection: React.FC = () => (
     <img
       src="/105f060441fe41618729fcd5695c6afc5a3d4f4f.png"
       alt="Remote365 running on a phone"
+      loading="lazy"
+      decoding="async"
       className="home-away-media"
     />
 

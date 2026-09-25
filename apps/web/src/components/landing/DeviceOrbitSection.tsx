@@ -28,7 +28,7 @@ const DeviceOrbitSection: React.FC = () => (
       <div className="orbit-ring" style={{ width: 'min(600px, 68vw)' }} />
 
       {/* Center logo */}
-      <img src="/logo.png" alt="Remote365" className="orbit-logo" />
+      <img src="/logo.png" alt="Remote365" loading="lazy" className="orbit-logo" />
 
       {/* Device ID pills revolving around the ring */}
       {PILLS.map(pill => (

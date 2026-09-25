@@ -1,8 +1,10 @@
+'use client'
+
 import React, { useState } from 'react'
-import { Link as RouterLink } from 'react-router-dom'
+import SiteLink from '@/components/site/SiteLink'
 import { Mail, Check } from 'lucide-react'
-import SiteLayout from '../components/landing/SiteLayout'
-import api from '../lib/api'
+import SiteContent from './SiteContent'
+import api from '@/lib/api'
 
 type Status = 'idle' | 'sending' | 'sent' | 'error'
 
@@ -33,14 +35,14 @@ const Contact: React.FC = () => {
         message: form.message,
       })
       setStatus('sent')
-    } catch (err: any) {
+    } catch (err) {
       setStatus('error')
-      setError(err?.response?.data?.error || 'Something went wrong. Please try again.')
+      setError((err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Something went wrong. Please try again.')
     }
   }
 
   return (
-    <SiteLayout>
+    <SiteContent>
       <div className="ct-page">
 
         <main className="ct-main">
@@ -49,13 +51,13 @@ const Contact: React.FC = () => {
             <span className="ct-eyebrow">Have Questions?</span>
             <h1 className="ct-title">Get In Touch With us</h1>
             <p className="ct-lede">
-              We're here to support your remote access needs, answer questions about the product, and
+              We’re here to support your remote access needs, answer questions about the product, and
               discuss enterprise solutions. Use the form to send us a message, or contact us directly
               via email.
             </p>
             <p className="ct-para">
               Have questions about connecting a device or running a support session? Find instant
-              answers in our <RouterLink to="/docs" className="ct-link">Docs &amp; Help Center</RouterLink>.
+              answers in our <SiteLink href="/docs" className="ct-link">Docs &amp; Help Center</SiteLink>.
             </p>
             <p className="ct-para">
               Looking to roll Remote365 out across your team? <strong>Email us now for a free consultation.</strong>
@@ -74,8 +76,8 @@ const Contact: React.FC = () => {
               <div className="ct-success">
                 <span className="ct-check"><Check size={26} strokeWidth={3} /></span>
                 <h2>Message sent</h2>
-                <p>Thanks for reaching out — we've emailed you a confirmation and will be in touch soon.</p>
-                <RouterLink to="/" className="ct-btn">Back to home</RouterLink>
+                <p>Thanks for reaching out — we’ve emailed you a confirmation and will be in touch soon.</p>
+                <SiteLink href="/" className="ct-btn">Back to home</SiteLink>
               </div>
             ) : (
               <form onSubmit={submit} noValidate>
@@ -101,7 +103,7 @@ const Contact: React.FC = () => {
                 {error && <p className="ct-error">{error}</p>}
 
                 <p className="ct-privacy">
-                  By submitting this form, you agree to our <RouterLink to="/privacy" className="ct-link">Privacy Policy</RouterLink>
+                  By submitting this form, you agree to our <SiteLink href="/privacy" className="ct-link">Privacy Policy</SiteLink>
                 </p>
 
                 <button type="submit" className="ct-btn" disabled={status === 'sending'}>
@@ -237,7 +239,7 @@ const Contact: React.FC = () => {
           }
         `}</style>
       </div>
-    </SiteLayout>
+    </SiteContent>
   )
 }
 

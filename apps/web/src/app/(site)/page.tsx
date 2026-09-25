@@ -1,28 +1,35 @@
-import React from 'react'
-import { Box } from '@mui/material'
-import SiteLayout from '../components/landing/SiteLayout'
-import HeroVideo from '../components/landing/HeroVideo'
-import CapabilityMarquee from '../components/landing/CapabilityMarquee'
-import DeviceOrbitSection from '../components/landing/DeviceOrbitSection'
-import EasyAccessSection from '../components/landing/EasyAccessSection'
-import AccessAnywhereSection from '../components/landing/AccessAnywhereSection'
-import CloudOrbitSection from '../components/landing/CloudOrbitSection'
-import ShowcaseImage from '../components/landing/ShowcaseImage'
-import HomeAwaySection from '../components/landing/HomeAwaySection'
-import SimpleReliableSection from '../components/landing/SimpleReliableSection'
-import GetStartedCta from '../components/landing/GetStartedCta'
-import { ScrollReveal } from '../components/landing/ScrollReveal'
+import SiteContent from '@/components/site/SiteContent'
+import HeroVideo from '@/components/landing/HeroVideo'
+import CapabilityMarquee from '@/components/landing/CapabilityMarquee'
+import DeviceOrbitSection from '@/components/landing/DeviceOrbitSection'
+import EasyAccessSection from '@/components/landing/EasyAccessSection'
+import AccessAnywhereSection from '@/components/landing/AccessAnywhereSection'
+import CloudOrbitSection from '@/components/landing/CloudOrbitSection'
+import ShowcaseImage from '@/components/landing/ShowcaseImage'
+import HomeAwaySection from '@/components/landing/HomeAwaySection'
+import SimpleReliableSection from '@/components/landing/SimpleReliableSection'
+import GetStartedCta from '@/components/landing/GetStartedCta'
+import { ScrollReveal } from '@/components/landing/ScrollReveal'
+import { DEFAULT_TITLE, pageMetadata } from '@/lib/seo'
 
-const Landing: React.FC = () => {
+export const metadata = pageMetadata({
+  title: DEFAULT_TITLE,
+  absoluteTitle: true,
+  description:
+    'Remote365 is remote desktop software for teams and families: reach unattended Windows and Android devices, run support sessions with a code, host video meetings and chat, with end-to-end encrypted remote sessions.',
+  path: '/',
+})
+
+export default function HomePage() {
   return (
-    <SiteLayout heroUnderNav>
-      <Box component="main">
+    <SiteContent heroUnderNav>
+      <main>
         <HeroVideo />
 
         <ScrollReveal delay={0.1}>
-          <Box sx={{ pt: { xs: 6, md: 9 } }}>
+          <div className="home-marquee">
             <CapabilityMarquee />
-          </Box>
+          </div>
         </ScrollReveal>
 
         <ScrollReveal delay={0.15}>
@@ -78,10 +85,7 @@ const Landing: React.FC = () => {
         <ScrollReveal delay={0.15}>
           <GetStartedCta />
         </ScrollReveal>
-
-      </Box>
-    </SiteLayout>
+      </main>
+    </SiteContent>
   )
 }
-
-export default Landing

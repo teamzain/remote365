@@ -1,5 +1,5 @@
 import React from 'react'
-import { Link as RouterLink } from 'react-router-dom'
+import SiteLink from '@/components/site/SiteLink'
 
 interface GetStartedCtaProps {
   heading?: string
@@ -21,7 +21,7 @@ const GetStartedCta: React.FC<GetStartedCtaProps> = ({
 
       <div className="cta-content">
         <h2 className="cta-heading">{heading}</h2>
-        <RouterLink to={ctaHref} className="cta-btn">{ctaText}</RouterLink>
+        <SiteLink href={ctaHref} className="cta-btn">{ctaText}</SiteLink>
       </div>
     </div>
 

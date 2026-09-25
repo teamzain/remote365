@@ -1,6 +1,9 @@
+'use client'
+
 import React, { useState, useEffect } from 'react'
-import { Link as RouterLink, useLocation } from 'react-router-dom'
-import { useAuthStore } from '../../store/authStore'
+import { usePathname } from 'next/navigation'
+import SiteLink from '@/components/site/SiteLink'
+import { useSignedIn } from '@/lib/useSignedIn'
 import GetStartedScreen from './GetStartedScreen'
 
 const NAV_LINKS = [
@@ -20,8 +23,8 @@ export interface NavbarProps {
 }
 
 const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, variant = 'default' }) => {
-  const { accessToken, user } = useAuthStore()
-  const { pathname } = useLocation()
+  const signedIn = useSignedIn()
+  const pathname = usePathname()
   const [scrolled, setScrolled] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const glass = variant === 'glass'
@@ -66,22 +69,22 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
 
           {/* Logo + links */}
           <div className="navbar-left">
-            <RouterLink to="/" className={glass ? 'navbar-brand navbar-brand-glass' : 'navbar-brand'}>
+            <SiteLink href="/" className={glass ? 'navbar-brand navbar-brand-glass' : 'navbar-brand'}>
               <img src="/logo.png" alt="Remote365" width={36} height={36} />
               <span style={{ color: logoColor }}>Remote365</span>
-            </RouterLink>
+            </SiteLink>
 
             {!glass && (
               <nav className="navbar-links">
                 {links.map(item => (
-                  <RouterLink
+                  <SiteLink
                     key={item.label}
-                    to={item.path}
+                    href={item.path}
                     className="navbar-link"
                     style={{ color: isActive(item.path) ? '#FF8A00' : fg }}
                   >
                     {item.label}
-                  </RouterLink>
+                  </SiteLink>
                 ))}
               </nav>
             )}
@@ -91,42 +94,42 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
           {glass && (
             <nav className="navbar-links navbar-pill">
               {links.map(item => (
-                <RouterLink
+                <SiteLink
                   key={item.label}
-                  to={item.path}
+                  href={item.path}
                   className="navbar-link"
                   style={{ color: isActive(item.path) ? '#FF8A00' : fg }}
                 >
                   {item.label}
-                </RouterLink>
+                </SiteLink>
               ))}
             </nav>
           )}
 
           {/* Actions */}
           <div className="navbar-actions">
-            {accessToken ? (
-              <RouterLink
-                to="/dashboard"
+            {signedIn ? (
+              <SiteLink
+                href="/dashboard"
                 className={glass ? 'navbar-btn navbar-btn-pill navbar-btn-pill-outline' : 'navbar-btn navbar-btn-outline'}
               >
-                {user?.name ? user.name : 'Dashboard'}
-              </RouterLink>
+                Dashboard
+              </SiteLink>
             ) : (
-              <RouterLink
-                to="/login"
+              <SiteLink
+                href="/login"
                 className={glass ? 'navbar-btn navbar-btn-pill navbar-btn-pill-outline' : 'navbar-btn navbar-btn-outline'}
               >
                 {glass ? 'Sign In' : 'Login'}
-              </RouterLink>
+              </SiteLink>
             )}
             {glass ? (
               // Morphs into the full-screen "Get started" chooser
               <GetStartedScreen variant="nav" />
             ) : (
-              <RouterLink to="/register" className="navbar-btn navbar-btn-primary">
+              <SiteLink href="/register" className="navbar-btn navbar-btn-primary">
                 Get Started
-              </RouterLink>
+              </SiteLink>
             )}
           </div>
 
@@ -151,33 +154,33 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
 
           {/* CTA buttons — in the top-right dark zone */}
           <div className="tri-top-right-content">
-            <RouterLink
-              to="/login"
+            <SiteLink
+              href="/login"
               onClick={() => setMenuOpen(false)}
               className="tri-link-btn tri-link-outline"
             >
               {glass ? 'Sign In' : 'Login'}
-            </RouterLink>
-            <RouterLink
-              to="/register"
+            </SiteLink>
+            <SiteLink
+              href="/register"
               onClick={() => setMenuOpen(false)}
               className="tri-link-btn tri-link-filled"
             >
               Get Started
-            </RouterLink>
+            </SiteLink>
           </div>
 
           {/* Nav links — in the bottom-left orange zone */}
           <div className="tri-bottom-left-content">
             {links.map(item => (
-              <RouterLink
+              <SiteLink
                 key={item.label}
-                to={item.path}
+                href={item.path}
                 onClick={() => setMenuOpen(false)}
                 className="tri-nav-link"
               >
                 {item.label}
-              </RouterLink>
+              </SiteLink>
             ))}
           </div>
         </div>

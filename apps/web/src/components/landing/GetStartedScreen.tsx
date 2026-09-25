@@ -1,5 +1,7 @@
+'use client'
+
 import React from 'react'
-import { Link as RouterLink } from 'react-router-dom'
+import SiteLink from '@/components/site/SiteLink'
 import {
   ArrowRight,
   Download,
@@ -16,7 +18,7 @@ import {
   ExpandableScreenTrigger,
   useExpandableScreen,
 } from './ExpandableScreen'
-import { useAuthStore } from '../../store/authStore'
+import { useSignedIn } from '@/lib/useSignedIn'
 
 // Points and copy are the site's existing claims (hero + feature cards).
 const POINTS = [
@@ -50,8 +52,8 @@ const ActionLink: React.FC<{ action: Action }> = ({ action }) => {
   const { Icon } = action
   return (
     // Collapse too, for the case where the link points at the current page.
-    <RouterLink
-      to={action.to}
+    <SiteLink
+      href={action.to}
       onClick={collapse}
       className={`gs-action${action.primary ? ' gs-action--primary' : ''}`}
     >
@@ -61,12 +63,12 @@ const ActionLink: React.FC<{ action: Action }> = ({ action }) => {
         <span className="gs-action-desc">{action.description}</span>
       </span>
       <ArrowRight className="gs-action-arrow" size={18} strokeWidth={2} />
-    </RouterLink>
+    </SiteLink>
   )
 }
 
 const Panel: React.FC = () => {
-  const signedIn = Boolean(useAuthStore(s => s.accessToken))
+  const signedIn = useSignedIn()
   const { collapse } = useExpandableScreen()
   const actions = signedIn ? signedInActions : signedOutActions
 
@@ -94,7 +96,7 @@ const Panel: React.FC = () => {
         {!signedIn && (
           <p className="gs-signin">
             Already have an account?{' '}
-            <RouterLink to="/login" onClick={collapse}>Sign in</RouterLink>
+            <SiteLink href="/login" onClick={collapse}>Sign in</SiteLink>
           </p>
         )}
       </div>

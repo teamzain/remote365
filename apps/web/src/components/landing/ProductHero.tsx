@@ -1,5 +1,5 @@
 import React from 'react'
-import { Link as RouterLink } from 'react-router-dom'
+import SiteLink from '@/components/site/SiteLink'
 import CapabilityMarquee from './CapabilityMarquee'
 
 interface ProductHeroProps {
@@ -14,7 +14,7 @@ interface ProductHeroProps {
 const ProductHero: React.FC<ProductHeroProps> = ({
   heading = 'Remote access for everyone, everywhere',
   description = 'Connect to any device, from anywhere. Unique 9-digit device IDs, end-to-end encrypted sessions, and one-click remote support — no VPN, no port forwarding, no setup.',
-  ctaText = 'Get started free',
+  ctaText = 'Start your free trial',
   ctaHref = '/register',
   image = '/product.png',
   imageAlt = 'Remote365 Dashboard',
@@ -29,7 +29,7 @@ const ProductHero: React.FC<ProductHeroProps> = ({
       </div>
 
       {/* CTA */}
-      <RouterLink to={ctaHref} className="ph-cta">{ctaText}</RouterLink>
+      <SiteLink href={ctaHref} className="ph-cta">{ctaText}</SiteLink>
 
       {/* Dashboard image */}
       <div className="ph-image-wrap">

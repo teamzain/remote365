@@ -1,5 +1,5 @@
 import React from 'react'
-import { Link as RouterLink } from 'react-router-dom'
+import SiteLink from '@/components/site/SiteLink'
 
 // tabler:arrow-up rotated 90° → arrow pointing right, primary orange
 const ArrowRightIcon: React.FC = () => (
@@ -47,16 +47,16 @@ const AccessAnywhereSection: React.FC<AccessAnywhereSectionProps> = ({
           <p className="aa-sub">{subtitle}</p>
         </div>
         {linkLabel && (
-          <RouterLink to={linkTo} className="aa-link">
+          <SiteLink href={linkTo} className="aa-link">
             {linkLabel}
             <ArrowRightIcon />
-          </RouterLink>
+          </SiteLink>
         )}
       </div>
 
       {/* Visual */}
       {image
-        ? <img src={image} alt="" className={`aa-media${illustration ? ' aa-media--contain' : ''}`} />
+        ? <img src={image} alt="" loading="lazy" decoding="async" className={`aa-media${illustration ? ' aa-media--contain' : ''}`} />
         : <div className="aa-media" aria-hidden="true" />}
 
     </div>

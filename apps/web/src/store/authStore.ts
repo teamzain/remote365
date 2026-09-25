@@ -1,8 +1,6 @@
 import { create } from 'zustand';
 import api from '../lib/api';
-
-const TOKEN_KEY = 'remotelink_access_token';
-const REFRESH_KEY = 'remotelink_refresh_token';
+import { TOKEN_KEY, REFRESH_KEY } from '../lib/authKeys';
 
 interface User {
   id: string;

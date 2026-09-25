@@ -1,5 +1,7 @@
+'use client'
+
 import React, { useEffect, useRef } from 'react'
-import { Link as RouterLink } from 'react-router-dom'
+import SiteLink from '@/components/site/SiteLink'
 
 // tabler:arrow-up rotated 90° → arrow pointing right, primary orange
 const ArrowRightIcon: React.FC = () => (
@@ -41,7 +43,7 @@ const GetInvolvedSection: React.FC<GetInvolvedSectionProps> = ({ image }) => {
   <section className="gi-section">
     {/* Showcase media */}
     {image
-      ? <img src={image} alt="" className="gi-media" />
+      ? <img src={image} alt="" loading="lazy" decoding="async" className="gi-media" />
       : (
         <video
           ref={videoRef}
@@ -50,23 +52,23 @@ const GetInvolvedSection: React.FC<GetInvolvedSectionProps> = ({ image }) => {
           muted
           loop
           playsInline
-          preload="auto"
+          preload="metadata"
         />
       )}
 
     {/* Get involved */}
     <div className="gi-copy">
       <div className="gi-text">
-        <h2 className="gi-title">Get involved</h2>
+        <h2 className="gi-title">Tell us what you need</h2>
         <p className="gi-sub">
-          We're always amazed how creative Remote365 users are. If you'd like to share how you're
-          using Remote365, tweet us @remote365 or tag us in your posts.
+          Remote365 grows with the people who use it. Tell us how you use it, what’s
+          missing, or what would save you time, and the team reads every message.
         </p>
       </div>
-      <RouterLink to="/resources" className="gi-link">
-        Explore our developer community
+      <SiteLink href="/contact" className="gi-link">
+        Contact the team
         <ArrowRightIcon />
-      </RouterLink>
+      </SiteLink>
     </div>
 
     <style>{`

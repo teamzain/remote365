@@ -1,9 +1,11 @@
+'use client'
+
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Rocket, LifeBuoy, MonitorSmartphone, Video, Users, ShieldCheck, CreditCard,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import SiteLayout from '../components/landing/SiteLayout'
+import SiteContent from './SiteContent'
 
 // ── Content model ──────────────────────────────────────────────────────────────
 type Block =
@@ -271,7 +273,7 @@ const Docs: React.FC = () => {
   const goTo = (id: string) => refs.current[id]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
   return (
-    <SiteLayout>
+    <SiteContent>
       <div className="doc-page">
 
         {/* Header */}
@@ -546,7 +548,7 @@ const Docs: React.FC = () => {
           }
         `}</style>
       </div>
-    </SiteLayout>
+    </SiteContent>
   )
 }
 

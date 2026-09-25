@@ -1,10 +1,9 @@
 /*
- * The public website on the fixed video backdrop (SiteLayout + LandingBackdrop).
+ * The public website on the fixed video backdrop (SiteFrame + LandingBackdrop).
  *
- * The section components are light by default and some are still rendered
- * outside SiteLayout (the unlinked Features/Enterprise/... pages), so nothing
- * here edits them in place: everything is scoped to .site-dark (SiteLayout's
- * root) and only recolours — sections go transparent so the video shows
+ * The section components are light by default, so nothing here edits them in
+ * place: everything is scoped to .site-dark (SiteFrame's root) and only
+ * recolours — sections go transparent so the video shows
  * through, text turns light, cards and bands become dark glass. Layout,
  * spacing and animation stay in the components.
  */
@@ -190,14 +189,6 @@
 .site-dark .lf-divider {
   border-top-color: var(--ld-line);
 }
-.site-dark .lf-socialBtn {
-  background: var(--ld-glass-hover);
-  color: var(--ld-text);
-  transition: background 0.3s;
-}
-.site-dark .lf-socialBtn:hover {
-  background: rgba(255, 255, 255, 0.16);
-}
 .site-dark .lf-legalLink,
 .site-dark .lf-copy {
   color: var(--ld-faint);
@@ -308,12 +299,6 @@
 .site-dark .pp-cta.pp-cta-outline:hover {
   background: var(--ld-glass-hover);
   border-color: rgba(255, 255, 255, 0.45);
-}
-.site-dark .pp-card.pp-skeleton {
-  border-color: var(--ld-line);
-}
-.site-dark .pp-skeleton-block {
-  background: rgba(255, 255, 255, 0.08);
 }
 .site-dark .faq-item {
   background: var(--ld-glass);
@@ -524,4 +509,10 @@
 }
 .site-dark .legal-divider {
   border-top-color: var(--ld-line);
+}
+
+/* Home: space between the hero and the capability marquee. */
+.site-dark .home-marquee { padding-top: 48px; }
+@media (min-width: 900px) {
+  .site-dark .home-marquee { padding-top: 72px; }
 }

@@ -1,3 +1,5 @@
+'use client'
+
 import React from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'framer-motion'
@@ -18,7 +20,10 @@ export const ScrollReveal: React.FC<ScrollRevealProps> = ({ children, width = '1
 
   return (
     <div ref={ref} style={{ position: 'relative', width }}>
+      {/* Server-rendered hidden; data-reveal lets the root layout's
+          <noscript> style show it when JavaScript never runs. */}
       <motion.div
+        data-reveal=""
         variants={{
           hidden: { opacity: 0, y: 50 },
           visible: { opacity: 1, y: 0 },

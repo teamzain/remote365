@@ -1,9 +1,11 @@
+'use client'
+
 import React from 'react'
 import {
   FileText, Monitor, UserCheck, ShieldAlert, CreditCard,
   Copyright, XCircle, AlertTriangle, MessageSquare,
 } from 'lucide-react'
-import LegalPage, { type LegalSection } from '../../components/landing/LegalPage'
+import LegalPage, { type LegalSection } from '@/components/landing/LegalPage'
 
 const SECTIONS: LegalSection[] = [
   {

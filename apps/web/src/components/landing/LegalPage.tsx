@@ -1,6 +1,8 @@
+'use client'
+
 import React, { useEffect, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import SiteLayout from './SiteLayout'
+import SiteContent from '@/components/site/SiteContent'
 
 // Shared layout for legal documents (Privacy Policy, Terms of Service):
 // gradient hero, sticky sidebar nav, white content card with sections.
@@ -56,7 +58,7 @@ const LegalPage: React.FC<LegalPageProps> = ({ title, intro, effectiveDate, sect
   }
 
   return (
-    <SiteLayout>
+    <SiteContent>
 
       {/* Gradient hero */}
       <section className="legal-hero">
@@ -267,7 +269,7 @@ const LegalPage: React.FC<LegalPageProps> = ({ title, intro, effectiveDate, sect
           .legal-content { padding: 32px 20px; }
         }
       `}</style>
-    </SiteLayout>
+    </SiteContent>
   )
 }
 

@@ -1,4 +1,7 @@
+'use client'
+
 import React, { useEffect, useRef } from 'react'
+import { usePathname } from 'next/navigation'
 // Served from our own origin: hot-linking the design hand-off CDN
 // (cdn.sceneai.art) left the page black wherever a blocker or DNS filter
 // refused that host. Remuxed without the unused audio track and with
@@ -18,16 +21,25 @@ const OVERLAY = {
   content: { top: 0.6, below: 0.75 },
 } as const
 
-interface LandingBackdropProps {
-  dim?: keyof typeof OVERLAY
-}
-
 // Fixed full-screen video behind every website page. Must not be placed
 // inside a transformed ancestor (e.g. ScrollReveal), which would turn
-// `position: fixed` into scrolling-with-the-content.
-const LandingBackdrop: React.FC<LandingBackdropProps> = ({ dim = 'hero' }) => {
+// `position: fixed` into scrolling-with-the-content. Lives in the site
+// layout, so it keeps playing across page changes; only the overlay follows
+// the page.
+const LandingBackdrop: React.FC = () => {
   const overlayRef = useRef<HTMLDivElement>(null)
-  const { top, below } = OVERLAY[dim]
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const { top, below } = OVERLAY[usePathname() === '/' ? 'hero' : 'content']
+
+  // React leaves `muted` out of server-rendered HTML, so the browser can
+  // refuse the markup's autoplay before hydration sets it. Start playback
+  // once it is muted (not under reduced motion: the poster shows instead).
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    video.muted = true
+    video.play().catch(() => { /* the poster stays */ })
+  }, [])
 
   useEffect(() => {
     let raf = 0
@@ -52,6 +64,7 @@ const LandingBackdrop: React.FC<LandingBackdropProps> = ({ dim = 'hero' }) => {
   return (
     <div className="lb" aria-hidden="true" style={{ backgroundImage: `url(${backgroundPoster})` }}>
       <video
+        ref={videoRef}
         className="lb-video"
         src={backgroundVideo}
         poster={backgroundPoster}

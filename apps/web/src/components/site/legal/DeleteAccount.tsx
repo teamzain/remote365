@@ -1,6 +1,8 @@
+'use client'
+
 import React from 'react'
 import { UserX, ListChecks, Database, Clock, Mail } from 'lucide-react'
-import LegalPage, { type LegalSection } from '../../components/landing/LegalPage'
+import LegalPage, { type LegalSection } from '@/components/landing/LegalPage'
 
 // Account deletion instructions.
 //

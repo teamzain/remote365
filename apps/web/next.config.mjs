@@ -33,9 +33,13 @@ const nextConfig = {
   async headers() {
     return [
       {
-        // Media file names carry a version (hero-video.v1.mp4), so they can be
-        // cached for good.
+        // Media and font file names carry a version (hero-video.v1.mp4,
+        // mona-sans-latin.v4.woff2), so they can be cached for good.
         source: '/media/:path*',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
+      },
+      {
+        source: '/fonts/:path*',
         headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
       },
     ]

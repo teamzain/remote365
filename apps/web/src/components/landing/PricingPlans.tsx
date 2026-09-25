@@ -1,54 +1,10 @@
-import React, { useEffect, useState } from 'react'
-import { API_URL } from '../../lib/env'
-import { useNavigate } from 'react-router-dom'
-
-// Shape of GET /api/billing/plans — the merged catalog (built-ins plus any
-// custom plans the super admin created; his edits show up here live).
-interface ApiPlan {
-  id: string
-  name: string
-  price: number | 'Custom'
-  priceLabel: string
-  description: string
-  maxDevices: number | null
-  maxUsers: number | null
-  maxConcurrentSessions: number | null
-  features: string[]
-  popular?: boolean
-}
-
-// Snapshot of the built-in catalog so the page still renders if the API is
-// unreachable (marketing page must never be empty).
-const FALLBACK_PLANS: ApiPlan[] = [
-  {
-    id: 'TRIAL', name: 'Trial', price: 0, priceLabel: '15 days free',
-    description: 'One organization owner gets full access for 15 days, with three devices and core remote support features.',
-    maxDevices: 3, maxUsers: 1, maxConcurrentSessions: 1,
-    features: ['Support sessions', 'Unattended access', 'File transfer', 'Clipboard sync', 'Meetings'],
-  },
-  {
-    id: 'SOLO', name: 'Solo', price: 15, priceLabel: '$15 / month',
-    description: 'For an individual managing their own machines, with no team administration screens.',
-    maxDevices: 10, maxUsers: 2, maxConcurrentSessions: 1,
-    features: ['Unattended access', 'File transfer', 'Clipboard sync', 'Meetings'],
-  },
-  {
-    id: 'PRO', name: 'Pro', price: 40, priceLabel: '$40 / month',
-    description: 'For small support teams that need assigned access and support workflows.',
-    maxDevices: 50, maxUsers: 5, maxConcurrentSessions: 3, popular: true,
-    features: ['Technician and Viewer roles', 'Device groups', 'Per-member device access', 'Support queue', 'Scripts library', 'Basic analytics', '30-day audit log'],
-  },
-  {
-    id: 'BUSINESS', name: 'Business', price: 100, priceLabel: '$100 / month',
-    description: 'For delegated team management with full RBAC, policies, analytics, and branding.',
-    maxDevices: 200, maxUsers: 25, maxConcurrentSessions: 10,
-    features: ['Admin role and full RBAC', 'Connection policies', 'Forced two-factor authentication', 'Session recording', 'Full analytics', 'Custom branding', '1-year audit log', 'Priority support'],
-  },
-]
+import React from 'react'
+import SiteLink from '@/components/site/SiteLink'
+import type { ApiPlan } from '@/lib/plans'
 
 // charm:tick — primary orange
 const TickIcon: React.FC = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }} aria-hidden="true">
     <path d="M2.75 8.75L6 12L13.25 4.5" stroke="#FF8A00" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
@@ -72,23 +28,24 @@ const featureItems = (plan: ApiPlan): string[] =>
 const TickList: React.FC<{ label: string; items: string[] }> = ({ label, items }) => (
   <div className="pp-ticks">
     <p className="pp-ticks-label">{label}</p>
-    {items.map(item => (
-      <div key={item} className="pp-tick-row">
-        <TickIcon />
-        <span>{item}</span>
-      </div>
-    ))}
+    <ul className="pp-tick-list">
+      {items.map(item => (
+        <li key={item} className="pp-tick-row">
+          <TickIcon />
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
   </div>
 )
 
 const PlanCard: React.FC<{ plan: ApiPlan }> = ({ plan }) => {
-  const navigate = useNavigate()
   const isCustom = plan.price === 'Custom'
 
   return (
-    <div className={`pp-card${plan.popular ? ' pp-card-popular' : ''}`}>
+    <article className={`pp-card${plan.popular ? ' pp-card-popular' : ''}`}>
       <div className="pp-head">
-        <h3 className="pp-name">{plan.name}</h3>
+        <h2 className="pp-name">{plan.name}</h2>
         <div>
           <p className="pp-starts">Starts at</p>
           <div className="pp-price-row">
@@ -107,66 +64,35 @@ const PlanCard: React.FC<{ plan: ApiPlan }> = ({ plan }) => {
         <p className="pp-desc">{plan.description}</p>
       </div>
 
-      <button
+      <SiteLink
+        href={isCustom ? '/contact' : '/register'}
         className={plan.popular ? 'pp-cta pp-cta-primary' : 'pp-cta pp-cta-outline'}
-        onClick={() => navigate(isCustom ? '/contact' : '/register')}
       >
         {isCustom ? 'Contact Sales' : 'Get Started'}
-      </button>
+      </SiteLink>
 
       <div className="pp-divider" />
 
       <TickList label="Users & Devices" items={usersDevicesItems(plan)} />
       <TickList label="Features" items={featureItems(plan)} />
-    </div>
+    </article>
   )
 }
 
-const SkeletonCard: React.FC = () => (
-  <div className="pp-card pp-skeleton">
-    {[31, 66, 40, 40, 111, 176].map((h, i) => (
-      <div key={i} className="pp-skeleton-block" style={{ height: `${h}px` }} />
-    ))}
-  </div>
-)
-
-const PricingPlans: React.FC = () => {
-  const [plans, setPlans] = useState<ApiPlan[] | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    // Plain fetch (not the shared axios client) so a failed/unreachable request
-    // falls back silently to the built-in catalog without firing the global
-    // "Cannot connect to server" toast on this public marketing page.
-    const base = API_URL
-    fetch(`${base}/api/billing/plans`)
-      .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
-      .then((data: { plans?: ApiPlan[] }) => {
-        if (cancelled) return
-        // Custom-priced plans (Enterprise) are not shown on the public grid
-        const list = ((data?.plans ?? []) as ApiPlan[]).filter(p => p.price !== 'Custom')
-        setPlans(list.length ? list : FALLBACK_PLANS)
-      })
-      .catch(() => {
-        if (!cancelled) setPlans(FALLBACK_PLANS)
-      })
-    return () => { cancelled = true }
-  }, [])
-
+// Plan cards for /pricing. The page loads the catalogue on the server
+// (lib/plans.ts), so prices are part of the HTML.
+const PricingPlans: React.FC<{ plans: ApiPlan[] }> = ({ plans }) => {
   return (
     <section style={{ padding: '32px clamp(16px, 4vw, 40px) 80px' }}>
       <div className="pp-grid">
-        {plans === null
-          ? Array.from({ length: 4 }, (_, i) => <SkeletonCard key={i} />)
-          : plans.map(plan => <PlanCard key={plan.id} plan={plan} />)}
+        {plans.map(plan => <PlanCard key={plan.id} plan={plan} />)}
       </div>
 
       <style>{`
         .pp-grid {
-          display: flex;
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
           align-items: stretch;
-          flex-wrap: nowrap;
-          overflow-x: auto;
           gap: clamp(16px, 2.5vw, 36px);
           max-width: 1438px;
           margin: 0 auto;
@@ -176,8 +102,7 @@ const PricingPlans: React.FC = () => {
           display: flex;
           flex-direction: column;
           gap: 24px;
-          flex: 1 1 0;
-          min-width: 250px;
+          min-width: 0;
           padding: 24px clamp(18px, 2vw, 34px);
           box-sizing: border-box;
           background: #FFFFFF;
@@ -234,6 +159,11 @@ const PricingPlans: React.FC = () => {
           color: rgba(17, 19, 21, 0.7);
         }
         .pp-cta {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-sizing: border-box;
+          text-decoration: none;
           width: 100%;
           height: 40px;
           padding: 10px 16px;
@@ -266,6 +196,14 @@ const PricingPlans: React.FC = () => {
           flex-direction: column;
           gap: 12px;
         }
+        .pp-tick-list {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
         .pp-ticks-label {
           margin: 0;
           font-weight: 600;
@@ -282,19 +220,13 @@ const PricingPlans: React.FC = () => {
           line-height: 20px;
           color: #111315;
         }
-        .pp-skeleton { border-color: rgba(26, 29, 33, 0.12); }
-        .pp-skeleton-block {
-          border-radius: 6px;
-          background: rgba(26, 29, 33, 0.07);
-          animation: ppPulse 1.4s ease-in-out infinite;
+        /* Four across on wide screens, two on tablets and small laptops,
+           one on phones: the page never scrolls sideways. */
+        @media (max-width: 1100px) {
+          .pp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
-        @keyframes ppPulse {
-          0%, 100% { opacity: 1; }
-          50%      { opacity: 0.45; }
-        }
-        /* Cards stay on one line — narrow viewports scroll horizontally */
-        @media (max-width: 768px) {
-          .pp-card { min-width: 270px; }
+        @media (max-width: 600px) {
+          .pp-grid { grid-template-columns: minmax(0, 1fr); }
         }
       `}</style>
     </section>

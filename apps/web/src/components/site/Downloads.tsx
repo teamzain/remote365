@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { Box } from '@mui/material'
-import SiteLayout from '../components/landing/SiteLayout'
-import { API_URL } from '../lib/env'
+'use client'
+
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import SiteContent from './SiteContent'
+import { API_URL } from '@/lib/env'
 
 type PlatformId = 'macos' | 'ios' | 'windows' | 'android'
 
@@ -88,13 +89,17 @@ const detectPlatform = (): PlatformId => {
   return 'windows'
 }
 
+const noopSubscribe = () => () => {}
+
 // ── Download section ──────────────────────────────────────────────────────────
 
 const DownloadHero: React.FC = () => {
-  // Windows first, then the visitor's own platform once mounted: the server
-  // can't see the user agent, and the first client render must match it.
-  const [selected, setSelected] = useState<PlatformId>('windows')
-  useEffect(() => { setSelected(detectPlatform()) }, [])
+  // Windows first, then the visitor's own platform once hydrated: the server
+  // can't see the user agent, and the first client render must match it. A
+  // tile the visitor picks wins over the detected one.
+  const detected = useSyncExternalStore(noopSubscribe, detectPlatform, (): PlatformId => 'windows')
+  const [chosen, setSelected] = useState<PlatformId | null>(null)
+  const selected = chosen ?? detected
   const [installerUrl, setInstallerUrl] = useState(`${DESKTOP_DOWNLOADS}/${encodeURIComponent(FALLBACK_INSTALLER)}`)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -425,11 +430,11 @@ const DownloadHero: React.FC = () => {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 const Downloads: React.FC = () => (
-  <SiteLayout>
-    <Box component="main">
+  <SiteContent>
+    <main>
       <DownloadHero />
-    </Box>
-  </SiteLayout>
+    </main>
+  </SiteContent>
 )
 
 export default Downloads

@@ -1,16 +1,13 @@
+'use client'
+
 import React, { useState, useEffect } from 'react'
 import GetStartedScreen from './GetStartedScreen'
-// Self-hosted copy of the design hand-off image (see LandingBackdrop).
-import communityImageAsset from '../../assets/landing/community.png'
-
-const communityImage = communityImageAsset.src
 
 const ROTATING_WORDS = ['any device', 'any desktop', 'any mobile', 'any tablet', 'anywhere']
 
 // Full-viewport hero for the dark landing page: glass badge, gradient heading
-// with the rotating word, glass CTA with a rotating gradient border and the
-// community avatar group underneath. Transparent — the video comes from
-// <LandingBackdrop />, and <Navbar variant="glass" /> floats over the top.
+// with the rotating word, and the glass CTA with a rotating gradient border.
+// Transparent — the video comes from <LandingBackdrop />, and <Navbar variant="glass" /> floats over the top.
 const HeroVideo: React.FC = () => {
   const [wordIndex, setWordIndex] = useState(0)
 
@@ -47,14 +44,6 @@ const HeroVideo: React.FC = () => {
 
         {/* Morphs into the full-screen "Get started" chooser */}
         <GetStartedScreen variant="hero" />
-
-        <img
-          className="vh-avatars"
-          src={communityImage}
-          alt="People using Remote365"
-          width={130}
-          loading="lazy"
-        />
       </div>
 
       <style>{`
@@ -214,14 +203,6 @@ const HeroVideo: React.FC = () => {
           transition: transform 0.3s;
         }
         .vh-cta:hover .vh-cta-icon { transform: translateX(2px); }
-
-        .vh-avatars {
-          display: block;
-          width: 130px;
-          height: auto;
-          margin-top: 3.25rem;
-          filter: drop-shadow(0 12px 25px rgba(0, 0, 0, 0.6));
-        }
 
         @media (max-width: 768px) {
           .vh { padding: 112px 24px 72px; }

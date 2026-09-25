@@ -8,7 +8,7 @@ interface ShowcaseImageProps {
 // Full-width rounded image card, matching the site's other showcase slots.
 const ShowcaseImage: React.FC<ShowcaseImageProps> = ({ src, alt = '' }) => (
   <section className="showcase-section">
-    <img src={src} alt={alt} className="showcase-img" />
+    <img src={src} alt={alt} loading="lazy" decoding="async" className="showcase-img" />
     <style>{`
       .showcase-section {
         background: #FFFFFF;

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Link as RouterLink } from 'react-router-dom'
+import SiteLink from '@/components/site/SiteLink'
 
 // tabler:arrow-up rotated 90° → arrow pointing right, primary orange
 const ArrowRightIcon: React.FC = () => (
@@ -34,10 +34,10 @@ const EasyAccessSection: React.FC<EasyAccessSectionProps> = ({
         <p className="easy-sub">{subtitle}</p>
       </div>
 
-      <RouterLink to={linkTo} className="easy-link">
+      <SiteLink href={linkTo} className="easy-link">
         {linkLabel}
         <ArrowRightIcon />
-      </RouterLink>
+      </SiteLink>
     </div>
 
     <style>{`

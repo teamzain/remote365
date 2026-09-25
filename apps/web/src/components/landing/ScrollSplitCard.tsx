@@ -1,3 +1,5 @@
+'use client'
+
 import React, { useEffect, useRef } from 'react'
 import {
   motion,
@@ -7,7 +9,7 @@ import {
   useScroll,
   useTransform,
 } from 'framer-motion'
-import { useMediaQuery } from '@mui/material'
+import { useMediaQuery } from '@/lib/useMediaQuery'
 
 // Port of Componentry's "Scroll Split Card" (componentry.dev, installed via
 // `shadcn add @componentry/scroll-split-card`). Same scroll stages and
