@@ -1,6 +1,6 @@
 import React, { type ReactNode } from 'react'
 import SiteLink from '@/components/site/SiteLink'
-import CapabilityMarquee from './CapabilityMarquee'
+import CapabilityConverge from './CapabilityConverge'
 
 interface ProductHeroProps {
   heading?: string
@@ -32,8 +32,8 @@ const ProductHero: React.FC<ProductHeroProps> = ({
 
       {visual && <div className="ph-image-wrap">{visual}</div>}
 
-      {/* Capability marquee (same as the home page) */}
-      <CapabilityMarquee />
+      {/* What the app does (same as the home page) */}
+      <CapabilityConverge />
 
       <style>{`
         .ph-section {
@@ -91,6 +91,8 @@ const ProductHero: React.FC<ProductHeroProps> = ({
           padding: 0 clamp(16px, 4vw, 40px);
           box-sizing: border-box;
         }
+        /* The section gap already spaces it from the diagram. */
+        .ph-section .cc { padding-top: 0; }
 
         @media (max-width: 640px) {
           .ph-section { gap: 44px; padding: 44px 0 0; }

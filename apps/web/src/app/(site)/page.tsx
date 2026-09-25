@@ -1,6 +1,6 @@
 import SiteContent from '@/components/site/SiteContent'
 import HeroVideo from '@/components/landing/HeroVideo'
-import CapabilityMarquee from '@/components/landing/CapabilityMarquee'
+import CapabilityConverge from '@/components/landing/CapabilityConverge'
 import CaseStudyFlipStack from '@/components/landing/CaseStudyFlipStack'
 import DeviceOrbitSection from '@/components/landing/DeviceOrbitSection'
 import EasyAccessSection from '@/components/landing/EasyAccessSection'
@@ -34,11 +34,9 @@ export default function HomePage() {
       <main>
         <HeroVideo />
 
-        <ScrollReveal delay={0.1}>
-          <div className="home-marquee">
-            <CapabilityMarquee />
-          </div>
-        </ScrollReveal>
+        {/* Scroll-driven: no ScrollReveal (its fade would hide the letters
+            flying in). */}
+        <CapabilityConverge />
 
         {/* Scroll-driven and pinned: no ScrollReveal (its transform would
             break the sticky stage). */}

@@ -16,7 +16,7 @@ import SiteLink from '@/components/site/SiteLink'
 // Port of Componentry's "Case Study Flip Stack" (componentry.dev, installed
 // via `shadcn add @componentry/case-study-flip-stack`). Same scroll-driven
 // fold-up of each card onto the next; changed for this site:
-//  - sits inside the home page after the capability marquee: no full-screen
+//  - sits inside the home page after the capability section: no full-screen
 //    "Scroll Down" intro and no "The End" outro; a section heading instead
 //    (the page already has its H1, so card titles are H3)
 //  - the last card stays put, so the section never ends on an empty stage
