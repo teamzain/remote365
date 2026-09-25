@@ -29,10 +29,14 @@ rm -rf "$OUT"
 mkdir -p "$OUT/app"
 cp -R "$STANDALONE/." "$OUT/app/"
 # `next build` leaves static assets and public/ out of the standalone folder;
-# the server expects them next to it.
-mkdir -p "$OUT/app/apps/web/.next"
-cp -R apps/web/.next/static "$OUT/app/apps/web/.next/static"
-cp -R apps/web/public "$OUT/app/apps/web/public"
+# the server expects them next to it. Copy the folders' CONTENTS: the tracer
+# may already have put single files there (the OG image code reads
+# public/logo.png), and `cp -R dir existing-dir` would nest dir inside it.
+mkdir -p "$OUT/app/apps/web/.next/static" "$OUT/app/apps/web/public"
+cp -R apps/web/.next/static/. "$OUT/app/apps/web/.next/static/"
+cp -R apps/web/public/. "$OUT/app/apps/web/public/"
+[ -f "$OUT/app/apps/web/public/media/hero-poster.v1.jpg" ] && [ ! -d "$OUT/app/apps/web/public/public" ] \
+  || { echo "public/ was not copied correctly"; exit 1; }
 # Dev-only settings must never reach the image.
 find "$OUT/app" -maxdepth 3 -name '.env*' -type f -delete
 # sharp ships builds for every Linux libc plus a wasm fallback; the runtime

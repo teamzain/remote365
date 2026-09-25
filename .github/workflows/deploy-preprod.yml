@@ -112,7 +112,11 @@ jobs:
           fail() { echo "::error::$1"; cat /tmp/web.log; exit 1; }
           sha=$(curl -sf http://127.0.0.1:3100/healthz | node -pe 'JSON.parse(require("fs").readFileSync(0)).sha') || fail "no /healthz"
           [ "$sha" = "$GITHUB_SHA" ] || fail "/healthz reports $sha, expected $GITHUB_SHA"
-          for p in / /login /pricing /dashboard; do
+          # Pages, then public files (fonts, media, images) and the image
+          # optimizer, which needs sharp's Linux build.
+          for p in / /login /pricing /dashboard /faq /sitemap.xml /llms.txt \
+                   /logo.png /media/hero-poster.v1.jpg /fonts/mona-sans-latin.v4.woff2 \
+                   '/_next/image?url=%2Fproduct.png&w=640&q=75'; do
             code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3100$p")
             [ "$code" = 200 ] || fail "$p returned $code"
           done
