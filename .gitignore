@@ -64,3 +64,6 @@ tmp/
 *.p12
 *.p8
 *.mobileprovision
+
+# Local Claude Code tooling (launch configs, permissions)
+.claude/

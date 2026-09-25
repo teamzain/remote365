@@ -85,11 +85,18 @@ sync_release() {
 }
 
 tag_previous() {
+  # Tag what is actually RUNNING, not :latest — after an aborted deploy
+  # :latest is the unused new build, and rolling back to it would be a no-op.
   for s in $SERVICES; do
-    local img=${PROJECT}-${s}
-    docker image inspect "$img:latest" >/dev/null 2>&1 && docker tag "$img:latest" "$img:previous"
+    local img=${PROJECT}-${s} running
+    running=$(docker inspect -f '{{.Image}}' "${PROJECT}-${s}-1" 2>/dev/null || true)
+    if [ -n "$running" ]; then
+      docker tag "$running" "$img:previous"
+    elif docker image inspect "$img:latest" >/dev/null 2>&1; then
+      docker tag "$img:latest" "$img:previous"
+    fi
   done
-  log "Current images tagged :previous for rollback"
+  log "Running images tagged :previous for rollback"
 }
 
 build_images() {
@@ -139,10 +146,16 @@ sync_schema() {
   if printf '%s' "$sql" | grep -Eiq '\b(DROP|RENAME|ALTER COLUMN|TRUNCATE|DELETE)\b'; then
     die "schema change is not purely additive — apply it by hand, then redeploy"
   fi
-  log "Applying additive schema change (db push, no data-loss flag)"
-  prisma db push --schema "$schema" --skip-generate || die "prisma db push failed"
+  # Apply exactly the SQL inspected above, in ONE transaction: if any statement
+  # fails (say a unique index over existing duplicates) Postgres rolls the
+  # whole change back and the deploy stops before any container changes.
+  # (`prisma db push` is not used: it refuses every new unique index without
+  # --accept-data-loss, and that flag would also wave through real data loss.)
+  log "Applying additive schema change in a single transaction"
+  printf '%s\n' "$sql" | docker exec -i "$PG_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -1 -q \
+    || die "schema change failed and was rolled back"
   sql=$(prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel "$schema" --script 2>/dev/null)
-  printf '%s' "$sql" | grep -q 'empty migration' || die "schema still differs after db push"
+  printf '%s' "$sql" | grep -q 'empty migration' || die "schema still differs after applying the change"
 }
 
 start_services() {
