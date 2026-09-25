@@ -10,6 +10,7 @@
     "dev": "npx concurrently -n auth,signal,session,billing -c blue,green,yellow,magenta \"npm run dev -w @remotelink/auth-service\" \"npm run dev -w @remotelink/signaling-service\" \"npm run dev -w @remotelink/session-service\" \"npm run dev -w @remotelink/billing-service\"",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:smoke": "bash scripts/local-smoke.sh",
     "rebuild:native": "npm run install --workspaces --if-present",
     "mobile": "npm run start -w remote-365-mobile",
     "mobile:android": "npm run android -w remote-365-mobile",

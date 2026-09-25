@@ -1,0 +1,34 @@
+# Local smoke-test overrides for docker-compose.prod.yml — used by scripts/local-smoke.sh.
+#
+# Runs the real production images on this machine with throwaway settings:
+# Caddy on http://localhost:8088, no /var/www host mounts, signaling reachable
+# only through Caddy, no restart loops hiding a crash, and every service reads
+# .env.localtest instead of .env so a real server .env is never used.
+services:
+  auth-service:
+    restart: "no"
+    env_file: !override
+      - .env.localtest
+  signaling-service:
+    restart: "no"
+    ports: !reset []
+    env_file: !override
+      - .env.localtest
+  session-service:
+    restart: "no"
+    env_file: !override
+      - .env.localtest
+  billing-service:
+    restart: "no"
+    env_file: !override
+      - .env.localtest
+  caddy:
+    restart: "no"
+    ports: !override
+      - "8088:80"
+    environment:
+      CADDY_SITE: ":80"
+    volumes: !override
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
