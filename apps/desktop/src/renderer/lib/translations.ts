@@ -1,3 +1,4 @@
+import { dashboardTranslations } from './dashboardTranslations';
 import { landingTranslations } from './landingTranslations';
 export type Language = 'en' | 'de' | 'fr' | 'es' | 'ar-SA';
 
@@ -2259,8 +2260,9 @@ const translateKey = (key: string, lang: Language): string => {
     return entry?.[lang] || entry?.en || key;
 };
 
-// Signed-out home screen phrases (exact on-screen English -> translation).
-Object.assign(supplementalTranslations, landingTranslations);
+// Whole-phrase tables keyed by the exact on-screen English: the signed-in
+// app, then the signed-out home screen (its wording wins where both exist).
+Object.assign(supplementalTranslations, dashboardTranslations, landingTranslations);
 
 const staticTextToKey = (() => {
     const map = new Map<string, string>();
@@ -2834,6 +2836,12 @@ const translateFallbackWords = (text: string, lang: Language): string => {
     return translated;
 };
 
+/** True when `text` has a whole-phrase translation (not word-by-word fallback). */
+export const hasPhraseTranslation = (text: string): boolean => {
+    const t = text.trim();
+    return Boolean(supplementalTranslations[t] || staticTextToKey.get(t));
+};
+
 export const translateStaticText = (value: string, lang?: string): string => {
     const l = (lang && supportedLanguages.includes(lang as Language) ? lang : 'en') as Language;
     const leading = value.match(/^\s*/)?.[0] || '';
@@ -2858,6 +2866,8 @@ export const applyGlobalTranslations = (root: ParentNode = document.body, lang?:
     const translateTextNode = (node: Text) => {
         const parent = node.parentElement;
         if (!parent || ['SCRIPT', 'STYLE', 'TEXTAREA', 'CODE', 'PRE'].includes(parent.tagName)) return;
+        // Standard HTML opt-out: IDs, codes, words the user must type verbatim.
+        if (parent.closest('[translate="no"]')) return;
         const current = node.nodeValue || '';
         let original = originalTextNodes.get(node) || current;
         if (originalTextNodes.has(node) && current !== original && !isKnownTranslation(original, current)) {
@@ -2869,6 +2879,7 @@ export const applyGlobalTranslations = (root: ParentNode = document.body, lang?:
     };
 
     const translateElement = (element: Element) => {
+        if (element.closest('[translate="no"]')) return;
         translatableAttributes.forEach((attribute) => {
             if (!element.hasAttribute(attribute)) return;
             const stored = originalAttributes.get(element) || {};

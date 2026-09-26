@@ -3263,7 +3263,10 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
                 {t('delete_account_desc', lang)}
               </p>
               <p className="text-[13px] text-gray-600 dark:text-[#A0A0A0]">
-                Type <span className="font-mono font-bold text-red-600">Delete</span> below to confirm.
+                {/* One text node so the translator handles the whole sentence; the
+                    confirmation word stays "Delete" in every language because
+                    that is the only word the check below accepts. */}
+                To confirm, type &quot;Delete&quot; below.
               </p>
               <input
                 type="text"
