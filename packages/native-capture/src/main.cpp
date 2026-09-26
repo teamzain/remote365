@@ -14,7 +14,22 @@ public:
   DXGICapture()
       : device(nullptr), context(nullptr), duplication(nullptr),
         stagingTexture(nullptr), currentOutputIndex(UINT_MAX), hasCapturedFrame(false) {}
-  ~DXGICapture() { Cleanup(); }
+  // No Cleanup() here on purpose. The only instance is a process-lifetime
+  // global, so a destructor would run during process exit: under the loader
+  // lock, after other threads are gone, with third-party DLLs that hook D3D
+  // (audio/GPU overlays such as NahimicOSD.dll, nvspcap64.dll) still loaded.
+  // Releasing a desktop duplication + D3D11 device there hung the whole
+  // process in the graphics driver on a field machine (PUREVOIP-4): the
+  // process could not exit or be killed, kept its files locked, and every
+  // update failed with "Remote 365 cannot be closed". Callers release
+  // explicitly via Release() while the process is healthy; anything still
+  // open at exit is reclaimed by the kernel.
+  ~DXGICapture() {}
+
+  // Explicit teardown, called from JS on the main thread before quitting (and
+  // whenever capture is idle). Safe to call repeatedly; the next capture
+  // re-initialises.
+  void Release() { Cleanup(); }
 
   bool Initialize(UINT outputIndex) {
     if (duplication && currentOutputIndex == outputIndex)
@@ -247,10 +262,18 @@ private:
   bool hasCapturedFrame;
 };
 
-DXGICapture g_capture;
+// Heap-allocated and never deleted: see ~DXGICapture. A plain global would
+// still get its destructor run by the CRT at exit.
+DXGICapture* g_capture = new DXGICapture();
 
 Napi::Value CaptureFrame(const Napi::CallbackInfo& info) {
-  return g_capture.Capture(info);
+  return g_capture->Capture(info);
+}
+
+// Release the desktop duplication and D3D11 device now. Returns undefined.
+Napi::Value DxgiRelease(const Napi::CallbackInfo& info) {
+  g_capture->Release();
+  return info.Env().Undefined();
 }
 
 // Return the host's current mouse cursor SHAPE as a CSS-cursor name, so the viewer can
@@ -301,6 +324,8 @@ Napi::Value SetHighResTimers(const Napi::CallbackInfo& info) {
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set(Napi::String::New(env, "captureFrame"),
               Napi::Function::New(env, CaptureFrame));
+  exports.Set(Napi::String::New(env, "release"),
+              Napi::Function::New(env, DxgiRelease));
   exports.Set(Napi::String::New(env, "getCursorType"),
               Napi::Function::New(env, GetCursorType));
   exports.Set(Napi::String::New(env, "setHighResTimers"),

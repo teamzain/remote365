@@ -82,6 +82,9 @@ function stopPipeline(): void {
   running = false;
   if (captureTimer) { clearTimeout(captureTimer); captureTimer = null; }
   try { capture?.setHighResTimers?.(false); } catch { /* older binary */ }
+  // Free the DXGI duplication + D3D11 device while this process is healthy,
+  // never at process exit (see releaseMainCapture in main/index.ts).
+  try { capture?.release?.(); } catch { /* older binary */ }
   secureCapture.deactivate();
   if (ffmpeg) {
     try { ffmpeg.stdin?.end(); } catch { /* noop */ }

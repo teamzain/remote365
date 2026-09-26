@@ -196,6 +196,26 @@ try {
 // @ts-ignore: Module types
 declare module '@remotelink/native-capture' {
   export function captureFrame(outputIndex?: number): { width: number; height: number; data: Buffer };
+  export function release(): void;
+}
+
+// Drop this process's DXGI desktop duplication + D3D11 device NOW, on the
+// main thread, while the process is healthy. The native module used to free
+// them only in a global destructor during process exit, and on a machine with
+// D3D-hooking overlays loaded into us (NahimicOSD.dll, nvspcap64.dll, Intel
+// iGPU) that teardown hung the process in the graphics driver: it could not
+// exit or be killed, kept $INSTDIR locked, and every update failed with
+// "Remote 365 cannot be closed". Safe to call repeatedly; the next
+// captureFrame re-initialises. Older binaries have no release().
+function releaseMainCapture(reason: string) {
+  try {
+    if (typeof (capture as any)?.release === 'function') {
+      (capture as any).release();
+      log.info(`[Host] Released main-process screen capture (${reason}).`);
+    }
+  } catch (err: any) {
+    log.warn(`[Host] Releasing main-process screen capture failed (${reason}): ${err?.message || err}`);
+  }
 }
 
 const PROTOCOL = 'remote365';
@@ -4974,6 +4994,9 @@ function scheduleStreamWorkerIdleKill() {
 }
 
 function stopStreaming() {
+  // Covers session end, before-quit and the update-install path (both call
+  // stopStreaming) — see releaseMainCapture.
+  releaseMainCapture('streaming stopped');
   onDemandKeyframesActive = false;
   if (forcedKeyframeTimer) { clearTimeout(forcedKeyframeTimer); forcedKeyframeTimer = null; }
   if (isStreamWorkerEnabled()) stopWorkerStream();
@@ -5559,6 +5582,9 @@ function startStreaming() {
 
     // Got a frame! Stop polling and start the encoder
     if (initPollInterval) clearInterval(initPollInterval);
+    // The stream worker (its own process) does the real capturing; the main
+    // process only needed this one frame. Don't keep a duplication open here.
+    if (useNativeCapture && isStreamWorkerEnabled()) releaseMainCapture('prime frame taken');
 
     // Wider-than-1080p captures need more bits to stay sharp: same CBR spread
     // over 2-4× the pixels is visibly softer. Only for hardware encoders and
