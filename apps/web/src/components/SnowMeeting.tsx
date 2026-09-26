@@ -139,6 +139,9 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
   // so a guest never sees a flash of the empty meeting grid while media and
   // the join round-trip settle.
   const [hasEnteredMeeting, setHasEnteredMeeting] = useState(false);
+  // Mirror for the socket message handler, which closes over stale state.
+  const hasEnteredMeetingRef = useRef(false);
+  useEffect(() => { hasEnteredMeetingRef.current = hasEnteredMeeting; }, [hasEnteredMeeting]);
   const [showInvitePanel, setShowInvitePanel] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteCopied, setInviteCopied] = useState<'link' | 'code' | null>(null);
@@ -694,6 +697,13 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
 
         case 'meeting-error':
           setMeetingError(data.error || 'Could not join this meeting.');
+          // Surface it on the full-screen cover too. The inline text lives in
+          // the desktop stage only, so a phone that got a join error used to
+          // sit on "Joining meeting…" with no way to know why.
+          if (!hasEnteredMeetingRef.current) {
+            setWaitingForHost(true);
+            setDeniedMessage(data.error || 'Could not join this meeting.');
+          }
           break;
 
         case 'meeting-participant-joined':
@@ -1347,9 +1357,19 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
             <span>{participants.length + 1} Participants</span>
           </div>
         </div>
-        <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-[12px] bg-[#F3F4F6] p-2">
-          <div className="flex flex-col gap-2">
-            <div className="relative h-[250px] flex-none overflow-hidden rounded-[12px] bg-[#111315]">
+        {/* Tile canvas, Google Meet style: everyone fits on screen at once
+            (no page scroll) — one column for two people, two columns beyond
+            that, rows share the height. While anyone shares a screen the
+            share fills the stage and everyone else sits in a filmstrip
+            underneath. Only a very large meeting (9+ tiles) scrolls. */}
+        {(() => {
+          const tileCount = participants.length + 1;
+          const cols = tileCount <= 2 ? 1 : 2;
+          const rows = Math.ceil(tileCount / cols);
+          const scrolls = tileCount > 8;
+          const compactTiles = tileCount > 4;
+          const localTile = (compact: boolean, extraClass = '') => (
+            <div className={`relative min-h-0 min-w-0 overflow-hidden rounded-[12px] bg-[#111315] ${extraClass}`}>
               <video
                 autoPlay
                 muted
@@ -1358,25 +1378,53 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
                   const stream = isScreenSharing && screenStreamRef.current ? screenStreamRef.current : localStream;
                   if (el && stream && el.srcObject !== stream) el.srcObject = stream;
                 }}
-                className={`h-full w-full object-cover ${isCameraOff && !isScreenSharing ? 'hidden' : ''}`}
+                className={`h-full w-full ${isScreenSharing ? 'object-contain bg-black' : 'object-cover'} ${isCameraOff && !isScreenSharing ? 'hidden' : ''}`}
               />
               {isCameraOff && !isScreenSharing && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-                  <span className="flex h-[52px] w-[52px] items-center justify-center rounded-full bg-white/15 text-white"><User size={30} /></span>
-                  <span className="text-[12px] text-white">{meetingUser.name || 'You'}</span>
+                <div className={`absolute inset-0 flex flex-col items-center justify-center ${compact ? 'gap-1.5' : 'gap-3'}`}>
+                  <span className={`flex items-center justify-center rounded-full bg-white/15 text-white ${compact ? 'h-9 w-9' : 'h-[52px] w-[52px]'}`}><User size={compact ? 20 : 30} /></span>
+                  <span className={`max-w-full truncate px-2 text-white ${compact ? 'text-[11px]' : 'text-[12px]'}`}>{meetingUser.name || 'You'}</span>
                 </div>
               )}
-              <span className="absolute right-3 top-3 text-white">{isMuted ? <MicOff size={18} /> : <Mic size={18} />}</span>
-              <span className="absolute bottom-2 left-3 text-[11px] text-white/80">You</span>
+              <span className={`absolute text-white ${compact ? 'right-2 top-2' : 'right-3 top-3'}`}>{isMuted ? <MicOff size={compact ? 14 : 18} className="text-[#FF383C]" /> : <Mic size={compact ? 14 : 18} />}</span>
+              <span className={`absolute rounded-full bg-black/55 font-medium text-white ${compact ? 'bottom-1.5 left-1.5 px-2 py-0.5 text-[10px]' : 'bottom-2 left-2 px-2.5 py-1 text-[11px]'}`}>You{isScreenSharing ? ' · sharing' : ''}</span>
             </div>
-            {participants.map((participant) => (
-              <div key={participant.connectionId} className="relative h-[250px] flex-none overflow-hidden rounded-[12px] bg-[#111315]">
-                <RemoteVideo participant={participant} className="h-full w-full" />
-                <span className="absolute right-3 top-3 text-white">{participant.mediaState?.isMuted ? <MicOff size={18} /> : <Mic size={18} />}</span>
+          );
+          if (primaryTileId) {
+            const primaryParticipant = primaryTileId === 'local' ? null : participants.find((p) => p.connectionId === primaryTileId) || null;
+            const stripParticipants = participants.filter((p) => p.connectionId !== primaryTileId);
+            return (
+              <div className="mt-3 flex min-h-0 flex-1 flex-col gap-2 overflow-hidden rounded-[12px] bg-[#F3F4F6] p-2">
+                <div className="relative min-h-0 flex-1 overflow-hidden rounded-[12px] bg-black">
+                  {primaryTileId === 'local'
+                    ? localTile(false, 'h-full w-full')
+                    : primaryParticipant && <RemoteVideo participant={primaryParticipant} className="h-full w-full" />}
+                </div>
+                <div className="flex h-[92px] flex-none gap-2 overflow-x-auto overflow-y-hidden [scrollbar-width:none]">
+                  {primaryTileId !== 'local' && localTile(true, 'h-full w-[124px] flex-none')}
+                  {stripParticipants.map((participant) => (
+                    <RemoteVideo key={participant.connectionId} participant={participant} compact className="h-full w-[124px] flex-none" />
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
-        </div>
+            );
+          }
+          return (
+            <div
+              className={`mt-3 grid min-h-0 flex-1 gap-2 rounded-[12px] bg-[#F3F4F6] p-2 ${scrolls ? 'overflow-y-auto' : 'overflow-hidden'}`}
+              style={{
+                gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                gridTemplateRows: scrolls ? undefined : `repeat(${rows}, minmax(0, 1fr))`,
+                gridAutoRows: scrolls ? '160px' : undefined,
+              }}
+            >
+              {localTile(compactTiles)}
+              {participants.map((participant) => (
+                <RemoteVideo key={participant.connectionId} participant={participant} compact={compactTiles} className="min-h-0 min-w-0 h-full w-full" />
+              ))}
+            </div>
+          );
+        })()}
         <div className="mt-3 flex h-[60px] flex-none items-center justify-between rounded-[53px] bg-white px-[26px]">
           <button type="button" aria-label={isMuted ? 'Unmute' : 'Mute'} onClick={toggleMute} className={`flex h-10 w-10 items-center justify-center active:scale-95 ${isMuted ? 'text-[#FF383C]' : 'text-[#111315]'}`}>
             {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
@@ -1528,7 +1576,7 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
                 <X size={30} className="text-[#FF383C]" />
               </div>
               <div className="flex flex-col gap-2">
-                <h2 className="text-[20px] font-semibold leading-7 text-white">Not admitted</h2>
+                <h2 className="text-[20px] font-semibold leading-7 text-white">{meetingError ? "Couldn't join" : 'Not admitted'}</h2>
                 <p className="max-w-[380px] text-[14px] leading-5 text-white/70">{deniedMessage}</p>
               </div>
               <button
@@ -2642,7 +2690,10 @@ const RemoteVideo: React.FC<{
   onFullscreen?: () => void;
   onFocus?: () => void;
   onRequestControl?: () => void;
-}> = ({ participant, hidden, className = '', showFullscreen, onFullscreen, onFocus, onRequestControl }) => {
+  // Small tile (phone grid / filmstrip): smaller avatar, name and mic badge,
+  // no hover-only Control button (there is no hover on a phone).
+  compact?: boolean;
+}> = ({ participant, hidden, className = '', showFullscreen, onFullscreen, onFocus, onRequestControl, compact }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoReady, setVideoReady] = useState(false);
   const hasIncomingVideo = videoReady || Boolean(participant.stream?.getVideoTracks().some((track) => track.readyState === 'live'));
@@ -2703,27 +2754,27 @@ const RemoteVideo: React.FC<{
         className={`w-full h-full ${participant.mediaState?.isScreenSharing ? 'object-contain bg-black' : 'object-cover'} ${shouldShowPlaceholder ? 'hidden' : ''}`}
       />
       {shouldShowPlaceholder && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-[22px] px-4 text-center">
-          <User size={72} strokeWidth={1.4} className="text-[#F3F4F6]" />
-          <span className="text-[16px] leading-[23px] text-white">{participant.user?.name || 'Participant'}</span>
-          {!participant.mediaState?.isCameraOff && (
+        <div className={`absolute inset-0 flex flex-col items-center justify-center px-2 text-center ${compact ? 'gap-1.5' : 'gap-[22px] px-4'}`}>
+          <User size={compact ? 28 : 72} strokeWidth={1.4} className="text-[#F3F4F6]" />
+          <span className={`max-w-full truncate text-white ${compact ? 'text-[11px] leading-4' : 'text-[16px] leading-[23px]'}`}>{participant.user?.name || 'Participant'}</span>
+          {!participant.mediaState?.isCameraOff && !compact && (
             <span className="text-[12px] font-medium uppercase tracking-widest text-white/40">Connecting…</span>
           )}
         </div>
       )}
       {/* mic indicator */}
-      <div className="absolute top-4 right-4">
-        {participant.mediaState?.isMuted ? <MicOff size={20} className="text-[#FF383C]" /> : <Mic size={20} className="text-white" />}
+      <div className={`absolute ${compact ? 'right-2 top-2' : 'right-4 top-4'}`}>
+        {participant.mediaState?.isMuted ? <MicOff size={compact ? 14 : 20} className="text-[#FF383C]" /> : <Mic size={compact ? 14 : 20} className="text-white" />}
       </div>
       {!shouldShowPlaceholder && (
-        <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-full bg-black/55 px-3 py-1.5 text-[12px] font-medium text-white backdrop-blur-md">
-          {participant.user?.name || 'Participant'}
-          {participant.mediaState?.isScreenSharing && <ScreenShare size={12} className="text-[#FFB347]" />}
+        <div className={`absolute flex items-center gap-1.5 rounded-full bg-black/55 font-medium text-white backdrop-blur-md ${compact ? 'bottom-1.5 left-1.5 max-w-[calc(100%-12px)] px-2 py-0.5 text-[10px]' : 'bottom-4 left-4 gap-2 px-3 py-1.5 text-[12px]'}`}>
+          <span className="truncate">{participant.user?.name || 'Participant'}</span>
+          {participant.mediaState?.isScreenSharing && <ScreenShare size={compact ? 10 : 12} className="flex-none text-[#FFB347]" />}
         </div>
       )}
       {/* Remote control can only target another DESKTOP app (a browser or
           phone participant has no host to take over). */}
-      {!['mobile', 'web'].includes(String(participant.user?.clientKind || '')) && (
+      {!compact && !['mobile', 'web'].includes(String(participant.user?.clientKind || '')) && (
         <button
           onClick={(event) => {
             event.stopPropagation();

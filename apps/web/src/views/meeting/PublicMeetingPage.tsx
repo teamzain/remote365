@@ -108,7 +108,7 @@ const PublicMeetingPage: React.FC = () => {
             <div className="flex flex-col items-center gap-[14px]">
               <h1 className="m-0 text-[24px] font-medium leading-[34px] text-black">Meeting ended</h1>
               <p className="m-0 text-[14px] font-normal leading-5 text-black">
-                You've left the meeting or the host ended it for everyone.
+                You've left the meeting or the host ended it for everyone. The same link opens it again.
               </p>
             </div>
           </div>

@@ -724,21 +724,23 @@ async function finalizeMeetingJoin(connectionId: string, meetingId: string, entr
       ? meeting.status === 'ACTIVE'
       : Boolean(collaborator && !collaborator.joinedAt);
 
+    // A join (re)opens the meeting: ENDED rows come back as IN_PROGRESS with
+    // a fresh start time and no end time, so the link behaves like a room.
+    const reopening = meeting.status === 'ENDED';
+    const liveData = {
+      status: 'IN_PROGRESS',
+      startedAt: reopening ? new Date() : (meeting.startedAt || new Date()),
+      ...(reopening ? { endedAt: null } : {})
+    };
     if (isCreator) {
-      await (prisma as any).remoteSession.update({
-        where: { id: meeting.id },
-        data: { status: 'IN_PROGRESS', startedAt: meeting.startedAt || new Date() }
-      });
+      await (prisma as any).remoteSession.update({ where: { id: meeting.id }, data: liveData });
       if (meeting.status !== 'IN_PROGRESS') void publishMeetingSync(meeting, 'started');
     } else if (collaborator) {
       await (prisma as any).remoteSessionCollaborator.update({
         where: { id: collaborator.id },
         data: { status: 'JOINED', joinedAt: collaborator.joinedAt || new Date() }
       });
-      await (prisma as any).remoteSession.update({
-        where: { id: meeting.id },
-        data: { status: 'IN_PROGRESS', startedAt: meeting.startedAt || new Date() }
-      });
+      await (prisma as any).remoteSession.update({ where: { id: meeting.id }, data: liveData });
       if (meeting.status !== 'IN_PROGRESS') void publishMeetingSync(meeting, 'started');
     }
 
@@ -1666,16 +1668,21 @@ async function startServer() {
               console.warn('[Signaling] Meeting lookup failed:', err);
             }
 
-            // Ended meetings stay ended. An unused (ACTIVE) link expires by its
-            // expiresAt, or by the instant-link window for legacy rows without one.
-            // A meeting that is IN_PROGRESS is live no matter how old its link is:
-            // the TTL bounds joining an unused link, not the call's length.
+            // A meeting link keeps working after the call, like Google Meet:
+            // "End for everyone" kicks the room out, and anyone who comes back
+            // through the same link reopens it (finalizeMeetingJoin flips ENDED
+            // back to IN_PROGRESS). Before this, a rejoin after the host ended
+            // was refused with "ended or expired" and the phone sat on the
+            // joining cover. An unused (ACTIVE) link still expires by its
+            // expiresAt, or by the instant-link window for legacy rows without
+            // one; a meeting that is IN_PROGRESS is live no matter how old its
+            // link is — the TTL bounds joining an unused link, not the call.
             const linkExpired = Boolean(meeting) && meeting.status === 'ACTIVE' && (
               meeting.expiresAt
                 ? new Date(meeting.expiresAt).getTime() <= Date.now()
                 : new Date(meeting.createdAt).getTime() + MEETING_LINK_TTL_MS <= Date.now()
             );
-            if (meeting && (!['ACTIVE', 'IN_PROGRESS'].includes(meeting.status) || linkExpired)) {
+            if (meeting && (!['ACTIVE', 'IN_PROGRESS', 'ENDED'].includes(meeting.status) || linkExpired)) {
               ws.send(JSON.stringify({ type: 'meeting-error', error: 'This meeting has ended or expired.' }));
               break;
             }
