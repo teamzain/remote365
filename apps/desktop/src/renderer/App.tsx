@@ -101,6 +101,18 @@ const LazyScreenFallback = () => (
 
 const HOST_IDENTITY_BOOTSTRAP_MARKER = 'remote365_host_identity_bootstrap_v2';
 
+// Does an RTCIceServer list carry a TURN relay? STUN-only lists only work when
+// the two machines can reach each other directly (same LAN, or friendly NATs).
+const iceListHasTurn = (list: any[]): boolean => Array.isArray(list) && list.some((s: any) =>
+    (Array.isArray(s?.urls) ? s.urls : [s?.urls]).some((u: any) => typeof u === 'string' && u.startsWith('turn')));
+
+// First-run host password: 8 digits, like the server's own generateAccessPassword.
+const generateFirstRunPassword = (): string => {
+    const buf = new Uint32Array(1);
+    window.crypto.getRandomValues(buf);
+    return String(10_000_000 + (buf[0] % 90_000_000));
+};
+
 const mockPerformanceData = [
     { time: '10:00', latency: 45, network: 120 },
     { time: '10:01', latency: 48, network: 132 },
@@ -924,19 +936,50 @@ export default function App() {
     // handshake (TURN credentials carry an hour TTL; 5 minutes is safely fresh).
     const iceServersCacheRef = useRef<{ list: any[]; at: number } | null>(null);
     const iceServersInflightRef = useRef<Promise<any[]> | null>(null);
+    // ICE servers the signaling server attached to this session's `joined`
+    // message. Signaling already authorized us for this exact session, so it
+    // hands over TURN credentials with no account or machine credential needed.
+    // This is the only relay a signed-out viewer on a fresh install can get.
+    const signalingIceServersRef = useRef<any[]>([]);
+    const logIce = (msg: string) => {
+        console.info(msg);
+        if (isElectron) (window as any).electronAPI?.log?.(msg);
+    };
     const fetchIceServers = useCallback((): Promise<any[]> => {
         const cached = iceServersCacheRef.current;
         if (cached && Date.now() - cached.at < 5 * 60_000) return Promise.resolve(cached.list);
         if (iceServersInflightRef.current) return iceServersInflightRef.current;
+        const hasTurn = iceListHasTurn;
         const inflight = api.get('/api/auth/ice-servers')
-            .then((res: any) => {
-                const list = Array.isArray(res.data?.iceServers) ? res.data.iceServers : [];
-                if (list.length) iceServersCacheRef.current = { list, at: Date.now() };
+            .then((res: any) => (Array.isArray(res.data?.iceServers) ? res.data.iceServers : []))
+            .catch((err: any) => {
+                logIce(`[Viewer] ICE servers from the account unavailable (${err?.response?.status || err?.message || err})`);
+                return [] as any[];
+            })
+            .then(async (list: any[]) => {
+                if (hasTurn(list)) {
+                    logIce('[Viewer] ICE servers: account credentials (TURN relay available)');
+                    return list;
+                }
+                // Signed out (no user token): without this the session gets STUN only
+                // and can never use the relay, so it fails on any pair of networks
+                // that can't connect directly. This PC's machine credential works.
+                const machine = await Promise.resolve((window as any).electronAPI?.getMachineIceServers?.()).catch(() => []);
+                if (Array.isArray(machine) && hasTurn(machine)) {
+                    logIce('[Viewer] ICE servers: this device\'s machine credential (TURN relay available)');
+                    return machine;
+                }
+                if (hasTurn(signalingIceServersRef.current)) {
+                    logIce('[Viewer] ICE servers: session credentials from signaling (TURN relay available)');
+                    return signalingIceServersRef.current;
+                }
+                logIce('[Viewer] ICE servers: STUN only, no TURN relay (direct connections only)');
                 return list;
             })
-            .catch((err: any) => {
-                console.warn('[Viewer] Failed to load ICE servers; using STUN fallback:', err?.message || err);
-                return [];
+            .then((list: any[]) => {
+                // Only a list with a relay is worth keeping; retry the rest next time.
+                if (hasTurn(list)) iceServersCacheRef.current = { list, at: Date.now() };
+                return list;
             })
             .finally(() => { iceServersInflightRef.current = null; });
         iceServersInflightRef.current = inflight;
@@ -3767,7 +3810,26 @@ export default function App() {
                     // kick hosting explicitly under the same conditions it uses.
                     // A device whose password lives server-side hosts fine without a
                     // local plaintext copy — viewers verify against the stored hash.
-                    const hostingPwd = data.auto_password || (identityChanged ? '' : storedPwd);
+                    let hostingPwd = data.auto_password || (identityChanged ? '' : storedPwd);
+
+                    // First run on this install, but the server already knows this
+                    // machine (the ID is derived from the hardware fingerprint, so a
+                    // reinstall lands on the old device row, whose password the
+                    // server keeps but nobody here knows). The screen would show
+                    // "Not Set" while viewers are asked for a password that can't be
+                    // read anywhere. Mint one here and push it through the same
+                    // explicit set-password path the modal uses. Gated on a TRULY
+                    // fresh install (nothing cached locally) so a working install
+                    // never has its password rotated behind the user's back.
+                    const trulyFreshInstall = !cachedAccessKey && !cachedPassword && !hasVerifiedBootstrapIdentity;
+                    const serverHasUnknownPassword = Boolean(data.has_password) && !data.auto_password;
+                    const passwordWanted = data.password_required !== false && passwordRequired !== false;
+                    if (trulyFreshInstall && serverHasUnknownPassword && passwordWanted && !hostingPwd) {
+                        hostingPwd = generateFirstRunPassword();
+                        console.log('[Self-Register] First run on a known machine: issuing a fresh access password.');
+                        setDevicePassword(hostingPwd);
+                        localStorage.setItem('device_password', hostingPwd);
+                    }
                     if (!manuallyStoppedHost.current) {
                         hasAutoStartedHost.current = true;
                         setTimeout(() => handleStartHosting(hostingPwd || undefined, { silent: true }), 600);
@@ -3863,6 +3925,11 @@ export default function App() {
                 reconnectingViewerRef.current = false;
                 if (data.success) {
                     console.log('[Viewer] Successfully joined session. Ready for stream.');
+                    // Keep the session-scoped ICE list (TURN included) for the offer
+                    // handler; see fetchIceServers.
+                    if (Array.isArray(data.iceServers) && data.iceServers.length) {
+                        signalingIceServersRef.current = data.iceServers;
+                    }
                     setViewerStatus('connected');
                 } else {
                     // Host denied the connection or timed out
@@ -3883,7 +3950,14 @@ export default function App() {
                 const hostSignalTargetId = data.senderId || sessionCode.replace(/\s/g, '');
                 // Cached/prefetched at connect start — resolves instantly on the happy
                 // path instead of stalling the handshake on an HTTPS round-trip.
-                const iceServers = await fetchIceServers();
+                let iceServers = await fetchIceServers();
+                // The prefetch may have finished before `joined` delivered the
+                // session credentials; never start the handshake STUN-only when a
+                // relay is available.
+                if (!iceListHasTurn(iceServers) && iceListHasTurn(signalingIceServersRef.current)) {
+                    logIce('[Viewer] ICE servers: session credentials from signaling (TURN relay available)');
+                    iceServers = signalingIceServersRef.current;
+                }
                 // One-shot relay-only routing (localStorage 'r365_force_relay' = '1').
                 //
                 // ICE ranks candidates by FIXED priority — host > srflx > relay — and never by

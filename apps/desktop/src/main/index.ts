@@ -6305,11 +6305,44 @@ function flushPreBuffer() {
 // signaling connects; 5 minutes is safely inside the TURN credential TTL.
 let hostIceServersCache: { host: string; list: any[]; at: number } | null = null;
 
+// RTCIceServer entries (as the backend/signaling send them) → node-datachannel's
+// IceServer shape. TURN entries without credentials are useless and dropped.
+function toDatachannelIceServers(list: any[]): any[] {
+  const servers: any[] = [];
+  for (const server of Array.isArray(list) ? list : []) {
+    const urls = Array.isArray(server?.urls) ? server.urls : [server?.urls];
+    for (const url of urls) {
+      if (typeof url !== 'string') continue;
+      if (url.startsWith('stun:')) {
+        const hostPort = url.replace(/^stun:/, '').split('?')[0];
+        const [hostname, port = '19302'] = hostPort.split(':');
+        servers.push({ hostname, port: Number(port) || 19302 });
+      } else if (url.startsWith('turn:') && server.username && server.credential) {
+        const hostPort = url.replace(/^turn:/, '').split('?')[0];
+        const [hostname, port = '3478'] = hostPort.split(':');
+        const relayType = url.includes('transport=tcp') ? 'TurnTcp' : 'TurnUdp';
+        servers.push({ hostname, port: Number(port) || 3478, username: server.username, password: server.credential, relayType });
+      }
+    }
+  }
+  return servers;
+}
+
+// ICE servers signaling attached to the last `viewer-joined` for this host.
+// Signaling authorized that viewer for THIS session, so the list carries TURN
+// credentials without needing a user token or a machine credential — the only
+// relay a signed-out, guest-mode host (a fresh install nobody has signed in
+// on) can get. Without it such a host was STUN-only and every session from a
+// network that can't reach it directly failed at ICE.
+let hostSignalingIceServers: any[] = [];
+const hasTurnRelay = (servers: any[]) => servers.some((s) => typeof s?.relayType === 'string');
+
 async function resolveHostIceServers(serverHost: string, token: string) {
-  const fallback = [
+  const stunOnly = [
     { hostname: 'stun.l.google.com', port: 19302 },
     { hostname: 'stun1.l.google.com', port: 19302 }
   ];
+  const fallback = hasTurnRelay(hostSignalingIceServers) ? hostSignalingIceServers : stunOnly;
   // Unattended (pre-logon) hosting has no user token. STUN-only would leave the
   // device Online but unable to connect on any network that needs a relay, so
   // authenticate to the ICE endpoint with the machine credential instead. Sent
@@ -6317,7 +6350,11 @@ async function resolveHostIceServers(serverHost: string, token: string) {
   const machineAuthHeaders = !token && activeHostSecret && activeHostAccessKey
     ? { 'X-Device-Key': activeHostAccessKey, 'X-Host-Secret': activeHostSecret }
     : null;
-  if (!token && !machineAuthHeaders) return fallback;
+  if (!token && !machineAuthHeaders) {
+    if (fallback === stunOnly) log.warn('[Host] No user token, machine credential or session ICE list; STUN only (direct connections only).');
+    else log.info('[Host] ICE servers: session credentials from signaling (TURN relay available).');
+    return fallback;
+  }
   if (hostIceServersCache && hostIceServersCache.host === serverHost && Date.now() - hostIceServersCache.at < 5 * 60_000) {
     return hostIceServersCache.list;
   }
@@ -6339,33 +6376,46 @@ async function resolveHostIceServers(serverHost: string, token: string) {
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json() as { iceServers?: Array<{ urls: string | string[]; username?: string; credential?: string }> };
-    const servers: any[] = [];
-    for (const server of data.iceServers || []) {
-      const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
-      for (const url of urls) {
-        if (typeof url !== 'string') continue;
-        if (url.startsWith('stun:')) {
-          const hostPort = url.replace(/^stun:/, '').split('?')[0];
-          const [hostname, port = '19302'] = hostPort.split(':');
-          servers.push({ hostname, port: Number(port) || 19302 });
-        } else if (url.startsWith('turn:') && server.username && server.credential) {
-          const hostPort = url.replace(/^turn:/, '').split('?')[0];
-          const [hostname, port = '3478'] = hostPort.split(':');
-          const relayType = url.includes('transport=tcp') ? 'TurnTcp' : 'TurnUdp';
-          servers.push({ hostname, port: Number(port) || 3478, username: server.username, password: server.credential, relayType });
-        }
-      }
-    }
-    if (servers.length > 0) {
+    const servers = toDatachannelIceServers(data.iceServers || []);
+    if (hasTurnRelay(servers)) {
       hostIceServersCache = { host: serverHost, list: servers, at: Date.now() };
       return servers;
     }
-    return fallback;
+    // The account answered but without a relay: the session list is better.
+    return servers.length > 0 && fallback === stunOnly ? servers : fallback;
   } catch (err: any) {
-    log.warn(`[Host] Failed to fetch ICE servers from backend; using STUN fallback: ${err?.message || err}`);
+    log.warn(`[Host] Failed to fetch ICE servers from backend; using ${fallback === stunOnly ? 'STUN-only' : 'session ICE list'} fallback: ${err?.message || err}`);
     return fallback;
   }
 }
+
+// ICE servers for a VIEWER that isn't signed in. /api/auth/ice-servers needs a
+// user token or a machine credential, so a signed-out viewer used to connect
+// with STUN only — fine on a LAN, but "connecting → failed" after 15s on any
+// pair of networks that needs the TURN relay (seen Sep 26: anonymous viewer on
+// Public Wi-Fi to a laptop elsewhere, every attempt failed). This PC is a
+// registered host, so it can use its machine credential exactly like unattended
+// hosting does above. Returns the backend's RTCIceServer list unchanged (the
+// renderer feeds it straight to RTCPeerConnection); [] when unavailable.
+ipcMain.handle('viewer:machine-ice-servers', async () => {
+  if (!activeHostSecret || !activeHostAccessKey) return [];
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), 5000);
+  try {
+    const response = await fetch(`${buildHttpOrigin(currentSignalingServer)}/api/auth/ice-servers`, {
+      headers: { 'X-Device-Key': activeHostAccessKey, 'X-Host-Secret': activeHostSecret },
+      signal: abort.signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json() as { iceServers?: unknown };
+    return Array.isArray(data.iceServers) ? data.iceServers : [];
+  } catch (err: any) {
+    log.warn(`[Viewer] ICE servers via machine credential unavailable: ${err?.message || err}`);
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+});
 
 // ── LAN Direct ────────────────────────────────────────────────────────────────
 // Offline/local access. Persisted locally (NOT on the server) because its whole
@@ -7692,6 +7742,9 @@ function handleHostSignalingMessage(data: any, reply: (payload: any) => void) {
       // there would silently downgrade an unattended session to view-only on
       // every renegotiation.
       if (viewerId && data.type === 'viewer-joined') {
+        // Session-scoped ICE servers (TURN included) — see resolveHostIceServers.
+        const sessionIce = toDatachannelIceServers(data.iceServers);
+        if (hasTurnRelay(sessionIce)) hostSignalingIceServers = sessionIce;
         hostViewerUnattended.set(String(viewerId), Boolean(data.unattended));
         // Per-file transfer cap for THIS viewer, stamped by the server from
         // their billing plan. -1 / absent = no server figure (older signaling

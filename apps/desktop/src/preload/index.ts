@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getHostStatus: () => ipcRenderer.invoke('host:getStatus'),
   stopHosting: () => ipcRenderer.invoke('host:stop'),
   connectToHost: (sessionId: string, serverIP?: string, token?: string, viewerClientId?: string, viewerDeviceId?: string) => ipcRenderer.invoke('viewer:connect', sessionId, serverIP, token, viewerClientId, viewerDeviceId),
+  // TURN/STUN list fetched with this PC's machine credential, for viewing
+  // while signed out (the account route needs a user token).
+  getMachineIceServers: () => ipcRenderer.invoke('viewer:machine-ice-servers'),
   // LAN Direct — works with no internet and no cloud account.
   lanGetStatus: () => ipcRenderer.invoke('lan:get-status'),
   lanConfigure: (options: { enabled?: boolean; password?: string }) => ipcRenderer.invoke('lan:configure', options),
