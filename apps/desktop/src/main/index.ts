@@ -2,10 +2,10 @@ import { app, shell, dialog, BrowserWindow, BrowserView, ipcMain, safeStorage, c
 import { isViewerMediaActive, hasActiveMediaViewer, updateHostMediaActivity } from '../shared/viewerMediaPolicy';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
-import { join, basename, resolve } from 'path';
+import { join, basename, resolve, dirname, extname } from 'path';
 import { spawn, execSync, ChildProcess } from 'child_process';
 import * as fs from 'fs/promises';
-import { createWriteStream, readFileSync, writeFileSync, existsSync } from 'fs';
+import { createWriteStream, readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 // Host dock mascot: the Lottie player is inlined into the dock page at build
 // time (the packaged app ships no node_modules a window could load), and the
 // robot animation is whichever src/renderer/assets/animations/dockRobot*.json
@@ -6967,11 +6967,16 @@ function handleControlMessage(msg: any, viewerId?: string) {
         const transferId = header.transferId || `${header.name}-${header.totalSize || header.totalChunks}`;
         let transfer = fileTransfers.get(transferId);
         if (!transfer) {
-          const safeName = basename(String(header.name || 'received-file'));
-          const targetDir = receivedFilesDir || app.getPath('downloads');
-          const filePath = join(targetDir, safeName);
-          log.info(`[Host] File transfer started: ${safeName} (${header.totalChunks} chunks)`);
-          const stream = createWriteStream(filePath, { flags: 'w' });
+          const safeName = basename(String(header.name || 'received-file').replace(/[\\/]+/g, '/'))
+            .replace(/[<>:"|?*\u0000-\u001f]/g, '_').trim() || 'received-file';
+          // Same folder and the same never-overwrite rule as v2 transfers: a
+          // browser upload used to land in the Downloads root and silently
+          // replace any file with that name.
+          const targetDir = receivedFilesDir || join(app.getPath('downloads'), 'Remote365');
+          try { mkdirSync(targetDir, { recursive: true }); } catch { /* reported by the stream */ }
+          const filePath = uniquePathSync(join(targetDir, safeName));
+          log.info(`[Host] File transfer started: ${safeName} (${header.totalChunks} chunks) -> ${filePath}`);
+          const stream = createWriteStream(filePath, { flags: 'wx' });
           const inactivityTimer = setTimeout(() => {
             const stale = fileTransfers.get(transferId);
             if (!stale) return;
@@ -7062,7 +7067,7 @@ function handleControlMessage(msg: any, viewerId?: string) {
           fileTransfers.delete(transferId);
           transfer.stream.end(() => {
             log.info(`[Host] File transfer complete: ${transfer!.name} -> ${transfer!.filePath}`);
-            new Notification({ title: 'File Transferred', body: `${transfer!.name} was saved to ${basename(receivedFilesDir || app.getPath('downloads'))}` }).show();
+            new Notification({ title: 'File Transferred', body: `${basename(transfer!.filePath)} was saved to ${basename(dirname(transfer!.filePath))}` }).show();
             if (replyChannel?.isOpen?.()) {
               replyChannel.sendMessage(JSON.stringify({
                 type: 'file-sent',
@@ -7158,7 +7163,9 @@ function handleControlMessage(msg: any, viewerId?: string) {
           : event.type === 'ft:host-pick'
             ? { type: 'ft:host-pick-result', reqId: event.reqId, chosen: false, error: message }
             : { type: 'ft:error', jobId: event.jobId, message };
-        try { ftReplyChannel?.sendMessage(JSON.stringify(refusal)); } catch { /* channel gone */ }
+        // The web viewer only listens on `control`; the desktop viewer reads both.
+        const refusalChannel = event.type === 'ft:host-pick' ? replyChannel : ftReplyChannel;
+        try { refusalChannel?.sendMessage(JSON.stringify(refusal)); } catch { /* channel gone */ }
         return;
       }
       const ftViewerKey = String(viewerId || currentViewerId || '');
@@ -7167,7 +7174,9 @@ function handleControlMessage(msg: any, viewerId?: string) {
         // its screen; the viewer operates it through the stream, and the
         // chosen files come back as a normal host-started transfer.
         const reqId = event.reqId;
-        const reply = (payload: any) => { try { ftReplyChannel?.sendMessage(JSON.stringify({ type: 'ft:host-pick-result', reqId, ...payload })); } catch { /* channel gone */ } };
+        // Answer on `control`: the web viewer never reads the `file` channel,
+        // and the desktop viewer's engine listens on both.
+        const reply = (payload: any) => { try { replyChannel?.sendMessage(JSON.stringify({ type: 'ft:host-pick-result', reqId, ...payload })); } catch { /* channel gone */ } };
         if (hostPickInProgress) {
           reply({ chosen: false, error: 'A file picker is already open on this computer.' });
           return;
@@ -8473,9 +8482,14 @@ app.whenReady().then(() => {
   // LAN Direct comes up independently of cloud signaling and of login — the whole
   // point is that a machine which reboots with no internet is still reachable from
   // the same network. It never waits for (or needs) a server round-trip.
-  if (lanConfig.enabled && lanConfig.passwordHash) {
-    const lan = startLanDirectIfConfigured();
-    log.info(`[LAN] Autostart ${lan.ok ? `ok on ${lan.addresses.join(', ')}` : `failed: ${lan.error}`}`);
+  // Local Network access was removed from Settings. A PC that had it on
+  // would otherwise keep listening on the LAN with no switch left to turn it
+  // off, so it is switched off (and stays off) here.
+  if (lanConfig.enabled) {
+    lanConfig.enabled = false;
+    persistLanConfig();
+    stopLanDirect();
+    log.info('[LAN] Local Network access was on; it has been removed from Settings, so it is now turned off.');
   }
 
   // Watch OS lock/unlock so the host streams the secure desktop (lock/PIN screen)
@@ -9027,6 +9041,20 @@ async function sendFileFromHost(selectedPath?: string, targetViewerId?: string) 
 // front (Windows' foreground lock would otherwise just flash the taskbar).
 // A transparent always-on-top 1x1 owner makes the dialog topmost too.
 let hostPickInProgress = false;
+
+// Synchronous twin of fileTransfer's uniquePath, for the v1 receive path,
+// which must open its stream before the next chunk handler runs.
+function uniquePathSync(target: string): string {
+  if (!existsSync(target)) return target;
+  const dir = dirname(target);
+  const ext = extname(target);
+  const stem = basename(target, ext);
+  for (let n = 2; n < 1000; n++) {
+    const candidate = join(dir, `${stem} (${n})${ext}`);
+    if (!existsSync(candidate)) return candidate;
+  }
+  return join(dir, `${stem} (${Date.now()})${ext}`);
+}
 async function showTopmostOpenDialog(title: string): Promise<string[]> {
   let owner: BrowserWindow | null = null;
   try {
@@ -9059,7 +9087,12 @@ async function sendFilesFromHost(
     : 'Send To The Viewer';
   const filePaths = await showTopmostOpenDialog(title);
   if (!filePaths.length) return false;
-  const fileChannel = peer?.fileDataChannel?.isOpen?.() ? peer.fileDataChannel : null;
+  // Only the desktop viewer runs the v2 engine. Web and phone viewers never
+  // read the `file` channel (it still opens, since the host creates it for
+  // everyone), so a v2 transfer to them used to vanish without a trace.
+  const clientKind = hostViewerClientKinds.get(viewerKey) || '';
+  const takesV2 = !/web|mobile/i.test(clientKind);
+  const fileChannel = takesV2 && peer?.fileDataChannel?.isOpen?.() ? peer.fileDataChannel : null;
   if (fileChannel) {
     const jobId = `h${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
     const label = filePaths.length === 1
@@ -9072,7 +9105,23 @@ async function sendFilesFromHost(
     startHostPull(jobId, filePaths, fileChannel, fileTransferDeps, { fromHost: true, label }, cap);
     return true;
   }
-  for (const filePath of filePaths) await sendFileFromHost(filePath, targetViewerId);
+  const v1Cap = options.requestedByViewer ? (hostViewerFileCaps.get(viewerKey) ?? null) : null;
+  const v1Channel = getHostPeerControlChannel(targetViewerId || peer?.viewerId);
+  for (const filePath of filePaths) {
+    if (v1Cap !== null) {
+      const size = await fs.stat(filePath).then((st) => st.size).catch(() => 0);
+      if (size > v1Cap) {
+        try {
+          v1Channel?.sendMessage(JSON.stringify({
+            type: 'file-transfer-error', direction: 'receive', name: basename(filePath),
+            message: `${basename(filePath)} is over your plan's per-file limit and was not sent.`,
+          }));
+        } catch { /* channel gone */ }
+        continue;
+      }
+    }
+    await sendFileFromHost(filePath, targetViewerId || peer?.viewerId);
+  }
   return true;
 }
 

@@ -14,7 +14,6 @@ import { applyEasyAccess, isEasyAccessEnabled, subscribeEasyAccess } from '../li
 import { addTempCode, getActiveTempCodes, removeTempCode } from '../lib/tempAccessCodes';
 import { hasUserFeature, hasUserPermission } from '../lib/permissions';
 import { readPreferenceChoice } from '../lib/preferenceValue';
-import LanDirectPanel from './LanDirectPanel';
 
 const RC_CLIPBOARD_OPTIONS = ['Outgoing Only', 'Incoming Only', 'Both', 'Off'] as const;
 const RC_CURSOR_OPTIONS = ['Default', 'Dot', 'Hidden'] as const;
@@ -2892,13 +2891,6 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
                       onChange={(next) => saveAdvancedFlag('pref_adv_connection_diagnostics', next, setAdvConnectionDiagnostics)}
                     />
                   </div>
-                </section>
-
-                <div className="h-px w-full bg-[rgba(26,29,33,0.3)] dark:bg-white/10" />
-
-                <section className="flex w-full flex-col items-start gap-4">
-                  <h3 className="m-0 w-full text-[16px] font-semibold leading-[23px] text-black dark:text-[#F5F5F5]">Local Network (Works Offline)</h3>
-                  <LanDirectPanel />
                 </section>
 
                 <div className="h-px w-full bg-[rgba(26,29,33,0.3)] dark:bg-white/10" />
