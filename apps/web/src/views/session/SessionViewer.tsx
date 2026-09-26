@@ -37,9 +37,16 @@ import {
   Zap as ZapIcon,
   Settings as SettingsIcon,
   ScreenShareOff,
+  UploadCloud,
+  DownloadCloud,
+  Upload,
+  Download,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import api from '../../lib/api';
+import { WebFileTransfer, type WebTransfer } from '../../lib/webFileTransfer';
 import { publishActiveSession } from '../../lib/activeSessions';
 import waitIllustrationAsset from '../../assets/wait.png';
 import {
@@ -242,7 +249,13 @@ const SessionViewer: React.FC = () => {
   }, []);
 
   const [zoomMode, setZoomMode] = useState<'fit' | 'fill' | 'original'>('fit');
-  const [transferProgress, setTransferProgress] = useState<{name: string, p: number} | null>(null);
+  // "Send files" / "Get files" — see lib/webFileTransfer. One engine per
+  // viewer; it reads the live control channel on every send.
+  const fileXferRef = useRef<WebFileTransfer | null>(null);
+  if (!fileXferRef.current) fileXferRef.current = new WebFileTransfer(() => dataChannelRef.current);
+  const [fileTransfers, setFileTransfers] = useState<WebTransfer[]>([]);
+  useEffect(() => fileXferRef.current!.subscribe(setFileTransfers), []);
+  useEffect(() => () => { fileXferRef.current?.dispose(); }, []);
   // Host-side control gate (see the control-channel switch in the desktop
   // main process): auto-granted when the channel opens, but the host can
   // revoke or hold input behind an approval prompt.
@@ -816,9 +829,16 @@ const SessionViewer: React.FC = () => {
           channel.send(JSON.stringify({ type: 'request-keyframe' }));
         };
         channel.onclose = () => console.log('[WebRTC] Control DataChannel CLOSED');
+        // File chunks from the host arrive as binary frames on this channel.
+        channel.binaryType = 'arraybuffer';
         channel.onmessage = (e) => {
+          if (e.data instanceof ArrayBuffer) {
+            fileXferRef.current?.handleBinary(e.data);
+            return;
+          }
           try {
             const data = JSON.parse(e.data);
+            if (fileXferRef.current?.handleJson(data)) return;
             if (data.type === 'clipboard' && data.text) navigator.clipboard.writeText(data.text).catch(() => {});
             else if (data.type === 'control-granted') { setHostAnnouncedControl(true); setControlStatus('granted'); }
             else if (data.type === 'control-pending') { setHostAnnouncedControl(true); setControlStatus('pending'); }
@@ -1835,6 +1855,30 @@ const SessionViewer: React.FC = () => {
   // style). Every Actions item maps to a command the host's control-channel
   // switch actually executes — see apps/desktop/src/main/index.ts.
   const hostAction = (action: string) => () => onControlEvent({ type: 'action', action });
+
+  // Send files / Get files. Phones can't receive files yet, so the buttons
+  // are hidden for them. Both act on the remote computer, so both need
+  // control; without it they ask for control instead of sending into nothing
+  // (the host silently drops file chunks from a view-only viewer).
+  const hostIsPhone = /^(mobile|android|ios)$/i.test(String(deviceType || ''));
+  const needControlForFiles = () => {
+    if (!hostAnnouncedControl || controlStatus === 'granted') return false;
+    if (controlStatus === 'pending') {
+      setSessionNotice('Waiting for the other side to allow control. Files can be sent once they do.');
+    } else {
+      setSessionNotice('Sending and getting files needs control of the session. Control requested.');
+      onControlEvent({ type: 'request-control' });
+    }
+    return true;
+  };
+  const sendFilesClick = () => {
+    if (needControlForFiles()) return;
+    fileInputRef.current?.click();
+  };
+  const getFilesClick = () => {
+    if (needControlForFiles()) return;
+    fileXferRef.current?.requestHostPick(deviceName);
+  };
   const confirmHostAction = (action: string, title: string, message: string, confirmLabel: string) => () =>
     setPendingAction({ action, title, message, confirmLabel });
   const pickQuality = (mode: 'auto' | 'speed' | 'quality') => () => {
@@ -1995,7 +2039,7 @@ const SessionViewer: React.FC = () => {
             exit — Esc must not be the only way back. Shifts down while the
             transfer toast occupies the corner. */}
         {(isFullscreen || remoteStream || hasReceivedKeyframeRef.current) && (
-          <div className={`absolute right-4 z-[100] flex items-center gap-2 ${transferProgress ? 'top-[70px]' : 'top-4'}`}>
+          <div className={`absolute right-4 z-[100] flex items-center gap-2 top-4`}>
             {isFullscreen && (
               <button
                 type="button"
@@ -2023,14 +2067,39 @@ const SessionViewer: React.FC = () => {
           </div>
         )}
 
-        {/* File transfer toast (desktop-style dark pill) */}
-        {transferProgress && (
-          <div className="absolute right-4 top-4 z-[105] flex items-center gap-3 rounded-full bg-black/80 px-4 py-2.5 text-white shadow-2xl backdrop-blur-md">
-            <span className="text-[13px] font-medium leading-none max-w-[180px] truncate">Sending {transferProgress.name}…</span>
-            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-white/20">
-              <div className="h-full rounded-full bg-[#FF8A00] transition-all duration-300" style={{ width: `${transferProgress.p}%` }} />
-            </div>
-            <span className="text-[12px] font-medium tabular-nums">{transferProgress.p}%</span>
+        {/* Send files / Get files progress (desktop parity): newest first, at
+            most four; finished cards can be closed. */}
+        {fileTransfers.length > 0 && (
+          <div className="pointer-events-none absolute bottom-24 right-4 z-[105] flex w-[300px] max-w-[calc(100%-2rem)] flex-col gap-2">
+            {fileTransfers.slice(0, 4).map((t) => {
+              const running = t.state === 'active' || t.state === 'waiting';
+              const pct = t.totalBytes > 0 ? Math.min(100, Math.round((t.transferredBytes / t.totalBytes) * 100)) : 0;
+              const Icon = t.state === 'done' ? Check : t.state === 'error' ? AlertCircle : t.hostPick ? Loader2 : t.direction === 'send' ? Upload : Download;
+              const iconColor = t.state === 'done' ? 'text-[#1E8E3E]' : t.state === 'error' ? 'text-[#FF383C]' : 'text-[#FF8A00]';
+              const line = t.state === 'done'
+                ? (t.direction === 'send' ? `Saved on ${deviceName} in Downloads\Remote365` : 'Saved to your browser downloads')
+                : t.state === 'error' ? t.message
+                  : t.message || `${pct}%`;
+              return (
+                <div key={t.id} className="pointer-events-auto rounded-xl border border-black/10 bg-white px-3 py-2.5 text-[#111315] shadow-lg" role="status">
+                  <div className="flex items-center gap-2">
+                    <Icon size={16} className={`flex-none ${iconColor} ${t.hostPick && running ? 'animate-spin' : ''}`} />
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{t.name}</span>
+                    {!running && (
+                      <button type="button" aria-label="Close" title="Close" onClick={() => fileXferRef.current?.dismiss(t.id)} className="flex h-6 w-6 items-center justify-center rounded text-[#111315]/60 hover:bg-black/5 hover:text-[#111315]">
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                  <p className={`m-0 mt-1 line-clamp-2 text-[11px] leading-4 ${t.state === 'error' ? 'text-[#FF383C]' : 'text-[#111315]/60'}`}>{line}</p>
+                  {running && !t.hostPick && (
+                    <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-black/10">
+                      <div className="h-full rounded-full bg-[#FF8A00] transition-[width] duration-300" style={{ width: `${pct}%` }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -2187,15 +2256,30 @@ const SessionViewer: React.FC = () => {
               {quickHint.label}
             </div>
           )}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            onMouseEnter={showQuickHint('Send a file')}
-            onMouseLeave={hideQuickHint('Send a file')}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-[#FF8A00] transition-colors hover:bg-[#FFF1E0] active:scale-95"
-          >
-            <Plus size={20} strokeWidth={2} />
-          </button>
+          {!hostIsPhone && (
+            <>
+              <button
+                type="button"
+                aria-label="Send files"
+                onClick={sendFilesClick}
+                onMouseEnter={showQuickHint('Send files')}
+                onMouseLeave={hideQuickHint('Send files')}
+                className="flex h-10 w-10 items-center justify-center rounded-full text-[#FF8A00] transition-colors hover:bg-[#FFF1E0] active:scale-95"
+              >
+                <UploadCloud size={20} strokeWidth={1.75} />
+              </button>
+              <button
+                type="button"
+                aria-label="Get files"
+                onClick={getFilesClick}
+                onMouseEnter={showQuickHint('Get files')}
+                onMouseLeave={hideQuickHint('Get files')}
+                className="flex h-10 w-10 items-center justify-center rounded-full text-[#FF8A00] transition-colors hover:bg-[#FFF1E0] active:scale-95"
+              >
+                <DownloadCloud size={20} strokeWidth={1.75} />
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={() => onControlEvent({ type: 'request-keyframe' })}
@@ -2388,48 +2472,16 @@ const SessionViewer: React.FC = () => {
         className="pointer-events-none fixed bottom-2 left-2 z-[1] h-6 w-6 resize-none opacity-[0.01]"
       />
 
-      {/* Hidden file input for transfers */}
+      {/* Hidden file input for "Send files" (several at once) */}
       <input
         type="file"
+        multiple
         ref={fileInputRef}
         className="hidden"
-        onChange={async (e) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-
-          const CHUNK_SIZE = 16 * 1024; // 16KB
-          const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-          setTransferProgress({ name: file.name, p: 0 });
-
-          for (let i = 0; i < totalChunks; i++) {
-            const start = i * CHUNK_SIZE;
-            const end = Math.min(start + CHUNK_SIZE, file.size);
-            const chunk = file.slice(start, end);
-            const arrayBuffer = await chunk.arrayBuffer();
-
-            const header = JSON.stringify({
-              type: 'file-chunk',
-              name: file.name,
-              totalSize: file.size,
-              offset: start,
-              chunkIndex: i,
-              totalChunks: totalChunks
-            });
-
-            const headerBuffer = new TextEncoder().encode(header);
-            const fullBuffer = new Uint8Array(4 + headerBuffer.length + arrayBuffer.byteLength);
-            const view = new DataView(fullBuffer.buffer);
-            view.setUint32(0, headerBuffer.length, true);
-            fullBuffer.set(headerBuffer, 4);
-            fullBuffer.set(new Uint8Array(arrayBuffer), 4 + headerBuffer.length);
-
-            onControlEvent(fullBuffer);
-            setTransferProgress({ name: file.name, p: Math.round(((i + 1) / totalChunks) * 100) });
-            if (i % 5 === 0) await new Promise(r => setTimeout(r, 10));
-          }
-
-          setTimeout(() => setTransferProgress(null), 2000);
+        onChange={(e) => {
+          const picked = Array.from(e.target.files || []);
           if (fileInputRef.current) fileInputRef.current.value = '';
+          if (picked.length) void fileXferRef.current?.sendFiles(picked);
         }}
       />
 
