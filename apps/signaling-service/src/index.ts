@@ -609,8 +609,22 @@ function createLiveKitJoinConfig(room: string, userId: string, name: string) {
   };
 }
 
-function createMeetingIceServers() {
+// ICE servers handed to a peer that signaling has already authorized to be in
+// a session (meeting participants, and the viewer/host pair of a remote
+// session). This is what a SIGNED-OUT desktop client relies on for TURN: the
+// account route (/api/auth/ice-servers) needs a user token or a machine
+// credential, and a fresh guest-mode install has neither, so without this list
+// both ends of a guest session were STUN-only and failed on any pair of
+// networks that can't connect directly.
+//
+// Credentials: when TURN_REST_SECRET is set, mint TURN REST API credentials
+// (coturn --use-auth-secret): "expiry:identity" + HMAC-SHA1, valid for
+// TURN_TTL_SECONDS, exactly as auth-service does. A leaked credential then dies
+// with the session instead of being a permanent relay password. Otherwise the
+// static TURN_USER/TURN_PASSWORD pair is used (coturn --user), as before.
+function createMeetingIceServers(identity: string = 'session') {
   const serverIP = process.env.TURN_HOST || process.env.SERVER_IP || '159.65.84.190';
+  const turnSecret = process.env.TURN_REST_SECRET;
   const turnUser = process.env.TURN_USER;
   const turnPass = process.env.TURN_PASSWORD;
 
@@ -619,11 +633,15 @@ function createMeetingIceServers() {
     { urls: 'stun:stun1.l.google.com:19302' }
   ];
 
-  if (turnUser && turnPass) {
-    iceServers.push(
-      { urls: `turn:${serverIP}:3478?transport=udp`, username: turnUser, credential: turnPass },
-      { urls: `turn:${serverIP}:3478?transport=tcp`, username: turnUser, credential: turnPass }
-    );
+  const urls = [`turn:${serverIP}:3478?transport=udp`, `turn:${serverIP}:3478?transport=tcp`];
+  if (turnSecret) {
+    const ttl = Number(process.env.TURN_TTL_SECONDS || 3600);
+    const expiresAt = Math.floor(Date.now() / 1000) + Math.max(300, Math.min(ttl, 86400));
+    const username = `${expiresAt}:${identity}`;
+    const credential = createHmac('sha1', turnSecret).update(username).digest('base64');
+    iceServers.push({ urls, username, credential, credentialType: 'password' });
+  } else if (turnUser && turnPass) {
+    iceServers.push({ urls, username: turnUser, credential: turnPass, credentialType: 'password' });
   }
 
   // Cloudflare anycast TURN FIRST so ICE prefers a nearby relay over the London
@@ -1404,7 +1422,7 @@ async function startServer() {
               viewerRegistry.set(viewerId, targetSessionId);
               void acquireDeviceSession(targetSessionId, viewerId);
               ws.send(JSON.stringify({
-                type: 'joined', success: true, iceServers: createMeetingIceServers(),
+                type: 'joined', success: true, iceServers: createMeetingIceServers(`viewer:${viewerId}`),
                 remoteSessionId: decoded.remoteSessionId,
                 expiresAt: grantExpiresAt?.toISOString()
               }));
@@ -1421,7 +1439,7 @@ async function startServer() {
                   // whether the session opens in control or view-only.
                   unattended: Boolean(decoded.unattended),
                   viewerClientKind: String(data.clientKind || ''),
-                  iceServers: createMeetingIceServers(),
+                  iceServers: createMeetingIceServers(`host:${targetSessionId}`),
                   remoteSessionId: decoded.remoteSessionId,
                   expiresAt: grantExpiresAt?.toISOString()
                 }));
