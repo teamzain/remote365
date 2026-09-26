@@ -1,8 +1,26 @@
 import React, { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import axios from 'axios';
 import { Box, CircularProgress, Typography } from '@mui/material';
 import { useAuthStore } from '../../store/authStore';
 import api from '../../lib/api';
+
+type OAuthGrant = { accessToken?: string; refreshToken?: string; tempToken?: string };
+
+// These calls carry the NEW sign-in's credentials, so they skip `api`: its
+// interceptor swaps in whatever token an earlier session left in storage
+// (possibly revoked, which would bounce this page to /login).
+const authApi = axios.create({ baseURL: api.defaults.baseURL });
+
+// The code works once, and the effect can run twice for the same URL
+// (React StrictMode in development): share one exchange per code.
+const exchanges = new Map<string, Promise<OAuthGrant>>();
+const exchangeCode = (code: string): Promise<OAuthGrant> => {
+  const pending: Promise<OAuthGrant> = exchanges.get(code)
+    ?? authApi.post('/api/auth/oauth/exchange', { code }).then(({ data }: { data: OAuthGrant }) => data);
+  exchanges.set(code, pending);
+  return pending;
+};
 
 const AuthCallback: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -11,36 +29,42 @@ const AuthCallback: React.FC = () => {
 
   useEffect(() => {
     const handleCallback = async () => {
-      const accessToken = searchParams.get('accessToken');
-      const refreshToken = searchParams.get('refreshToken');
-      const tempToken = searchParams.get('tempToken');
-
-      if (tempToken) {
-        useAuthStore.getState().setTemp2faToken(tempToken);
-        navigate('/2fa');
-        return;
-      }
-
-      if (!accessToken || !refreshToken) {
-        console.error('OAuth tokens missing from URL');
-        navigate('/login');
-        return;
-      }
-
       try {
-        // We have the tokens, now get the user profile
-        // The API client will use the new token from the URL if we set it in storage first 
-        // Or we can pass it in the headers for this specific call
-        const { data } = await api.get('/api/auth/me', {
+        // The API sends a one-time code; builds from before that put the
+        // tokens in the URL itself. replace: keep the callback URL out of history.
+        const code = searchParams.get('code');
+        const grant: OAuthGrant = code
+          ? await exchangeCode(code)
+          : {
+              accessToken: searchParams.get('accessToken') || undefined,
+              refreshToken: searchParams.get('refreshToken') || undefined,
+              tempToken: searchParams.get('tempToken') || undefined,
+            };
+
+        if (grant.tempToken) {
+          useAuthStore.getState().setTemp2faToken(grant.tempToken);
+          navigate('/2fa', { replace: true });
+          return;
+        }
+
+        const { accessToken, refreshToken } = grant;
+        if (!accessToken || !refreshToken) {
+          console.error('OAuth tokens missing from URL');
+          navigate('/login', { replace: true });
+          return;
+        }
+
+        // We have the tokens, now get the user profile with them.
+        const { data } = await authApi.get('/api/auth/me', {
           headers: { Authorization: `Bearer ${accessToken}` }
         });
 
         const user = data.user || data;
         setAuth(user, accessToken, refreshToken);
-        navigate('/dashboard');
+        navigate('/dashboard', { replace: true });
       } catch (error) {
         console.error('OAuth callback failed', error);
-        navigate('/login');
+        navigate('/login', { replace: true });
       }
     };
 

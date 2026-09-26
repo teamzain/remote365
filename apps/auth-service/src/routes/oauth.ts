@@ -1,13 +1,22 @@
 import https from 'https';
+import { randomBytes } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import path from 'path';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { prisma, recordLogin, getPlanLimits, getTrialDays, trialDurationMs } from '@remotelink/shared';
+import { prisma, redisPublisher, recordLogin, getPlanLimits, getTrialDays, trialDurationMs } from '@remotelink/shared';
 import { issueTokens } from '../utils/token-utils';
 import { saveAuthSession, enforceMaxSessions } from '../utils/authSessions';
 import { sendWelcomeEmail } from '../utils/welcomeEmail';
 import { isFreeMailDomain } from './auth';
 import { getPublicWebUrl } from '../utils/publicUrls';
+import {
+  OauthState,
+  decodeOauthState,
+  encodeOauthState,
+  normalizePlatform,
+  validateReturnUrl,
+  webCallbackUrl,
+} from '../utils/oauthState';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -56,25 +65,68 @@ const launchIllustrationSrc = launchIllustrationPath
   ? `data:image/png;base64,${readFileSync(launchIllustrationPath).toString('base64')}`
   : '';
 
-function encodeOauthState(data: { platform: string; returnUrl?: string; accountType?: string }) {
-  return Buffer.from(JSON.stringify(data), 'utf8').toString('base64url');
+/**
+ * Signed state for a start route. Business sign-ups keep their type through the
+ * round trip (the company-email check depends on it). A returnUrl that is not
+ * one of our own clients' callbacks is dropped, so the tokens can never be
+ * sent to it.
+ */
+function startOauthState(request: FastifyRequest) {
+  const query = request.query as { platform?: string; returnUrl?: string; accountType?: string; handoff?: string };
+  const platform = normalizePlatform(query.platform);
+  const returnUrl = validateReturnUrl(platform, query.returnUrl);
+  if (query.returnUrl && !returnUrl && platform !== 'desktop') {
+    request.log.warn(`[OAuth] Ignoring returnUrl that is not an allowed ${platform} callback: ${JSON.stringify(String(query.returnUrl).slice(0, 200))}`);
+  }
+  return encodeOauthState({
+    platform,
+    returnUrl,
+    accountType: query.accountType === 'business' ? 'business' : undefined,
+    handoff: platform === 'web' && query.handoff === 'code' ? 'code' : undefined,
+  });
 }
 
-function decodeOauthState(state?: string) {
-  if (!state) return { platform: 'web' };
+const INVALID_STATE_ERROR = 'This sign-in link is invalid or has expired. Please start the sign-in again.';
 
+// ── Web token handoff ──────────────────────────────────────────────────────
+// Web clients that ask for it (handoff=code) get a one-time code on
+// /auth/callback instead of the tokens themselves, and trade it through
+// POST /exchange, so the tokens never sit in a URL, the browser history or a
+// Referer. The code lives in Redis for two minutes and works once.
+
+type OauthGrant = { accessToken: string; refreshToken: string } | { tempToken: string };
+
+const HANDOFF_TTL_SECONDS = 120;
+const handoffKey = (code: string) => `auth:oauth:handoff:${code}`;
+
+async function createHandoffCode(grant: OauthGrant) {
+  const code = randomBytes(32).toString('base64url');
+  await redisPublisher.set(handoffKey(code), JSON.stringify(grant), 'EX', HANDOFF_TTL_SECONDS);
+  return code;
+}
+
+async function redeemHandoffCode(code: string): Promise<OauthGrant | null> {
+  // GET + DEL in one transaction: only the first redeemer gets the grant.
+  const results = await redisPublisher.multi().get(handoffKey(code)).del(handoffKey(code)).exec();
+  const raw = results?.[0]?.[1];
+  if (typeof raw !== 'string') return null;
   try {
-    const parsed = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
-    return {
-      platform: typeof parsed.platform === 'string' ? parsed.platform : 'web',
-      returnUrl: typeof parsed.returnUrl === 'string' ? parsed.returnUrl : undefined,
-      // Business sign-ups must keep their type through the round trip; without
-      // this the company-email check never ran.
-      accountType: parsed.accountType === 'business' ? 'business' : undefined,
-    };
+    return JSON.parse(raw) as OauthGrant;
   } catch {
-    return { platform: state };
+    return null;
   }
+}
+
+/** Send a web sign-in (tokens, or the 2FA temp token) back to its callback page. */
+async function redirectToWeb(reply: FastifyReply, oauthState: OauthState, grant: OauthGrant) {
+  const callbackUrl = webCallbackUrl(oauthState);
+  if (oauthState.handoff === 'code') {
+    return reply.redirect(appendParamToUrl(callbackUrl, 'code', await createHandoffCode(grant)));
+  }
+  // Web builds from before the code handoff read the tokens from the URL.
+  return reply.redirect('tempToken' in grant
+    ? appendParamToUrl(callbackUrl, 'tempToken', grant.tempToken)
+    : appendTokensToUrl(callbackUrl, grant));
 }
 
 function appendTokensToUrl(returnUrl: string, tokens: { accessToken: string; refreshToken: string }) {
@@ -95,10 +147,6 @@ function getRequestOrigin(request: FastifyRequest) {
 
 function getGoogleCallbackUrl(request: FastifyRequest) {
   return process.env.GOOGLE_CALLBACK_URL || `${getRequestOrigin(request)}/api/auth/oauth/google/callback`;
-}
-
-function getWebAuthCallbackUrl(oauthState: { returnUrl?: string }) {
-  return oauthState.returnUrl || `${process.env.WEB_APP_URL || 'http://localhost:3000'}/auth/callback`;
 }
 
 function renderDesktopLaunchPage(deepLink: string, targetLabel = 'Remote 365 desktop application') {
@@ -318,14 +366,14 @@ async function finishOauthSignIn(
   request: FastifyRequest,
   reply: FastifyReply,
   profile: { email: string; name?: string | null },
-  oauthState: { platform?: string; returnUrl?: string; accountType?: string },
+  oauthState: OauthState,
 ) {
-  const platform = oauthState.platform || 'web';
+  const platform = oauthState.platform;
   const isBusiness = oauthState.accountType === 'business';
   if (isBusiness && isFreeMailDomain(profile.email)) {
     const message = 'Business accounts need a company email address. Personal providers such as Gmail, Outlook or Yahoo are not accepted.';
     if (platform === 'web') {
-      const base = (() => { try { return new URL(oauthState.returnUrl || '').origin; } catch { return getPublicWebUrl(); } })();
+      const base = (() => { try { return new URL(webCallbackUrl(oauthState)).origin; } catch { return getPublicWebUrl(); } })();
       return reply.redirect(`${base}/register?oauthError=${encodeURIComponent(message)}`);
     }
     // Desktop / mobile: hand the message to the app through the deep link so it shows on the sign-up screen.
@@ -475,8 +523,7 @@ async function finishOauthSignIn(
         `);
       }
 
-      const webUrl = appendParamToUrl(getWebAuthCallbackUrl(oauthState), 'tempToken', tempToken);
-      return reply.redirect(webUrl);
+      return redirectToWeb(reply, oauthState, { tempToken });
     }
 
     // Issue our own JWT tokens
@@ -514,6 +561,7 @@ async function finishOauthSignIn(
     // Redirect back to the client
     if (platform === 'desktop' || platform === 'mobile') {
       const deepLink = `remote365://auth/callback?accessToken=${tokens.accessToken}&refreshToken=${tokens.refreshToken}`;
+      // Mobile returnUrls were checked against the app's own schemes.
       const mobileReturnUrl = platform === 'mobile' && oauthState.returnUrl
         ? appendTokensToUrl(oauthState.returnUrl, tokens)
         : null;
@@ -530,8 +578,7 @@ async function finishOauthSignIn(
     }
 
     // Web fallback: the React app completes token storage on /auth/callback.
-    const webUrl = appendTokensToUrl(getWebAuthCallbackUrl(oauthState), tokens);
-    return reply.redirect(webUrl);
+    return redirectToWeb(reply, oauthState, { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken });
 
 }
 
@@ -543,8 +590,6 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
 
   // Step 1 — Redirect user to Google consent screen
   fastify.get('/google', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { platform, returnUrl, accountType } = request.query as { platform?: string; returnUrl?: string; accountType?: string };
-
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const callbackUrl = getGoogleCallbackUrl(request);
 
@@ -557,7 +602,7 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
       redirect_uri: callbackUrl,
       response_type: 'code',
       scope: 'openid email profile',
-      state: encodeOauthState({ platform: platform || 'web', returnUrl, accountType: accountType === 'business' ? 'business' : undefined }),
+      state: startOauthState(request),
       access_type: 'offline',
       prompt: 'select_account',
     });
@@ -573,10 +618,15 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: error || 'No authorization code received from Google' });
     }
 
+    // Only a state our start route signed decides where the tokens go.
+    const oauthState = decodeOauthState(state);
+    if (!oauthState) {
+      return reply.code(400).send({ error: INVALID_STATE_ERROR });
+    }
+
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
     const callbackUrl = getGoogleCallbackUrl(request);
-    const oauthState = decodeOauthState(state);
 
     if (!clientId || !clientSecret) {
       return reply.code(500).send({ error: 'Google OAuth credentials not configured' });
@@ -618,7 +668,6 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
   // the shared finishOauthSignIn(). Tenant defaults to "common" (work, school
   // and personal accounts); set MICROSOFT_TENANT_ID to restrict it.
   fastify.get('/microsoft', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { platform, returnUrl, accountType } = request.query as { platform?: string; returnUrl?: string; accountType?: string };
     const clientId = process.env.MICROSOFT_CLIENT_ID;
     if (!clientId) {
       return reply.code(500).send({ error: 'Microsoft sign-in is not configured. Set MICROSOFT_CLIENT_ID in environment.' });
@@ -630,7 +679,7 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
       response_type: 'code',
       response_mode: 'query',
       scope: 'openid email profile User.Read',
-      state: encodeOauthState({ platform: platform || 'web', returnUrl, accountType: accountType === 'business' ? 'business' : undefined }),
+      state: startOauthState(request),
       prompt: 'select_account',
     });
     return reply.redirect(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize?${params.toString()}`);
@@ -641,13 +690,16 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
     if (error || !code) {
       return reply.code(400).send({ error: error_description || error || 'No authorization code received from Microsoft' });
     }
+    const oauthState = decodeOauthState(state);
+    if (!oauthState) {
+      return reply.code(400).send({ error: INVALID_STATE_ERROR });
+    }
     const clientId = process.env.MICROSOFT_CLIENT_ID;
     const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
     if (!clientId || !clientSecret) {
       return reply.code(500).send({ error: 'Microsoft sign-in credentials not configured' });
     }
     const tenant = process.env.MICROSOFT_TENANT_ID || 'common';
-    const oauthState = decodeOauthState(state);
     try {
       const tokenBody = new URLSearchParams({
         code,
@@ -674,6 +726,24 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
       fastify.log.error(`Microsoft OAuth callback error: ${err.message}`);
       return reply.code(500).send({ error: 'Authentication failed. Please try again.' });
     }
+  });
+
+  // Step 3 (web, handoff=code) — /auth/callback trades the one-time code for
+  // the tokens, or for the 2FA temp token.
+  fastify.post('/exchange', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { code } = (request.body || {}) as { code?: unknown };
+    reply.header('Cache-Control', 'no-store');
+    if (typeof code !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(code)) {
+      return reply.code(400).send({ error: 'Invalid sign-in code' });
+    }
+    const grant = await redeemHandoffCode(code);
+    if (!grant) {
+      return reply.code(400).send({ error: 'This sign-in has expired. Please sign in again.' });
+    }
+    if ('tempToken' in grant) {
+      return reply.send({ twoFactorRequired: true, tempToken: grant.tempToken });
+    }
+    return reply.send({ accessToken: grant.accessToken, refreshToken: grant.refreshToken });
   });
 
   fastify.get('/github', async (_request, reply) => {

@@ -58,11 +58,15 @@ export function twoFactorFailure(error: unknown): SignInFailure {
 
 export type OAuthProvider = 'google' | 'microsoft'
 
-/** Where to send the browser to start Google / Microsoft sign-in. */
+/**
+ * Where to send the browser to start Google / Microsoft sign-in. handoff=code:
+ * the API comes back to /auth/callback with a one-time code (traded for the
+ * tokens there) instead of the tokens themselves.
+ */
 export function oauthStartUrl(provider: OAuthProvider, options: { business?: boolean } = {}) {
   const apiUrl = API_URL || window.location.origin
   const returnUrl = `${window.location.origin}/auth/callback`
-  return `${apiUrl}/api/auth/oauth/${provider}?platform=web&returnUrl=${encodeURIComponent(returnUrl)}${options.business ? '&accountType=business' : ''}`
+  return `${apiUrl}/api/auth/oauth/${provider}?platform=web&returnUrl=${encodeURIComponent(returnUrl)}&handoff=code${options.business ? '&accountType=business' : ''}`
 }
 
 export type SignInOutcome = 'signed-in' | 'two-factor' | 'failed'
