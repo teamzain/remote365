@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowRight, CalendarPlus, Link2, Sparkles, Video, X } from 'lucide-react';
+import { claimAnnouncement, releaseAnnouncement } from './onboarding/announcements';
+
+const ANNOUNCEMENT_ID = 'whats-new:meetings';
 
 // Bump the key when a future release ships another meetings announcement.
 const STORAGE_KEY = 'r365_whats_new:meetings-2026-08';
@@ -28,29 +31,39 @@ const STEPS = [
 ];
 
 /**
- * One-time "What's new" walkthrough shown after this update to signed-in
- * users. Card carousel over the three new meeting options; marks itself done
- * in localStorage on any dismissal so it never reappears.
+ * One-time "What's new" walkthrough shown after this update to EVERYONE who
+ * opens the app (signed in or not — the meeting options are on the home
+ * screen for both). Card carousel over the three new meeting options; marks
+ * itself done in localStorage on any dismissal so it never reappears.
+ *
+ * It claims the announcement slot the moment it knows it will show, so a
+ * page's FirstRunGuide tour (which fires sooner) waits its turn instead of
+ * stacking on top — the two used to open together, one modal over the other.
  */
-export const MeetingsWhatsNew: React.FC<MeetingsWhatsNewProps> = ({ user, onOpenMeetings }) => {
+export const MeetingsWhatsNew: React.FC<MeetingsWhatsNewProps> = ({ onOpenMeetings }) => {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
 
   useEffect(() => {
-    if (!user?.id) return;
     try {
       if (localStorage.getItem(STORAGE_KEY) === 'done') return;
     } catch {
       return;
     }
+    claimAnnouncement(ANNOUNCEMENT_ID);
     // Let the dashboard settle before announcing.
     const timer = setTimeout(() => setOpen(true), 900);
-    return () => clearTimeout(timer);
-  }, [user?.id]);
+    return () => {
+      clearTimeout(timer);
+      // Unmounted before/while showing (view changed): free the slot.
+      releaseAnnouncement(ANNOUNCEMENT_ID);
+    };
+  }, []);
 
   const dismiss = () => {
     try { localStorage.setItem(STORAGE_KEY, 'done'); } catch { /* storage unavailable */ }
     setOpen(false);
+    releaseAnnouncement(ANNOUNCEMENT_ID);
   };
 
   useEffect(() => {

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Sparkles, X } from 'lucide-react';
+import { whenAnnouncementsClear } from './announcements';
 
 export interface GuideStep {
   title: string;
@@ -31,9 +32,17 @@ export const FirstRunGuide: React.FC<FirstRunGuideProps> = ({ pageId, steps }) =
     try {
       if (localStorage.getItem(storageKey(pageId)) === 'done') return;
     } catch { return; }
-    // Give the page a beat to render so spotlight targets exist.
-    const timer = setTimeout(() => setVisible(true), 450);
-    return () => clearTimeout(timer);
+    // One modal at a time: if a "What's New" announcement is showing (or
+    // about to), start this tour only after it has been dismissed.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = whenAnnouncementsClear(() => {
+      // Give the page a beat to render so spotlight targets exist.
+      timer = setTimeout(() => setVisible(true), 450);
+    });
+    return () => {
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+    };
   }, [pageId]);
 
   const step = steps[stepIndex];
