@@ -1090,9 +1090,11 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
   };
 
   const copyInvite = async () => {
-    await navigator.clipboard?.writeText(`${meetingCode}\n${meetingLink}`);
+    // Just the link: it already carries the code, and pasting "CNR-AZU-QMB"
+    // on the line above it is what people kept sending by mistake.
+    await copyText(meetingLink);
     setInviteStatus('sent');
-    setInviteMessage('Meeting code copied.');
+    setInviteMessage('Meeting link copied.');
     setShowInvitePanel(true);
   };
 
@@ -1397,16 +1399,17 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
               <span className="h-[3px] w-[3px] rounded-full bg-[#F3F4F6]" />
               <span>{participants.length + 1} Participant{participants.length === 0 ? '' : 's'}</span>
               <span className="h-[3px] w-[3px] rounded-full bg-[#F3F4F6]" />
-              {/* Click-to-copy meeting code: copies the code + join link so it
-                  can be pasted straight to whoever still needs to join. */}
+              {/* Click-to-copy: the join link only. It already carries the code,
+                  and the old "code on one line, link on the next" paste was what
+                  people kept sending by mistake. */}
               <button
                 type="button"
                 onClick={() => {
-                  copyText(`${meetingCode}\n${meetingLink}`);
+                  copyText(meetingLink);
                   setHeaderCodeCopied(true);
                   window.setTimeout(() => setHeaderCodeCopied(false), 2000);
                 }}
-                title="Copy the meeting code and join link"
+                title="Copy the meeting link"
                 className="flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-0.5 text-[13px] font-medium text-white transition-colors hover:bg-white/20"
               >
                 {headerCodeCopied

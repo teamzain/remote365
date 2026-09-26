@@ -4161,6 +4161,17 @@ export default function App() {
                     } else if (channel.label === 'input-critical') {
                         criticalInputChannelRef.current = channel;
                         channel.onopen = () => console.log('[Renderer] Critical input DataChannel ready.');
+                        // Hosts >= 1.2.125 ack clicks here instead of on the busy
+                        // control channel (see the host's input-ack comment).
+                        channel.onmessage = (msg: MessageEvent) => {
+                            if (typeof msg.data !== 'string') return;
+                            try {
+                                const data = JSON.parse(msg.data);
+                                if (data?.type === 'input-ack') {
+                                    (videoPlayerRef.current as any)?.onInputAck?.(data.seq, data.hostMs);
+                                }
+                            } catch { /* not JSON */ }
+                        };
                         channel.onclose = () => {
                             if (criticalInputChannelRef.current === channel) criticalInputChannelRef.current = null;
                         };
@@ -4430,7 +4441,7 @@ export default function App() {
                                 } else if (data.type === 'input-ack') {
                                     // Host acked an injected click — feed the real input RTT
                                     // to the player's latency readout (ref call, no re-render).
-                                    (videoPlayerRef.current as any)?.onInputAck?.(data.seq);
+                                    (videoPlayerRef.current as any)?.onInputAck?.(data.seq, data.hostMs);
                                 } else if (data.type === 'control-granted') {
                                     setHostAnnouncedControl(true);
                                     setControlStatus('granted');

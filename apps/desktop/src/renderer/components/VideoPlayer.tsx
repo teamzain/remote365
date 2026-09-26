@@ -249,6 +249,7 @@ const VideoPlayer = forwardRef<any, VideoPlayerProps>(({
     const lastLatencyUpdateRef = useRef(0);
     const inputRttSamplesRef = useRef<number[]>([]);
     const inputToPresentSamplesRef = useRef<number[]>([]);
+    const inputHostMsSamplesRef = useRef<number[]>([]);
 
     const onControlEvent = useCallback((event: any) => {
         if (isMacroRecording && !(event instanceof Uint8Array) && event?.type && MACRO_RECORDABLE_TYPES.has(event.type)) {
@@ -560,7 +561,7 @@ const VideoPlayer = forwardRef<any, VideoPlayerProps>(({
     }, [remoteStream, viewerStatus]);
 
     useImperativeHandle(ref, () => ({
-        onInputAck: (seq: number) => {
+        onInputAck: (seq: number, hostMs?: number) => {
             const pending = pendingInputAcksRef.current;
             const t0 = pending.get(seq);
             if (t0 === undefined) return;
@@ -569,6 +570,13 @@ const VideoPlayer = forwardRef<any, VideoPlayerProps>(({
             const rttSamples = inputRttSamplesRef.current;
             rttSamples.push(rtt);
             if (rttSamples.length > 120) rttSamples.shift();
+            // Time the host itself spent on the click (receive → SendInput);
+            // the rest of the RTT is network. Only newer hosts report it.
+            if (typeof hostMs === 'number' && Number.isFinite(hostMs)) {
+                const hostSamples = inputHostMsSamplesRef.current;
+                hostSamples.push(hostMs);
+                if (hostSamples.length > 120) hostSamples.shift();
+            }
 
             // The first frame presented after injection is an observable upper
             // bound for input-to-display feedback. It may be an unchanged frame,
@@ -591,9 +599,11 @@ const VideoPlayer = forwardRef<any, VideoPlayerProps>(({
                     return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p))];
                 };
                 const presentSamples = inputToPresentSamplesRef.current;
+                const hostSamples = inputHostMsSamplesRef.current;
                 (window as any).electronAPI?.log?.(
                     `[Perf] Input latency samples=${rttSamples.length} injectRttP50=${percentile(rttSamples, 0.5)}ms injectRttP95=${percentile(rttSamples, 0.95)}ms ` +
-                    `inputToNextPresentP50=${percentile(presentSamples, 0.5)}ms inputToNextPresentP95=${percentile(presentSamples, 0.95)}ms`
+                    `inputToNextPresentP50=${percentile(presentSamples, 0.5)}ms inputToNextPresentP95=${percentile(presentSamples, 0.95)}ms` +
+                    (hostSamples.length ? ` hostSideP50=${percentile(hostSamples, 0.5)}ms hostSideP95=${percentile(hostSamples, 0.95)}ms` : '')
                 );
             }
             // Throttle the display update to 1/s — this is a health readout,
@@ -1554,7 +1564,10 @@ const VideoPlayer = forwardRef<any, VideoPlayerProps>(({
 
                 // Early exit for Mobile specifically — BEFORE the throttle gate, so a
                 // suppressed hover can never be stashed for the trailing flush.
-                if (e.buttons === 0 && (!deviceType || deviceType.toLowerCase() === 'mobile' || deviceType.toLowerCase() === 'android' || deviceType.toLowerCase() === 'ios')) {
+                // An UNKNOWN device type is treated as a desktop: dropping its
+                // hover moves made the host cursor teleport only at the click,
+                // so hover effects trailed the click and it read as input lag.
+                if (e.buttons === 0 && deviceType && (deviceType.toLowerCase() === 'mobile' || deviceType.toLowerCase() === 'android' || deviceType.toLowerCase() === 'ios')) {
                     return;
                 }
 

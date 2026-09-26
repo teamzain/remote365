@@ -348,6 +348,10 @@ const hostViewerUnattended = new Map<string, boolean>();
 // deliberate, hands-on action, and a touch UI has nowhere comfortable to put a
 // view-only mode. Desktop and laptop viewers still have to ask.
 const hostViewerSkipsConsent = new Set<string>();
+// Viewer client kind as announced by signaling on viewer-joined
+// ('desktop-viewer', 'web-viewer', 'mobile-web-viewer', 'mobile…'). Gates work
+// that only some viewers consume, such as the post-click focus probe.
+const hostViewerClientKinds = new Map<string, string>();
 
 /** Does a freshly opened control channel start with input enabled? */
 function grantsControlOnConnect(viewerId?: string | null) {
@@ -1904,7 +1908,12 @@ function normalizeHostStreamQuality(value: any) {
 // the narrower ArrayBuffer type. Keep the accumulator broad enough for both
 // FFmpeg pipe Buffers and zero-copy worker-transferred chunks.
 let bufferAccumulator: Buffer<ArrayBufferLike> = Buffer.alloc(0);
-let accessUnitBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+// NAL units of the access unit being assembled. Kept as a list and joined
+// ONCE when the frame is complete: appending with Buffer.concat per NAL
+// re-copied the whole growing frame for every slice (quadratic on multi-slice
+// keyframes), on the main thread that also injects the viewer's input.
+let accessUnitParts: Buffer[] = [];
+let accessUnitBytes = 0;
 let hasVcl = false;
 
 // Pre-buffering and Handshake
@@ -4697,7 +4706,15 @@ function ensureHostAnnotationOverlay(): BrowserWindow | null {
       fullscreenable: false, show: false, backgroundColor: '#00000000',
       webPreferences: { nodeIntegration: true, contextIsolation: false, backgroundThrottling: false }
     });
-    win.setIgnoreMouseEvents(true, { forward: true });
+    // Click-through WITHOUT `forward: true`. On Windows, forwarding is built on
+    // a low-level mouse hook (WH_MOUSE_LL) that runs on this process's UI
+    // thread, so while the overlay existed EVERY mouse event on the host —
+    // including the clicks we inject for the viewer — had to wait for the
+    // Electron main thread before Windows would deliver it. Any JS stall
+    // (frame assembly, clipboard poll, logging) turned straight into click
+    // delay for the rest of the session. The overlay page only draws strokes
+    // and never reads the mouse, so nothing needs forwarding.
+    win.setIgnoreMouseEvents(true);
     try { win.setAlwaysOnTop(true, 'screen-saver'); } catch {}
     try { win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch {}
     hostAnnotationReady = false;
@@ -4756,6 +4773,7 @@ function cleanupHostViewerPeer(viewerId: string | null | undefined, reason = 'en
     hostViewerDeviceIds.delete(viewerId);
     hostViewerUnattended.delete(viewerId);
     hostViewerSkipsConsent.delete(viewerId);
+    hostViewerClientKinds.delete(viewerId);
     lastControlDeniedAt.delete(viewerId);
     hostViewerFileCaps.delete(viewerId);
     // Their camera tile has nothing left to show once they are gone.
@@ -5384,14 +5402,16 @@ function drainNALBuffer() {
       const isNewFrame = (nalType === 9 || nalType === 7); // AUD or SPS
       const isSlice = (nalType === 1 || nalType === 5); // VCL slices
 
-      if (isNewFrame && accessUnitBuffer.length > 0 && hasVcl) {
-        sendFrame(accessUnitBuffer);
-        accessUnitBuffer = Buffer.alloc(0);
+      if (isNewFrame && accessUnitBytes > 0 && hasVcl) {
+        sendFrame(accessUnitParts.length === 1 ? accessUnitParts[0] : Buffer.concat(accessUnitParts, accessUnitBytes));
+        accessUnitParts = [];
+        accessUnitBytes = 0;
         hasVcl = false;
       }
 
       if (isSlice) hasVcl = true;
-      accessUnitBuffer = Buffer.concat([accessUnitBuffer, nalUnit]);
+      accessUnitParts.push(nalUnit);
+      accessUnitBytes += nalUnit.length;
     }
 
     bufferAccumulator = bufferAccumulator.subarray(syncPos);
@@ -5414,7 +5434,8 @@ function startStreaming() {
   // A replacement encoder begins with SPS/PPS/IDR. Never prefix it with the
   // unclosed Annex-B tail or partial access unit from the previous process.
   bufferAccumulator = Buffer.alloc(0);
-  accessUnitBuffer = Buffer.alloc(0);
+  accessUnitParts = [];
+  accessUnitBytes = 0;
   hasVcl = false;
   // Geometry/profile may change across an encoder restart. Never bootstrap a
   // new decoder with an access unit produced by the previous configuration.
@@ -5619,7 +5640,8 @@ function startStreaming() {
     // WebRTC, data channels, input, and the cursor loop stay in main.
     if (isStreamWorkerEnabled()) {
       bufferAccumulator = Buffer.alloc(0);
-      accessUnitBuffer = Buffer.alloc(0);
+      accessUnitParts = [];
+      accessUnitBytes = 0;
       hasVcl = false;
       preforkStreamWorker();
       log.info('[Host] Stream worker ON — capture+encode offloaded to utilityProcess.');
@@ -5663,7 +5685,8 @@ function startStreaming() {
       stopStreaming();
     });
     bufferAccumulator = Buffer.alloc(0);
-    accessUnitBuffer = Buffer.alloc(0);
+    accessUnitParts = [];
+    accessUnitBytes = 0;
     hasVcl = false;
 
     // Capture Loop
@@ -6902,6 +6925,7 @@ const fileTransferDeps = {
 
 function handleControlMessage(msg: any, viewerId?: string) {
   try {
+    const receivedAtMs = Date.now();
     const activePeer = viewerId ? hostViewerPeers.get(viewerId) : getPrimaryHostPeer();
     const replyChannel = activePeer?.dataChannel || dataChannel;
     let event: any = null;
@@ -7189,12 +7213,28 @@ function handleControlMessage(msg: any, viewerId?: string) {
         input.injectMouseAction(btns[event.button] || 'left', event.type === 'mousedown' ? 'down' : 'up');
         // Input-latency echo: events stamped with a seq get an ack AFTER
         // injection, so the viewer can display true click-to-injected RTT.
-        if (event.seq !== undefined && replyChannel?.isOpen?.()) {
-          replyChannel.sendMessage(JSON.stringify({ type: 'input-ack', seq: event.seq }));
+        if (event.seq !== undefined) {
+          // Ack on the channel the click arrived on. The control channel also
+          // carries 30 Hz cursor JSON, clipboard text, pings and (for old
+          // viewers) file chunks, so an ack queued there measured that backlog
+          // as "input latency". hostMs = time spent on this machine between
+          // receiving the packet and SendInput returning, so the viewer can
+          // tell host-side stalls from network time.
+          const ackChannel = activePeer?.criticalInputDataChannel?.isOpen?.() ? activePeer.criticalInputDataChannel : replyChannel;
+          if (ackChannel?.isOpen?.()) {
+            ackChannel.sendMessage(JSON.stringify({ type: 'input-ack', seq: event.seq, hostMs: Date.now() - receivedAtMs }));
+          }
         }
         // After a click lands, report whether focus ended up in an editable
-        // text field so mobile viewers can auto-open their on-screen keyboard.
-        if (event.type === 'mouseup') scheduleFocusEditableProbe(replyChannel);
+        // text field so mobile/web viewers can auto-open their on-screen
+        // keyboard. The desktop viewer ignores that message, yet the probe
+        // used to run for it too — and it is not free: a UI Automation query
+        // makes Chromium/Electron/Office apps on this PC build their whole
+        // accessibility tree, which shows up as sluggish clicks in those apps.
+        if (event.type === 'mouseup') {
+          const kind = viewerId ? (hostViewerClientKinds.get(viewerId) || '') : '';
+          if (!/^desktop/i.test(kind)) scheduleFocusEditableProbe(replyChannel);
+        }
         break;
       case 'wheel':
         input.injectMouseScroll(event.deltaX, event.deltaY);
@@ -7754,6 +7794,7 @@ function handleHostSignalingMessage(data: any, reply: (payload: any) => void) {
         if (Number.isFinite(cap) && cap > 0) hostViewerFileCaps.set(String(viewerId), cap);
         else hostViewerFileCaps.delete(String(viewerId));
         const clientKind = String(data.viewerClientKind || '');
+        hostViewerClientKinds.set(String(viewerId), clientKind);
         const isPhone = /^mobile/i.test(clientKind);
         if (isPhone) hostViewerSkipsConsent.add(String(viewerId));
         else hostViewerSkipsConsent.delete(String(viewerId));
