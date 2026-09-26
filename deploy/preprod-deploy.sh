@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Preprod deploy. Runs ON the droplet as root, normally via bin/receive.sh (the
+# Preprod and prod deploy (the site comes from $ROOT/site.conf; see below).
+# Runs ON the droplet as root, normally via bin/receive.sh (the
 # forced command of the GitHub Actions deploy key), or by hand:
 #
 #   bash /root/remote365/app/deploy/preprod-deploy.sh deploy <full-sha>  # needs releases/<sha>/
@@ -28,7 +29,12 @@ BACKEND="auth-service signaling-service session-service billing-service"
 WEB=web
 PG_CONTAINER=${PROJECT}-postgres-1
 PG_VOLUME=${PROJECT}_postgres_data
+# Which site this box serves. Preprod has no site.conf and keeps these
+# defaults; prod's one-time setup writes SITE=remote365.ai LABEL=prod there.
 SITE=pp.remote365.ai
+LABEL=preprod
+# shellcheck disable=SC1091
+[ -f "$ROOT/site.conf" ] && . "$ROOT/site.conf"
 KEEP_BACKUPS=10
 KEEP_RELEASES=5
 HEALTH_TIMEOUT=120
@@ -156,7 +162,7 @@ build_images() {
 
 backup_db() {
   mkdir -p "$ROOT/backups"
-  BACKUP="$ROOT/backups/preprod-$(date +%Y%m%d-%H%M%S)-${SHA:0:7}.dump"
+  BACKUP="$ROOT/backups/${LABEL}-$(date +%Y%m%d-%H%M%S)-${SHA:0:7}.dump"
   docker exec "$PG_CONTAINER" pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc >"$BACKUP"
   [ -s "$BACKUP" ] || die "backup file is empty"
   docker exec -i "$PG_CONTAINER" pg_restore -l <"$BACKUP" >/dev/null || die "backup does not verify"

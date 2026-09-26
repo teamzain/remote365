@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# One-time setup on the preprod droplet, run as root:
+# One-time setup on a droplet (preprod or prod), run as root:
 #
-#   bash setup-preprod.sh <dir holding receive.sh + preprod-deploy.sh> "<deploy public key line>"
+#   bash setup-preprod.sh <dir holding receive.sh + preprod-deploy.sh> "<deploy public key line>" [site label]
+#   prod: ... remote365.ai prod
 #
 # Creates /root/remote365, seeds app/.env from the LIVE stack's .env (not from
 # /root/.env.preprod, which is older), pins the Compose project name so the
@@ -11,6 +12,10 @@ set -euo pipefail
 
 SRC_DIR=${1:?directory holding receive.sh and preprod-deploy.sh}
 PUBKEY=${2:?deploy public key line}
+# Optional: the site this box serves and a label for backups. Omit both on
+# preprod (defaults pp.remote365.ai / preprod); prod: remote365.ai prod.
+SITE=${3:-}
+LABEL=${4:-}
 ROOT=/root/remote365
 LIVE_ENV=/root/RemoteLink-Desktop/.env
 PROJECT=remotelink-desktop
@@ -24,6 +29,13 @@ if [ ! -f "$ROOT/app/.env" ]; then
 fi
 grep -q "^COMPOSE_PROJECT_NAME=" "$ROOT/app/.env" || printf '\n# Pinned: the database volume belongs to this Compose project\nCOMPOSE_PROJECT_NAME=%s\n' "$PROJECT" >>"$ROOT/app/.env"
 chmod 600 "$ROOT/app/.env"
+
+if [ -n "$SITE" ]; then
+  printf 'SITE=%s
+LABEL=%s
+' "$SITE" "${LABEL:-$SITE}" >"$ROOT/site.conf"
+  echo "site.conf: SITE=$SITE LABEL=${LABEL:-$SITE}"
+fi
 
 install -m 755 "$SRC_DIR/receive.sh" "$ROOT/bin/receive.sh"
 # Used by `status`/`rollback` until the first release brings its own copy.

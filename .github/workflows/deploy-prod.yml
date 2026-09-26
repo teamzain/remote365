@@ -1,0 +1,128 @@
+# Deploy to PROD (remote365.ai). Manual only: Actions -> "Deploy to prod" ->
+# Run workflow, pick the commit/branch. Nothing deploys prod automatically;
+# every push to main still goes to preprod first (deploy-preprod.yml).
+#
+# Same machinery as preprod: the release is packed here (the web app built
+# here, not on the 4 GB droplet), streamed over SSH, and deploy/preprod-deploy.sh
+# runs on the droplet. The deploy key is restricted to deploy/receive.sh
+# (forced command), so it can only deploy, roll back or report status. The
+# database is never part of a deploy: same Compose project and volume,
+# postgres/redis/coturn untouched, verified backup first, additive-only schema
+# changes, automatic rollback if health checks fail. The droplet's
+# /root/remote365/site.conf (SITE=remote365.ai LABEL=prod) points the health
+# checks at the prod site.
+name: Deploy to prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'deploy = build + restart backend and web from this commit; rollback = previous images of the last deploy; status = report only'
+        type: choice
+        options: [deploy, rollback, status]
+        default: deploy
+
+# One prod deploy at a time, and a queued one is never cancelled half-way.
+concurrency:
+  group: prod-backend
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prod:
+    name: ${{ inputs.action }} on remote365.ai
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    env:
+      ACTION: ${{ inputs.action }}
+      SSH: ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=6
+    steps:
+      - name: Checkout
+        if: env.ACTION == 'deploy'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Components
+        id: changes
+        if: env.ACTION == 'deploy'
+        run: |
+          # A prod deploy always ships the backend AND the web app from the
+          # chosen commit, so prod never ends up half on one release.
+          echo "components=backend web" >>"$GITHUB_OUTPUT"
+          echo "web=true" >>"$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        if: env.ACTION == 'deploy' && steps.changes.outputs.web == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build the web app
+        if: env.ACTION == 'deploy' && steps.changes.outputs.web == 'true'
+        run: |
+          # Only the web workspace's dependencies; no install scripts (the root
+          # postinstall patches React Native, which the web build never loads).
+          npm ci --workspace @remotelink/web --ignore-scripts --no-audit --no-fund
+          bash scripts/build-web-release.sh "$GITHUB_SHA"
+
+      - name: Smoke-test the web server
+        if: env.ACTION == 'deploy' && steps.changes.outputs.web == 'true'
+        run: |
+          cd web-release/app
+          PORT=3100 HOSTNAME=127.0.0.1 node apps/web/server.js >/tmp/web.log 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:3100/healthz >/dev/null && break; sleep 1; done
+          fail() { echo "::error::$1"; cat /tmp/web.log; exit 1; }
+          sha=$(curl -sf http://127.0.0.1:3100/healthz | node -pe 'JSON.parse(require("fs").readFileSync(0)).sha') || fail "no /healthz"
+          [ "$sha" = "$GITHUB_SHA" ] || fail "/healthz reports $sha, expected $GITHUB_SHA"
+          # Pages, then public files (fonts, media, images) and the image
+          # optimizer, which needs sharp's Linux build.
+          for p in / /login /pricing /dashboard /faq /sitemap.xml /llms.txt \
+                   /logo.png /media/hero-poster.v1.jpg /fonts/mona-sans-latin.v4.woff2 \
+                   '/_next/image?url=%2F105f060441fe41618729fcd5695c6afc5a3d4f4f.png&w=640&q=75'; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3100$p")
+            [ "$code" = 200 ] || fail "$p returned $code"
+          done
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/features)
+          [ "$code" = 301 ] || fail "/features returned $code, expected 301"
+          curl -sf http://127.0.0.1:3100/ | grep -q '<title>' || fail "/ has no <title>"
+          echo "web server OK on $sha"
+
+      - name: Install the deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.PROD_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+      - name: Pack the release
+        if: env.ACTION == 'deploy'
+        env:
+          COMPONENTS: ${{ steps.changes.outputs.components }}
+          WEB: ${{ steps.changes.outputs.web }}
+        run: |
+          printf '%s\n' "$COMPONENTS" > deploy/COMPONENTS
+          extra=()
+          [ "$WEB" = true ] && extra+=(web-release)
+          tar -czf /tmp/release.tgz \
+            package.json package-lock.json tsconfig.base.json .dockerignore \
+            Caddyfile docker-compose.prod.yml \
+            scripts packages/shared \
+            apps/auth-service apps/signaling-service apps/session-service apps/billing-service \
+            deploy "${extra[@]}"
+          echo "$COMPONENTS: $(tar -tzf /tmp/release.tgz | wc -l) files, $(du -h /tmp/release.tgz | cut -f1)"
+
+      - name: Deploy ${{ github.sha }}
+        if: env.ACTION == 'deploy'
+        run: $SSH "root@${{ secrets.PROD_HOST }}" "deploy ${{ github.sha }}" < /tmp/release.tgz
+
+      - name: ${{ env.ACTION }}
+        if: env.ACTION != 'deploy'
+        run: $SSH "root@${{ secrets.PROD_HOST }}" "$ACTION" < /dev/null
