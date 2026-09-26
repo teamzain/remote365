@@ -1955,7 +1955,6 @@ const VideoPlayer = forwardRef<any, VideoPlayerProps>(({
             { label: 'Open Task Manager', hint: 'Recovery', detail: 'Use this instead of Ctrl + Alt + Del.', run: () => onControlEvent({ type: 'action', action: 'task_manager' }) },
         ],
         transfer: [
-            { label: 'Send File', hint: 'Upload', detail: 'Transfer a local file to the remote Downloads folder.', run: triggerFilePicker },
             { label: 'Paste Clipboard', hint: 'Text', detail: 'Type your local clipboard into the remote device.', run: pasteLocalClipboard },
             { label: 'Refresh Stream', hint: 'Keyframe', detail: 'Recover a stuck or blurry video stream.', run: () => onControlEvent({ type: 'request-keyframe', urgent: true, reason: 'manual-refresh' }) },
             { label: remoteAudioEnabled ? 'Mute Remote Audio' : 'Listen To Remote Audio', hint: hostAudioStatus || (remoteAudioTrackCount ? 'Audio Ready' : 'No Audio Track'), detail: remoteAudioTrackCount ? (remoteAudioEnabled ? 'Stop playing the remote sound on this device only — the host is unaffected.' : 'Play audio from the remote stream on this device.') : 'The host stream is currently video-only, so there is no remote audio to play.', run: toggleRemoteAudio },

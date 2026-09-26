@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import whiteboardIcon from '../../assets/whiteboard.svg';
 import { toast } from '../../lib/toastStore';
 import { useClipboardSyncPreference } from '../../lib/clipboardSyncPreference';
-import FileManagerPanel from './FileManagerPanel';
+import FileTransferToasts from './FileTransferToasts';
 import ViewerCameraDock from './ViewerCameraDock';
 import { MeetingPreviewModal, SESSION_CAMERA_PREF_KEYS } from '../MeetingPreviewModal';
 import {
@@ -32,7 +32,6 @@ import {
   MicOff,
   Command,
   Folder,
-  FileBox,
   Copy,
   Keyboard,
   Monitor,
@@ -333,7 +332,6 @@ export const RemoteSessionChrome: React.FC<RemoteSessionChromeProps> = ({
   const cursorElRef = useRef<HTMLDivElement>(null);
   const [refreshing, setRefreshing] = useState(false);
   const refreshTimerRef = useRef<number | null>(null);
-  const [showFileTransfer, setShowFileTransfer] = useState(false);
   const [showWhiteboard, setShowWhiteboard] = useState(false);
   // Inline text-entry for the whiteboard "T" tool (Electron has no window.prompt).
   const [whiteboardTextInput, setWhiteboardTextInput] = useState<{ x: number; y: number } | null>(null);
@@ -458,20 +456,28 @@ export const RemoteSessionChrome: React.FC<RemoteSessionChromeProps> = ({
     };
   }, []);
 
-  // A transfer started by the HOST (its dock's "Send File", protocol v1) is
-  // mirrored into the tray like any other job. Surface it as the collapsed
-  // progress pill rather than taking over the screen — the old behaviour
-  // force-opened the full panel and closed the whiteboard under the user.
-  const [fileTransferOpenCollapsed, setFileTransferOpenCollapsed] = useState(false);
-  const showFileTransferRef = useRef(false);
-  useEffect(() => { showFileTransferRef.current = showFileTransfer; }, [showFileTransfer]);
-  useEffect(() => subscribeTransferJobs((jobs) => {
-    const hostSending = jobs.some((job) => (job.legacy || job.hostInitiated) && (job.state === 'active' || job.state === 'preparing'));
-    if (hostSending && !showFileTransferRef.current) {
-      setFileTransferOpenCollapsed(true);
-      setShowFileTransfer(true);
-    }
-  }), []);
+  // "Send files" / "Get files" (the whole transfer UI: two buttons plus the
+  // progress cards). Both act on the remote computer, so both need control;
+  // a view-only session asks for it instead of sending into nothing.
+  const transferEngine = () => getFileTransferEngine(onControlEvent, () => getControlChannel?.() || null);
+  const needControlForFiles = () => {
+    if (controlStatus === 'granted') return false;
+    toast.info(controlStatus === 'pending'
+      ? 'Waiting for the other side to allow control. Files can be sent once they do.'
+      : 'Sending and getting files needs control of the session. Control requested.', 6000);
+    if (controlStatus !== 'pending') onRequestControl();
+    return true;
+  };
+  const sendFiles = async () => {
+    if (needControlForFiles()) return;
+    const paths: string[] = await (window as any).electronAPI?.files?.pickFiles?.().catch(() => []) || [];
+    if (!paths.length) return;
+    void transferEngine().sendPaths(paths, '');
+  };
+  const getFiles = () => {
+    if (needControlForFiles()) return;
+    transferEngine().requestHostPick((deviceName || 'the remote computer').trim());
+  };
 
   // Close any open menu / popover on outside click or Escape.
   useEffect(() => {
@@ -1054,8 +1060,11 @@ export const RemoteSessionChrome: React.FC<RemoteSessionChromeProps> = ({
       items: [
         { label: 'Leave Notes', icon: <StickyNote size={16} />, keepOpen: true, onClick: () => setOpenMenu('notes') },
         { label: 'Clipboard', icon: <Copy size={16} />, submenu: clipboardSubmenu },
-        { label: 'File Transfer', icon: <Folder size={16} />, onClick: () => { setShowWhiteboard(false); setShowFileTransfer(true); } },
-        { label: 'Whiteboard', icon: <img src={whiteboardIcon} alt="" className="h-4 w-4" />, onClick: () => { setShowFileTransfer(false); setShowWhiteboard(true); } },
+        ...(isMobileDevice ? [] : [
+          { label: 'Send files', icon: <UploadCloud size={16} />, onClick: () => { void sendFiles(); } },
+          { label: 'Get files', icon: <DownloadCloud size={16} />, onClick: getFiles },
+        ]),
+        { label: 'Whiteboard', icon: <img src={whiteboardIcon} alt="" className="h-4 w-4" />, onClick: () => { setShowWhiteboard(true); } },
         { label: 'Take Screenshot', icon: <Camera size={16} />, onClick: () => { onTakeScreenshot(); logEvent('Took A Screenshot'); }, disabled: !hasReceivedKeyframe },
         {
           label: isRecording
@@ -1159,11 +1168,6 @@ export const RemoteSessionChrome: React.FC<RemoteSessionChromeProps> = ({
       ];
 
 
-
-  const openNativeSendPicker = () => {
-    setShowFileTransfer(false);
-    window.setTimeout(onSendFile, 80);
-  };
 
   const runItem = (item: MenuItem) => {
     if (item.disabled) return;
@@ -1454,18 +1458,11 @@ export const RemoteSessionChrome: React.FC<RemoteSessionChromeProps> = ({
           onCancel={() => setCameraConsentOpen(false)}
           onConfirm={() => { void confirmCameraConsent(); }}
         />
-        {showFileTransfer && (
-          <FileManagerPanel
-            deviceName={deviceName}
-            userName={user?.name}
-            sendControl={onControlEvent}
-            getChannel={() => getControlChannel?.() || null}
-            controlStatus={controlStatus}
-            onRequestControl={onRequestControl}
-            openCollapsed={fileTransferOpenCollapsed}
-            onClose={() => { setShowFileTransfer(false); setFileTransferOpenCollapsed(false); }}
-          />
-        )}
+        <FileTransferToasts
+          deviceName={(deviceName || 'the remote computer').trim()}
+          onCancel={(id) => transferEngine().cancel(id)}
+          onDismiss={(id) => transferEngine().dismiss(id)}
+        />
       </div>
 
       {/* Bottom toolbar */}
@@ -1650,18 +1647,33 @@ export const RemoteSessionChrome: React.FC<RemoteSessionChromeProps> = ({
               {quickHint.label}
             </div>
           )}
+          {!isMobileDevice && (
+            <>
+              <button
+                type="button"
+                aria-label="Send files"
+                onClick={() => { void sendFiles(); }}
+                onMouseEnter={showQuickHint('Send files')}
+                onMouseLeave={hideQuickHint('Send files')}
+                className={`${quickPillButton} h-11 w-11 rounded-full text-[#FF8A00]`}
+              >
+                <UploadCloud size={20} strokeWidth={1.5} />
+              </button>
+              <button
+                type="button"
+                aria-label="Get files"
+                onClick={getFiles}
+                onMouseEnter={showQuickHint('Get files')}
+                onMouseLeave={hideQuickHint('Get files')}
+                className={`${quickPillButton} h-11 w-11 rounded-full text-[#FF8A00]`}
+              >
+                <DownloadCloud size={20} strokeWidth={1.5} />
+              </button>
+            </>
+          )}
           <button
             type="button"
-            onClick={() => { setShowWhiteboard(false); setShowFileTransfer(true); }}
-            onMouseEnter={showQuickHint('File Transfer')}
-            onMouseLeave={hideQuickHint('File Transfer')}
-            className={`${quickPillButton} h-11 w-11 rounded-full ${showFileTransfer ? 'bg-[#FFE7E7] text-[#FF8A00]' : 'text-[#FF8A00]'}`}
-          >
-            <FileBox size={20} strokeWidth={1.5} />
-          </button>
-          <button
-            type="button"
-            onClick={() => { setShowFileTransfer(false); setShowWhiteboard(true); }}
+            onClick={() => { setShowWhiteboard(true); }}
             onMouseEnter={showQuickHint('Whiteboard')}
             onMouseLeave={hideQuickHint('Whiteboard')}
             className={`${quickPillButton} h-11 w-11 rounded-full ${showWhiteboard ? 'bg-[#FFE7E7]' : ''}`}

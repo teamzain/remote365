@@ -286,8 +286,11 @@ export function startHostPull(
   channel: TransferChannel,
   deps: FileTransferDeps,
   announce: { fromHost: true; label: string },
+  // The viewer's plan cap when the viewer asked for these files ("Get
+  // files"); null when the host chose to send on its own.
+  maxFileBytes: number | null = null,
 ): void {
-  void runPullJob(jobId, paths, channel, deps, null, { announce });
+  void runPullJob(jobId, paths, channel, deps, maxFileBytes, { announce });
 }
 
 async function runPullJob(
@@ -463,6 +466,9 @@ type PushJob = {
   idleTimer: NodeJS.Timeout | null;
 };
 const pushJobs = new Map<string, PushJob>();
+// "destDir|relPath" → the file a push is (or was, before a lost connection)
+// writing there. Lets a resumed push overwrite ONLY its own partial copy.
+const partialPushTargets = new Map<string, string>();
 
 function armIdleTimer(job: PushJob, deps: FileTransferDeps): void {
   if (job.idleTimer) clearTimeout(job.idleTimer);
@@ -680,18 +686,22 @@ export function handleFileTransferCommand(
         return true;
       }
       // `replace` = the viewer is re-sending a file that a lost connection cut
-      // short; the partial copy under that exact name is ours to overwrite.
-      const replace = Boolean(event.replace);
+      // short. Only the partial copy WE wrote may be overwritten, and it may
+      // live under a "(2)" name. Overwriting `target` itself used to clobber
+      // the user's pre-existing file whenever the first attempt was renamed.
+      const partialKey = `${job.destDir}|${relPath}`;
+      const ourPartial = Boolean(event.replace) ? partialPushTargets.get(partialKey) : undefined;
       // Chain the open so it cannot race the first chunk's write.
       job.writeChain = job.writeChain
         .then(() => fs.mkdir(dirname(target), { recursive: true }))
         .then(async () => {
-          // Never overwrite: an existing file keeps its name, ours gets "(2)".
-          const finalTarget = replace ? target : await uniquePath(target);
+          // Never overwrite a file that was there before: ours gets "(2)".
+          const finalTarget = ourPartial || await uniquePath(target);
           if (finalTarget !== target) job.renamed++;
           job.currentPath = finalTarget;
+          partialPushTargets.set(partialKey, finalTarget);
           if (!job.firstName) job.firstName = basename(finalTarget);
-          const stream = createWriteStream(finalTarget, { flags: replace ? 'w' : 'wx' });
+          const stream = createWriteStream(finalTarget, { flags: ourPartial ? 'w' : 'wx' });
           stream.on('error', (err: any) => abortPushJob(job.jobId, `Could not save ${basename(finalTarget)}: ${err.message}`, deps));
           job.stream = stream;
         })
@@ -718,6 +728,11 @@ export function handleFileTransferCommand(
         if (expected > 0 && seen !== expected && pushJobs.has(job.jobId)) {
           await fs.unlink(path).catch(() => {});
           abortPushJob(job.jobId, `${basename(path)} arrived incomplete (${seen} of ${expected} bytes). Ask the sender to try again.`, deps);
+          return;
+        }
+        // Complete: it is no longer a partial a resume may overwrite.
+        for (const [key, value] of partialPushTargets) {
+          if (value === path) partialPushTargets.delete(key);
         }
       });
       return true;
@@ -729,8 +744,12 @@ export function handleFileTransferCommand(
       // Everything queued must be flushed before we claim the job is done.
       void job.writeChain.then(() => {
         if (job.idleTimer) clearTimeout(job.idleTimer);
+        // A size check that failed while flushing aborts the job, which
+        // removes it from the map. Check BEFORE deleting: the order used to
+        // be reversed, so every push returned here and the viewer never got
+        // ft:push-done — each send sat on "Finishing…" and then "Stalled".
+        if (!pushJobs.has(job.jobId)) return;
         pushJobs.delete(job.jobId);
-        if (!pushJobs.has(job.jobId)) return; // aborted by a size check while flushing
         send(channel, {
           type: 'ft:push-done',
           jobId: job.jobId,

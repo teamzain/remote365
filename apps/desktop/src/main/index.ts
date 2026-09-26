@@ -35,7 +35,7 @@ import { ensureUnattendedCredential, readUnattendedCredential, setAppSupervision
 import { clearHostIntent, hasNetworkLink, readHostIntent, saveHostIntent, startNetworkRestoreWatcher } from './hostAutostart';
 import { armUpdateLock, clearUpdateLock, updateLockPath } from './updateGuard';
 import { decodeCompactInput, isCompactInput } from '../shared/inputProtocol';
-import { handleFileTransferCommand, handleFileTransferChunk, cancelAllFileTransfers, startHostPull } from './fileTransfer';
+import { handleFileTransferCommand, handleFileTransferChunk, cancelAllFileTransfers, startHostPull, uniquePath } from './fileTransfer';
 import { registerLocalFileHandlers, closeAllLocalWrites } from './localFiles';
 import {
   showViewerCameraWindow,
@@ -7155,11 +7155,33 @@ function handleControlMessage(msg: any, viewerId?: string) {
         const message = 'File transfer is turned off on this computer.';
         const refusal = event.type === 'ft:list' || event.type === 'ft:mkdir' || event.type === 'ft:walk'
           ? { type: 'ft:list-error', reqId: event.reqId, message }
-          : { type: 'ft:error', jobId: event.jobId, message };
+          : event.type === 'ft:host-pick'
+            ? { type: 'ft:host-pick-result', reqId: event.reqId, chosen: false, error: message }
+            : { type: 'ft:error', jobId: event.jobId, message };
         try { ftReplyChannel?.sendMessage(JSON.stringify(refusal)); } catch { /* channel gone */ }
         return;
       }
       const ftViewerKey = String(viewerId || currentViewerId || '');
+      if (event.type === 'ft:host-pick') {
+        // The viewer pressed "Get files": open this PC's own file picker on
+        // its screen; the viewer operates it through the stream, and the
+        // chosen files come back as a normal host-started transfer.
+        const reqId = event.reqId;
+        const reply = (payload: any) => { try { ftReplyChannel?.sendMessage(JSON.stringify({ type: 'ft:host-pick-result', reqId, ...payload })); } catch { /* channel gone */ } };
+        if (hostPickInProgress) {
+          reply({ chosen: false, error: 'A file picker is already open on this computer.' });
+          return;
+        }
+        hostPickInProgress = true;
+        sendFilesFromHost(ftViewerKey || undefined, { requestedByViewer: true })
+          .then((chosen) => reply({ chosen }))
+          .catch((err: any) => {
+            log.error(`[FileTransfer] Host picker for the viewer failed: ${err?.message || err}`);
+            reply({ chosen: false, error: 'The file picker could not be opened on the remote computer.' });
+          })
+          .finally(() => { hostPickInProgress = false; });
+        return;
+      }
       if (handleFileTransferCommand(event, ftReplyChannel, fileTransferDeps, listFilesystem, {
         maxFileBytes: hostViewerFileCaps.get(ftViewerKey) ?? null,
       })) return;
@@ -7416,17 +7438,28 @@ function handleControlMessage(msg: any, viewerId?: string) {
         log.info('[Host] Viewer camera stopped.');
         break;
       case 'request-file-from-host':
-        sendFileFromHost(undefined, viewerId).catch((err: any) => log.error(`[Host] Failed to send requested file: ${err.message}`));
-        break;
       case 'file-browser-list':
+      case 'request-file-from-host-path':
+        // Protocol-v1 browse/pull commands. "Block File Transfer" used to
+        // cover only the ft: messages, so these still let a viewer list
+        // folders and pull files off a PC whose owner had turned it off.
+        if (fileTransferBlocked) {
+          replyChannel?.sendMessage?.(JSON.stringify({ type: 'file-transfer-error', message: 'File transfer is turned off on this computer.' }));
+          break;
+        }
+        if (event.type === 'request-file-from-host') {
+          sendFileFromHost(undefined, viewerId).catch((err: any) => log.error(`[Host] Failed to send requested file: ${err.message}`));
+          break;
+        }
+        if (event.type === 'request-file-from-host-path') {
+          sendFileFromHost(event.path, viewerId).catch((err: any) => log.error(`[Host] Failed to send selected file: ${err.message}`));
+          break;
+        }
         listFilesystem(event.path).then((listing) => {
           replyChannel?.sendMessage?.(JSON.stringify({ type: 'file-browser-list', side: 'remote', ...listing }));
         }).catch((err: any) => {
           replyChannel?.sendMessage?.(JSON.stringify({ type: 'file-browser-error', side: 'remote', message: err?.message || 'Could not list remote folder.' }));
         });
-        break;
-      case 'request-file-from-host-path':
-        sendFileFromHost(event.path, viewerId).catch((err: any) => log.error(`[Host] Failed to send selected file: ${err.message}`));
         break;
       case 'typeText':
         input.injectText(event.text);
@@ -8694,9 +8727,18 @@ app.whenReady().then(() => {
 });
 
 ipcMain.handle('host:save-file-locally', async (_event: any, name: string, data: Uint8Array) => {
-  const downloadsPath = app.getPath('downloads');
-  const filePath = join(downloadsPath, name);
-  await fs.writeFile(filePath, Buffer.from(data));
+  // `name` comes from the REMOTE side (protocol-v1 receive). Keep only the
+  // final path segment and strip characters Windows forbids, so a name like
+  // "..\..\AppData\Roaming\...\startup.cmd" can't write outside Downloads,
+  // and never overwrite: an existing file keeps its name, ours gets "(2)".
+  const safeName = basename(String(name || '').replace(/[\\/]+/g, '/'))
+    .replace(/[<>:"|?*\u0000-\u001f]/g, '_')
+    .replace(/^\.+$/, '')
+    .trim() || 'received-file';
+  const downloadsPath = join(app.getPath('downloads'), 'Remote365');
+  await fs.mkdir(downloadsPath, { recursive: true });
+  const filePath = await uniquePath(join(downloadsPath, safeName));
+  await fs.writeFile(filePath, Buffer.from(data), { flag: 'wx' });
   return filePath;
 });
 
@@ -8979,24 +9021,58 @@ async function sendFileFromHost(selectedPath?: string, targetViewerId?: string) 
  * checks, and it lands in the viewer's transfers tray. Web and phone viewers
  * still get the v1 one-file-at-a-time path.
  */
-async function sendFilesFromHost(targetViewerId?: string): Promise<boolean> {
+// A native "Open" dialog that reliably appears ON TOP of this PC's screen.
+// For the viewer's "Get files" the dialog is operated remotely through the
+// video stream, so it must not open behind whatever window the host has in
+// front (Windows' foreground lock would otherwise just flash the taskbar).
+// A transparent always-on-top 1x1 owner makes the dialog topmost too.
+let hostPickInProgress = false;
+async function showTopmostOpenDialog(title: string): Promise<string[]> {
+  let owner: BrowserWindow | null = null;
+  try {
+    const area = screen.getPrimaryDisplay().workArea;
+    owner = new BrowserWindow({
+      width: 1, height: 1,
+      x: Math.round(area.x + area.width / 2), y: Math.round(area.y + area.height / 2),
+      frame: false, transparent: true, resizable: false, skipTaskbar: true,
+      alwaysOnTop: true, show: false, opacity: 0,
+    });
+    try { owner.setAlwaysOnTop(true, 'screen-saver'); } catch { /* not supported */ }
+    owner.show();
+    owner.moveTop();
+    owner.focus();
+    const result = await dialog.showOpenDialog(owner, { title, properties: ['openFile', 'multiSelections'] });
+    return result.canceled ? [] : result.filePaths;
+  } finally {
+    if (owner && !owner.isDestroyed()) owner.destroy();
+  }
+}
+
+async function sendFilesFromHost(
+  targetViewerId?: string,
+  options: { requestedByViewer?: boolean } = {},
+): Promise<boolean> {
   const peer = targetViewerId ? hostViewerPeers.get(targetViewerId) : getPrimaryHostPeer();
-  const result = await dialog.showOpenDialog({
-    title: 'Send To The Viewer',
-    properties: ['openFile', 'multiSelections'],
-  });
-  if (result.canceled || !result.filePaths.length) return false;
+  const viewerKey = String(peer?.viewerId || targetViewerId || '');
+  const title = options.requestedByViewer
+    ? `Choose files for ${hostViewerNames.get(viewerKey) || 'the remote viewer'}`
+    : 'Send To The Viewer';
+  const filePaths = await showTopmostOpenDialog(title);
+  if (!filePaths.length) return false;
   const fileChannel = peer?.fileDataChannel?.isOpen?.() ? peer.fileDataChannel : null;
   if (fileChannel) {
     const jobId = `h${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-    const label = result.filePaths.length === 1
-      ? basename(result.filePaths[0])
-      : `${result.filePaths.length} files from ${os.hostname()}`;
-    log.info(`[FileTransfer] Host sending ${result.filePaths.length} file(s) to viewer ${peer?.viewerId || 'primary'} as ${jobId} (v2)`);
-    startHostPull(jobId, result.filePaths, fileChannel, fileTransferDeps, { fromHost: true, label });
+    const label = filePaths.length === 1
+      ? basename(filePaths[0])
+      : `${filePaths.length} files from ${os.hostname()}`;
+    log.info(`[FileTransfer] Host sending ${filePaths.length} file(s) to viewer ${peer?.viewerId || 'primary'} as ${jobId} (v2${options.requestedByViewer ? ', viewer asked' : ''})`);
+    // A viewer-requested get obeys that viewer's plan cap, exactly like
+    // pulls; files the host decides to send on its own are not capped.
+    const cap = options.requestedByViewer ? (hostViewerFileCaps.get(viewerKey) ?? null) : null;
+    startHostPull(jobId, filePaths, fileChannel, fileTransferDeps, { fromHost: true, label }, cap);
     return true;
   }
-  for (const filePath of result.filePaths) await sendFileFromHost(filePath, targetViewerId);
+  for (const filePath of filePaths) await sendFileFromHost(filePath, targetViewerId);
   return true;
 }
 

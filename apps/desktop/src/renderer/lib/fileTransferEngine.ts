@@ -52,6 +52,8 @@ export type TransferJob = {
   renamedCount?: number;
   /** How many times the job continued after a lost connection. */
   resumes?: number;
+  /** Placeholder while the host's own file picker is open ("Get files"). */
+  hostPick?: boolean;
 };
 
 export type SkippedFile = { name: string; reason: string };
@@ -273,7 +275,8 @@ export class FileTransferEngine {
         }
         continue;
       }
-      if (!isRunning(job.state) || job.legacy) continue;
+      // A "choose files there" placeholder waits on a person, not the wire.
+      if (!isRunning(job.state) || job.legacy || job.hostPick) continue;
       anyLive = true;
       if (!linkUp) {
         this.pauseJob(job.id);
@@ -407,6 +410,37 @@ export class FileTransferEngine {
 
   getJobs(): TransferJob[] {
     return [...this.jobs.values()].sort((a, b) => b.startedAt - a.startedAt);
+  }
+
+  /** Drop one finished job from the list (the toast's close button). */
+  dismiss(id: string): void {
+    const job = this.jobs.get(id);
+    if (!job || job.state === 'active' || job.state === 'preparing' || job.state === 'paused') return;
+    this.jobs.delete(id);
+    this.emit();
+  }
+
+  /**
+   * "Get files": ask the host to open its own file picker on its screen.
+   * The viewer drives that picker through the stream; the files chosen come
+   * back as an ordinary host-started transfer (ft:pull-start with fromHost).
+   * Until then a placeholder job tells the user where to look.
+   */
+  requestHostPick(deviceName: string): void {
+    for (const job of this.jobs.values()) {
+      if (job.hostPick && job.state === 'preparing') return; // one picker at a time
+    }
+    const reqId = newWireId('p');
+    this.upsert(reqId, {
+      direction: 'receive',
+      label: 'Choose files',
+      destDir: '',
+      hostPick: true,
+      state: 'preparing',
+      startedAt: Date.now(),
+      message: `A file picker opened on ${deviceName}'s screen. Choose the files there.`,
+    });
+    this.send({ type: 'ft:host-pick', reqId });
   }
 
   clearFinished(): void {
@@ -717,8 +751,30 @@ export class FileTransferEngine {
     const files = filesApi();
 
     switch (type) {
+      case 'ft:host-pick-result': {
+        // Answer to "Get files". Chosen files arrive separately as a
+        // host-started pull (below), which replaces the placeholder.
+        const placeholder = this.jobs.get(String(data.reqId || ''));
+        if (!placeholder) return true;
+        if (data.chosen) return true;
+        if (data.error) {
+          this.upsert(placeholder.id, { state: 'error', message: String(data.error) });
+        } else {
+          this.jobs.delete(placeholder.id); // picker closed without choosing
+          this.emit();
+        }
+        return true;
+      }
+
       case 'ft:pull-start': {
         report(`pull ${jobId} started: ${data.fileCount} file(s), ${data.totalBytes} bytes${data.skippedOverLimit ? ` (${data.skippedOverLimit} over limit)` : ''}${data.fromHost ? ' (host-initiated)' : ''}`);
+        if (data.fromHost) {
+          // The files the user chose in the host's picker are on their way:
+          // the "choose files there" placeholder has done its job.
+          for (const [id, job] of this.jobs) {
+            if (job.hostPick && job.state === 'preparing') this.jobs.delete(id);
+          }
+        }
         if (!this.jobs.has(jobId)) {
           // The HOST started this transfer (its dock's Send Files). Same
           // stream as a pull we asked for; it just needs a job to land in.
