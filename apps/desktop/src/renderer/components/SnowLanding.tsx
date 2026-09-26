@@ -199,8 +199,10 @@ export const SnowLanding: React.FC<SnowLandingProps> = ({
       useAuthStore.getState().setLanguage(value);
       return;
     }
-    // Signed out: remember the choice locally; the store applies it on sign-in.
+    // Signed out: remember the choice locally (the store applies it on
+    // sign-in) and tell App, which runs the on-screen translation.
     try { localStorage.setItem(LANGUAGE_KEY, value); } catch { /* storage unavailable */ }
+    try { window.dispatchEvent(new CustomEvent('r365:language', { detail: value })); } catch { /* no window */ }
     try {
       document.documentElement.lang = value;
       document.documentElement.dir = value === 'ar-SA' ? 'rtl' : 'ltr';

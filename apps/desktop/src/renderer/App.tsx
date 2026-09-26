@@ -207,13 +207,34 @@ export default function App() {
     // Automatic-update policy is intentionally device-local. Account refreshes
     // must not overwrite another PC's updater preference.
 
+    // Language for signed-out screens (home screen, viewer login). The sweep
+    // below used to run only with a signed-in user, so on a machine sitting at
+    // the home screen (every unattended PC) choosing a language saved the
+    // choice and changed nothing on screen. The home screen's picker and the
+    // store announce changes with a 'r365:language' event.
+    const [storedLanguage, setStoredLanguage] = useState<string>(() => {
+        try { return localStorage.getItem('pref_language') || 'en'; } catch { return 'en'; }
+    });
+    useEffect(() => {
+        const onLanguage = (event: Event) => {
+            const next = String((event as CustomEvent).detail || '') || 'en';
+            setStoredLanguage(next);
+        };
+        window.addEventListener('r365:language', onLanguage);
+        return () => window.removeEventListener('r365:language', onLanguage);
+    }, []);
+    const activeLanguage = user?.language || storedLanguage || 'en';
+
     const translationPausedRef = useRef(false);
     // The full-DOM translation sweep costs 1-10ms per pass and competes with
     // input dispatch, so it pauses while a remote session is streaming
     // (translationPausedRef, flipped by the remoteStream effect below).
     useEffect(() => {
-        if (!user) return;
-        const language = user.language || 'en';
+        const language = activeLanguage;
+        try {
+            document.documentElement.lang = language;
+            document.documentElement.dir = language === 'ar-SA' ? 'rtl' : 'ltr';
+        } catch { /* not in a document */ }
         const translate = () => {
             if (translationPausedRef.current) return;
             applyGlobalTranslations(document.body, language);
@@ -253,7 +274,7 @@ export default function App() {
             window.clearInterval(interval);
             observer.disconnect();
         };
-    }, [user?.language, user]);
+    }, [activeLanguage]);
     const isAuthenticated = !!accessToken;
     const [totpCode, setTotpCode] = useState('');
     const [viewerStep, setViewerStep] = useState<1 | 2>(1);

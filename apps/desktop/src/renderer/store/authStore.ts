@@ -218,6 +218,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // sticks even if the backend write fails or there is no network.
   setLanguage: (language) => {
     localStorage.setItem('pref_language', language);
+    try { window.dispatchEvent(new CustomEvent('r365:language', { detail: language })); } catch { /* no window */ }
     try {
       document.documentElement.lang = language;
       document.documentElement.dir = language === 'ar-SA' ? 'rtl' : 'ltr';

@@ -1,3 +1,4 @@
+import { landingTranslations } from './landingTranslations';
 export type Language = 'en' | 'de' | 'fr' | 'es' | 'ar-SA';
 
 export const supportedLanguages: Language[] = ['en', 'de', 'fr', 'es', 'ar-SA'];
@@ -2257,6 +2258,9 @@ const translateKey = (key: string, lang: Language): string => {
     const entry = translations[key as keyof typeof translations] as Record<string, string> | undefined;
     return entry?.[lang] || entry?.en || key;
 };
+
+// Signed-out home screen phrases (exact on-screen English -> translation).
+Object.assign(supplementalTranslations, landingTranslations);
 
 const staticTextToKey = (() => {
     const map = new Map<string, string>();
