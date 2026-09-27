@@ -6901,8 +6901,8 @@ async function initiateHostWebRTC(viewerId: string) {
 
 // Debounced "did that click land in a text field?" probe. Runs shortly after
 // the click so the target app has settled focus, then tells the viewer over
-// its control/input channel. Mobile viewers use it to auto-open the keyboard;
-// the desktop viewer ignores the message.
+// its control/input channel. Only the native mobile app ('mobile-viewer')
+// listens for the answer and auto-opens its keyboard; nobody else is asked.
 let focusEditableProbeTimer: NodeJS.Timeout | null = null;
 function scheduleFocusEditableProbe(replyChannel: any) {
   if (focusEditableProbeTimer) clearTimeout(focusEditableProbeTimer);
@@ -7283,14 +7283,16 @@ function handleControlMessage(msg: any, viewerId?: string) {
           }
         }
         // After a click lands, report whether focus ended up in an editable
-        // text field so mobile/web viewers can auto-open their on-screen
-        // keyboard. The desktop viewer ignores that message, yet the probe
-        // used to run for it too — and it is not free: a UI Automation query
+        // text field so the native mobile app can auto-open its on-screen
+        // keyboard. It is the ONLY client that reads 'focus-editable'; the
+        // desktop and browser viewers ignore it, yet the probe used to run for
+        // every non-desktop viewer — and it is not free: a UI Automation query
         // makes Chromium/Electron/Office apps on this PC build their whole
-        // accessibility tree, which shows up as sluggish clicks in those apps.
+        // accessibility tree, which shows up as sluggish clicks in those apps
+        // and, from a browser viewer, as the picture freezing after each click.
         if (event.type === 'mouseup') {
           const kind = viewerId ? (hostViewerClientKinds.get(viewerId) || '') : '';
-          if (!/^desktop/i.test(kind)) scheduleFocusEditableProbe(replyChannel);
+          if (kind === 'mobile-viewer') scheduleFocusEditableProbe(replyChannel);
         }
         break;
       case 'wheel':
