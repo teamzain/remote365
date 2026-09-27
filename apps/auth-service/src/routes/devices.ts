@@ -606,6 +606,13 @@ export default async function deviceRoutes(fastify: FastifyInstance) {
 
     const passwordRequired = device.passwordRequired !== false;
     const requiresHostApprovalOnly = Boolean(approvalOnly);
+    // An approval-only grant skips the password and leaves the decision to the
+    // person at the host, whose prompt names the account asking. Anonymous
+    // callers have no name to show or account to ban, and could otherwise
+    // raise prompts on any device ID they guess.
+    if (requiresHostApprovalOnly && !requesterUserId) {
+      return reply.code(401).send({ error: 'Sign in to ask this device for access.' });
+    }
 
     // "Unattended" = the owner said this machine may be driven with nobody
     // sitting at it, so the in-session control prompt is skipped. It is a
