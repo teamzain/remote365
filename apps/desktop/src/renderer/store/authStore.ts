@@ -3,6 +3,60 @@ import api from '../lib/api';
 
 const isElectron = !!(window as any).electronAPI;
 
+// Boot-time profile recovery.
+//
+// At Windows login the app starts before Wi-Fi/DNS are usable, so the single
+// /api/auth/me call that restores the signed-in profile fails with a network
+// error. The tokens were already put in the store by then, so the shell
+// rendered as signed in but with no profile: "User" and a blank avatar in the
+// header, the sidebar cut down to the role-less default, no chat socket —
+// until someone reloaded the window by hand. The same one-shot pattern used to
+// keep rebooted hosts offline (see main/hostAutostart.ts); this is the
+// renderer-side counterpart.
+//
+// Transient failures are retried on a capped backoff, unbounded on purpose,
+// and immediately when Chromium reports the network back. A definitive answer
+// from the auth service (401/403) still ends the session exactly as before.
+const PROFILE_RETRY_BASE_MS = 5000;
+const PROFILE_RETRY_MAX_MS = 60000;
+let profileRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let profileRetryAttempt = 0;
+
+const clearProfileRetry = () => {
+  if (profileRetryTimer) clearTimeout(profileRetryTimer);
+  profileRetryTimer = null;
+  profileRetryAttempt = 0;
+};
+
+// Remote-session tabs render this same bundle and restore auth too. They only
+// ever open once the network is up and must not run a second retry loop.
+const isViewerWindow = (() => {
+  try { return new URLSearchParams(window.location.search).get('view') === 'viewer'; } catch { return false; }
+})();
+
+// 401/403 are the server's word that the session is over. Anything else — no
+// response at all (DNS not up, offline, timeout), a 502/503 from the proxy
+// while a service restarts, any 5xx — is worth trying again.
+const isTransientAuthError = (e: any): boolean => {
+  const status = Number(e?.response?.status || 0);
+  if (!status) return true;
+  return status === 408 || status === 429 || status >= 500;
+};
+
+const scheduleProfileRetry = (error: any) => {
+  // One pending retry at a time: a billing/features re-check that fails while
+  // the boot retry is already waiting just rides on that one.
+  if (isViewerWindow || profileRetryTimer) return;
+  const attempt = profileRetryAttempt++;
+  // 5s, 10s, 20s, 40s, then every 60s.
+  const delayMs = Math.min(PROFILE_RETRY_MAX_MS, PROFILE_RETRY_BASE_MS * Math.pow(2, Math.min(attempt, 4)));
+  console.warn(`[Auth] Could not load profile (attempt ${attempt + 1}): ${error?.message || error}. Retrying in ${delayMs / 1000}s.`);
+  profileRetryTimer = setTimeout(() => {
+    profileRetryTimer = null;
+    void useAuthStore.getState().checkAuth({ silent: true });
+  }, delayMs);
+};
+
 interface User {
   id: string;
   email: string;
@@ -49,7 +103,7 @@ interface AuthState {
   requestVerification: (email: string, extras?: Record<string, any>) => Promise<{ emailSent?: boolean } | undefined>;
   register: (name: string, email: string, password: string, verificationCode: string, extras?: Record<string, any>) => Promise<void>;
   logout: () => Promise<void>;
-  checkAuth: () => Promise<void>;
+  checkAuth: (options?: { silent?: boolean }) => Promise<void>;
   updateProfile: (data: Partial<User> & { current_password?: string; password?: string }) => Promise<void>;
   setLanguage: (language: string) => void;
 }
@@ -127,6 +181,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     const { refreshToken } = get();
+    clearProfileRetry();
     // 1. Clear memory state IMMEDIATELY to stop polling loops
     set({ user: null, accessToken: null, refreshToken: null });
 
@@ -144,8 +199,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  checkAuth: async () => {
-    set({ isLoading: true });
+  checkAuth: async (options) => {
+    // Background retries must not flash the loading state (Settings disables
+    // its Save button on it) — only a user-visible check toggles it.
+    const silent = Boolean(options?.silent);
+    if (!silent) set({ isLoading: true });
     try {
       let token, refresh;
       if (isElectron) {
@@ -172,8 +230,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
            // Admin settings and Remote support disappear after a while.
            const prevUser = get().user as any;
            set({ user: { ...(prevUser || {}), ...loadedUser, role: loadedUser.role || prevUser?.role } });
+           clearProfileRetry();
         } catch (e: any) {
            if (e.response?.status === 401 || e.response?.status === 403) {
+             clearProfileRetry();
              if (isElectron) {
                try { await (window as any).electronAPI.deleteToken(); } catch {}
              } else {
@@ -181,11 +241,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                localStorage.removeItem('refresh_token');
              }
              set({ user: null, accessToken: null, refreshToken: null });
+           } else if (isTransientAuthError(e)) {
+             // Tokens stay put and the shell stays signed in; the profile
+             // arrives whenever the network does.
+             scheduleProfileRetry(e);
+           } else {
+             console.warn(`[Auth] Could not load profile: ${e?.message || e}`);
            }
         }
+      } else {
+        clearProfileRetry();
       }
     } finally {
-      set({ isLoading: false });
+      if (!silent) set({ isLoading: false });
     }
   },
 
@@ -229,3 +297,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     api.patch('/api/auth/me', { language }).catch(() => {});
   }
 }));
+
+// Chromium fires this the moment it sees connectivity again (Wi-Fi associated,
+// VPN up, dock NIC replacing Wi-Fi). Skip the rest of the backoff and load the
+// profile right away — but only when a retry is actually waiting, so an
+// ordinary network flap on a healthy session doesn't spawn extra /me calls.
+if (typeof window !== 'undefined' && !isViewerWindow) {
+  window.addEventListener('online', () => {
+    if (!profileRetryTimer) return;
+    clearTimeout(profileRetryTimer);
+    profileRetryTimer = null;
+    console.log('[Auth] Network is back — loading the profile now.');
+    void useAuthStore.getState().checkAuth({ silent: true });
+  });
+}

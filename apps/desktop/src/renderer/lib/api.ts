@@ -151,11 +151,19 @@ api.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError, null);
         isRefreshing = false;
-        if (isElectron) {
-          await (window as any).electronAPI.deleteToken();
-        } else {
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('refresh_token');
+        // Only a definitive answer from the auth service ends the session
+        // (400 malformed, 401 expired/revoked, 403 blocked). A refresh that
+        // never got a response — the app started before DNS was up, a Wi-Fi
+        // blip, a 502 while the service restarts — keeps the stored tokens so
+        // the next request simply tries again instead of signing the user out.
+        const refreshStatus = (refreshError as AxiosError)?.response?.status;
+        if (refreshStatus === 400 || refreshStatus === 401 || refreshStatus === 403) {
+          if (isElectron) {
+            await (window as any).electronAPI.deleteToken();
+          } else {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+          }
         }
         return Promise.reject(refreshError);
       }

@@ -20,6 +20,11 @@ export const LicensesPanel: React.FC<LicensesPanelProps> = ({ user, lang }) => {
   const [billingPlans, setBillingPlans] = useState<any[]>([]);
   const [deviceCount, setDeviceCount] = useState(0);
   const [billingLoading, setBillingLoading] = useState(false);
+  // False until the first billing fetch settles. Before that, every derived
+  // value below is a placeholder (TRIAL plan, 0 devices, no card) and the
+  // license store may still hold the previous account's trial state — the tab
+  // used to flash "trial ended · 0 devices" before snapping to the real plan.
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
   const [portalError, setPortalError] = useState('');
   const [plansOpen, setPlansOpen] = useState(false);
@@ -46,6 +51,7 @@ export const LicensesPanel: React.FC<LicensesPanelProps> = ({ user, lang }) => {
       console.error('[Licenses] Failed to load billing', err);
     } finally {
       setBillingLoading(false);
+      setHasLoaded(true);
     }
   };
 
@@ -118,11 +124,18 @@ export const LicensesPanel: React.FC<LicensesPanelProps> = ({ user, lang }) => {
         <p className="m-0 mt-1 text-[14px] leading-5 text-[#111315] dark:text-[#A0A0A0]">Your subscription, capacity, and billing.</p>
       </div>
 
+      {!hasLoaded ? (
+        <div className="flex min-h-[140px] items-center justify-center gap-3 rounded-xl border border-[rgba(26,29,33,0.3)] p-4 text-[14px] leading-5 text-[#667085] dark:border-white/10 dark:text-[#A0A0A0]">
+          <Loader2 size={18} className="animate-spin text-[#FF8A00]" />
+          Loading your plan…
+        </div>
+      ) : (
+      <>
       {/* Plan card */}
       <div className="mb-12 flex items-center justify-between gap-6 rounded-xl border border-[rgba(26,29,33,0.3)] p-4 dark:border-white/10">
         <div className="flex flex-col gap-3">
           <div>
-            <h3 className="m-0 text-[16px] font-semibold leading-[23px] text-black dark:text-[#F5F5F5]">{billingLoading && !billingInfo ? 'Loading Plan…' : planDisplayName}</h3>
+            <h3 className="m-0 text-[16px] font-semibold leading-[23px] text-black dark:text-[#F5F5F5]">{planDisplayName}</h3>
             <p className="m-0 mt-1 text-[14px] leading-5 text-[#111315] dark:text-[#A0A0A0]">
               {planPriceLabel && <span className="text-[18px] font-medium leading-[25px] text-black dark:text-[#F5F5F5]">{planPriceLabel}</span>}
               {billingRenewal && (
@@ -207,6 +220,8 @@ export const LicensesPanel: React.FC<LicensesPanelProps> = ({ user, lang }) => {
       </div>
 
       {portalError && <p className="mt-4 text-[13px] font-medium text-red-500">{portalError}</p>}
+      </>
+      )}
 
       {plansOpen && (
         <div className="fixed inset-0 z-[950] flex items-center justify-center p-5">
