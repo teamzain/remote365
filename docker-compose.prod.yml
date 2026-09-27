@@ -45,7 +45,13 @@ services:
       SMTP_SECURE: ${SMTP_SECURE}
       SMTP_USER: ${SMTP_USER}
       SMTP_PASS: ${SMTP_PASS}
+      CHAT_UPLOAD_DIR: /data/chat-uploads
     env_file: .env
+    # Chat attachments used to land in the container's own filesystem
+    # (process.cwd()/uploads/chat), so every redeploy wiped them and old
+    # messages showed a broken image. A named volume outlives the container.
+    volumes:
+      - chat_uploads:/data/chat-uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -157,3 +163,4 @@ volumes:
   redis_data:
   caddy_data:
   caddy_config:
+  chat_uploads:

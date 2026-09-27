@@ -4,6 +4,21 @@ import { notify } from '../components/NotificationProvider';
 import { openSessionHere } from './sessionLauncher';
 import { useChatStore } from '../store/chatStore';
 import { useNotificationStore } from '../store/notificationStore';
+import { describeIncomingMessage } from './chatMessagePreview';
+import { playUISound } from './uiSound';
+
+// OS-level notification, gated by the same Settings toggles as the desktop
+// (Windows Notification / …for incoming sessions). `silent` because the app
+// plays its own cue; a second system chime on top was jarring on the desktop.
+const fireBrowserNotification = (title: string, body: string, kind: 'general' | 'session', tag: string) => {
+  try {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    if (localStorage.getItem('pref_windows_notification') === 'false') return;
+    if (kind === 'session' && localStorage.getItem('pref_incoming_session_notification') === 'false') return;
+    const n = new Notification(title, { body, icon: '/logo.png', silent: true, tag });
+    n.onclick = () => { try { window.focus(); } catch { /* not allowed */ } n.close(); };
+  } catch { /* notifications are best-effort */ }
+};
 
 /**
  * Chat and session events (contact requests, session/meeting invites, a
@@ -16,6 +31,32 @@ export function useShellChatEvents(userId: string | undefined) {
   useEffect(() => {
     const add = useNotificationStore.getState().addNotification;
     useChatStore.setState({
+      // A message from someone else: bell entry + snackbar + browser
+      // notification + cue, like the desktop. The web never wired this slot,
+      // so new messages arrived in complete silence unless the chat was open.
+      onNewMessage: (msg: any, conversationId: string) => {
+        if (!msg || msg.senderId === userId) return;
+        const chat = useChatStore.getState();
+        // Honour a per-user conversation mute if the server sends one.
+        const mutedHere = chat.conversations
+          .find((c: any) => c.id === conversationId)?.participants
+          ?.some((p: any) => p.userId === userId && p.muted);
+        if (mutedHere) return;
+
+        const info = describeIncomingMessage(msg, conversationId);
+        add(info.preview, info.kind, info.title, info.target);
+
+        // Reading that very conversation in a visible tab: the bubble itself
+        // is the notification — no snackbar or OS popup on top of it.
+        const readingIt = chat.activeChatId === conversationId
+          && typeof document !== 'undefined' && document.visibilityState === 'visible'
+          && window.location.pathname.startsWith('/dashboard/chat');
+        if (!readingIt) {
+          notify(`${info.title}: ${info.preview}`, 'info');
+          fireBrowserNotification(info.title, info.preview, info.isSessionEvent ? 'session' : 'general', `chat-${conversationId}`);
+        }
+        playUISound('connect');
+      },
       onInvite: (conversation: any) => {
         const from = conversation?.participants?.find((p: any) => p.userId !== userId)?.user?.name || 'Someone';
         add(`${from} wants to add you as a contact.`, 'session', 'New contact request', { view: 'chat', chatId: conversation?.id });
@@ -57,7 +98,7 @@ export function useShellChatEvents(userId: string | undefined) {
         if (event?.type === 'chat-conversation-removed') add('This conversation is no longer available.', 'blocked', 'Conversation closed', { view: 'chat' });
       },
     });
-    return () => { useChatStore.setState({ onInvite: undefined, onSessionInvite: undefined, onConversationEvent: undefined }); };
+    return () => { useChatStore.setState({ onNewMessage: undefined, onInvite: undefined, onSessionInvite: undefined, onConversationEvent: undefined }); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 }
