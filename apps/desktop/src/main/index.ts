@@ -7988,7 +7988,12 @@ function connectHostSignaling(serverIP: string, token: string, accessKey: string
       accessKey,
       clientKind: 'desktop-host',
       appVersion: app.getVersion(),
-      platform: process.platform
+      platform: process.platform,
+      // Join requests without a password or trust are only forwarded to hosts
+      // that show the Allow/Deny prompt. The pre-logon instance has no window
+      // to show it in, so those requests are refused up front instead of
+      // timing out after 30 s.
+      promptsForApproval: !isPreLogonHost
     };
     if (token) registration.token = token;
     // Unattended: no signed-in user means no access token, so the machine

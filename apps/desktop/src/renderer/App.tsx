@@ -3478,24 +3478,10 @@ export default function App() {
         if (!isElectron || isViewerWindow) return;
         const eAPI = (window as any).electronAPI;
         const unsubReq = eAPI.onViewerRequest?.((data: { viewerId: string; viewerName?: string }) => {
-            // AUTO-APPROVE: If host is not authenticated (Guest Mode), automatically approve.
-            // This is essential for unattended access via Access Key/PIN.
-            if (!isAuthenticated) {
-                console.log(`[Host] Guest Mode: Auto-approving connection request from ${data.viewerId}`);
-                eAPI.approveViewer(data.viewerId);
-                return;
-            }
-
-            // Unattended access (Settings → Device management): approve without
-            // prompting — same flag as "Grant Easy Access" (lib/easyAccess).
-            const unattendedEnabled = localStorage.getItem('pref_dm_unattended') === 'true';
-            if (unattendedEnabled) {
-                console.log(`[Host] Unattended access on: auto-approving ${data.viewerId}`);
-                eAPI.approveViewer(data.viewerId);
-                addNotification(`${data.viewerName || 'A viewer'} connected with Easy Access, so no approval was needed.`, 'session', 'Unattended Session');
-                return;
-            }
-
+            // Always ask, signed in or not, unattended or not. Viewers holding the
+            // password, a one-time code or trust are let in by signaling and never
+            // reach this handler; a request that does arrive proved nothing, so
+            // approving it without a prompt let anyone with the device ID in.
             setPendingViewerRequest({ viewerId: data.viewerId, viewerName: data.viewerName || '', countdown: 30 });
             playUISound('connect');
         });
@@ -5316,6 +5302,12 @@ export default function App() {
         return clean.match(/.{1,3}/g)?.join(' ') || clean;
     };
 
+    // Join requests always need an answer from whoever is at this PC, so the
+    // prompt is rendered on the signed-out, onboarding and admin screens too.
+    const viewerRequestPrompt = (
+        <ViewerRequestModal state={pendingViewerRequest} setState={setPendingViewerRequest} language={activeLanguage} />
+    );
+
     if (isMeetingWindow) {
         return activeMeetingId ? (
             <React.Suspense fallback={<LazyScreenFallback />}>
@@ -5352,6 +5344,7 @@ export default function App() {
     if (isViewerWindow || viewerStatus === 'streaming' || viewerStatus === 'connected' || viewerStatus === 'connection_lost') {
         return (
             <div className="h-screen bg-white flex flex-col relative overflow-hidden cursor-default">
+                {viewerRequestPrompt}
                 {viewerStatus === 'connection_lost' && (
                     <div className="absolute inset-0 z-[100] flex flex-col items-center justify-center overflow-hidden bg-white font-['Mona_Sans',system-ui,sans-serif] animate-in fade-in duration-500">
                         {/* Orange glow */}
@@ -5429,6 +5422,7 @@ export default function App() {
             <>
                 <UpdateBanner />
                 <SnowOnboard token={onboardingToken} onComplete={() => setOnboardingToken(null)} />
+                {viewerRequestPrompt}
             </>
         );
     }
@@ -5439,6 +5433,7 @@ export default function App() {
         return (
             <React.Suspense fallback={<LazyScreenFallback />}>
                 <SuperAdminConsole user={user} onLogout={handleLogout} />
+                {viewerRequestPrompt}
             </React.Suspense>
         );
     }
@@ -5448,6 +5443,7 @@ export default function App() {
             return (
                 <div className="h-screen w-full flex items-center justify-center bg-white font-inter select-none">
                     <UpdateBanner />
+                    {viewerRequestPrompt}
                     <AuthResultModal state={authResult} onClose={() => setAuthResult(null)} />
                     <div className="w-full max-w-sm p-8 animate-in fade-in zoom-in-95 duration-500">
                         <div className="flex items-center gap-3 mb-10 group cursor-default">
@@ -5513,6 +5509,7 @@ export default function App() {
                 }} />
 
                 <UpdateBanner />
+                {viewerRequestPrompt}
                 {/* Sign-in / sign-up outcome (animated tick or cross) */}
                 <AuthResultModal state={authResult} onClose={() => setAuthResult(null)} />
                 <SnowSplashScreen isReady={!loading} />
@@ -6264,7 +6261,7 @@ export default function App() {
             )}
 
             {/* ── Viewer Access Request Dialog ── */}
-            <ViewerRequestModal state={pendingViewerRequest} setState={setPendingViewerRequest} language={activeLanguage} />
+            {viewerRequestPrompt}
 
             <ControlRequestModal state={pendingControlRequest} onClose={() => setPendingControlRequest(null)} />
 

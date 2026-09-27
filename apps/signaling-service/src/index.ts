@@ -36,6 +36,8 @@ const clientMeta = new Map<string, {
   meetingId?: string;
   appVersion?: string;
   platform?: string;
+  /** Host said at registration that it shows an Allow/Deny prompt for join requests. */
+  promptsForApproval?: boolean;
   lastMessageAt: number;
   lastPongAt: number;
   connectedAt: number;
@@ -268,6 +270,7 @@ function updateClientMeta(connectionId: string, patch: Partial<{
   meetingId?: string;
   appVersion?: string;
   platform?: string;
+  promptsForApproval?: boolean;
   lastMessageAt: number;
   lastPongAt: number;
 }>) {
@@ -1271,7 +1274,8 @@ async function startServer() {
               kind: data.clientKind || 'host',
               sessionId,
               appVersion: data.appVersion,
-              platform: data.platform
+              platform: data.platform,
+              promptsForApproval: data.promptsForApproval === true
             });
 
             await markHostPresent(sessionId);
@@ -1463,6 +1467,22 @@ async function startServer() {
                 appVersion: data.appVersion,
                 platform: data.platform
               });
+              break;
+            }
+
+            // No password and no trust: only a person at the host can let this
+            // viewer in. Desktop builds before promptsForApproval existed let
+            // these requests through with no prompt whenever the app was signed
+            // out or unattended access was on, so a desktop host must say it
+            // will ask before one is forwarded. Android hosts are outside this
+            // check for now (see HostService.onViewerRequest). Their heartbeats
+            // omit clientKind, which resets `kind` to 'host', so match the
+            // platform as well.
+            const hostMeta = clientMeta.get(hostId);
+            const hostIsAndroid = hostMeta?.kind === 'android-host' || hostMeta?.platform === 'android';
+            if (!hostIsAndroid && !hostMeta?.promptsForApproval) {
+              console.log(`[Signaling] Join for ${targetSessionId} refused: host cannot prompt for approval (${describeClient(hostId)}).`);
+              ws.send(JSON.stringify({ type: 'joined', success: false, error: 'This device cannot show connection requests. Connect with its password or a one-time code, or ask its owner to update Remote365.' }));
               break;
             }
 
