@@ -333,7 +333,8 @@
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
-.site-dark .doc-empty {
+.site-dark .doc-empty,
+.site-dark .doc-credit {
   color: var(--ld-faint);
 }
 .site-dark .doc-group-head {
