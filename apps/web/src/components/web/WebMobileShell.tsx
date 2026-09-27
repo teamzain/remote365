@@ -21,6 +21,7 @@ import WebMobileHelp from './WebMobileHelp';
 import { useNotificationStore, type WebNotification } from '../../store/notificationStore';
 import { useShellChatEvents } from '../../lib/useShellChatEvents';
 import { WebNotificationPanel } from './WebNotificationPanel';
+import { WebAppToast } from './WebAppToast';
 
 const initials = (name?: string | null) =>
   String(name || '?')
@@ -58,10 +59,8 @@ export const WebMobileShell: React.FC<WebMobileShellProps> = ({ view, children }
   const notifications = useNotificationStore((state) => state.notifications);
   const unreadAlerts = notifications.filter((item) => !item.read).length;
   useShellChatEvents(user?.id);
-  const openNotification = (item: WebNotification) => {
-    useNotificationStore.getState().markRead(item.id);
-    setAlertsOpen(false);
-    const target = item.target || {};
+  // Destination of a notification entry or the sliding toast.
+  const openTarget = (target: Record<string, any>) => {
     if (target.view === 'connect' && target.sessionCode) { navigate(`/join/${String(target.sessionCode).replace(/\D/g, '')}`); return; }
     if (target.view === 'meetings' && target.meetingId) { navigate(`/meeting/${String(target.meetingId).replace(/[^a-zA-Z0-9]/g, '')}`); return; }
     if (target.view === 'chat' && target.chatId) useChatStore.getState().setActiveChat(target.chatId);
@@ -70,6 +69,11 @@ export const WebMobileShell: React.FC<WebMobileShellProps> = ({ view, children }
       settings: '/dashboard/settings', billing: '/dashboard/billing', members: '/dashboard/members', admin_settings: '/dashboard/admin-settings', support: '/dashboard/support',
     };
     if (target.view && paths[target.view]) navigate(paths[target.view]);
+  };
+  const openNotification = (item: WebNotification) => {
+    useNotificationStore.getState().markRead(item.id);
+    setAlertsOpen(false);
+    openTarget(item.target || {});
   };
 
   // Phones had NO device sync at all — the list was whatever it was on mount.
@@ -200,7 +204,9 @@ export const WebMobileShell: React.FC<WebMobileShellProps> = ({ view, children }
         onClearAll={() => useNotificationStore.getState().clearAll()}
         onDismiss={(item) => useNotificationStore.getState().dismiss(item.id)}
         onNotificationClick={openNotification}
+        onOpenSettings={() => navigate('/dashboard/settings')}
       />
+      <WebAppToast onOpen={openTarget} />
     </div>
   );
 };

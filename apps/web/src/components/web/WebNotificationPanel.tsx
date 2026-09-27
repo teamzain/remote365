@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { X, MoreHorizontal, ChevronDown, Check, Trash2 } from 'lucide-react';
+import { X, MoreHorizontal, ChevronDown, Check, Settings, Trash2 } from 'lucide-react';
 import notificationImgAsset from '../../assets/notification.png';
 import type { WebNotification } from '../../store/notificationStore';
 
@@ -13,6 +13,8 @@ interface WebNotificationPanelProps {
   onClearAll: () => void;
   onNotificationClick: (notification: WebNotification) => void;
   onDismiss: (notification: WebNotification) => void;
+  /** "Notification settings" menu entry (the desktop lists it too). */
+  onOpenSettings?: () => void;
 }
 
 const relativeTime = (createdAt: number) => {
@@ -35,7 +37,7 @@ const dayBucket = (createdAt: number) => {
  * Today / Older sections, round dark icon tile (orange dot while unread),
  * title + description + View link, time on the right. Opens on All.
  */
-export const WebNotificationPanel: React.FC<WebNotificationPanelProps> = ({ isOpen, notifications, onClose, onMarkAllRead, onClearAll, onNotificationClick, onDismiss }) => {
+export const WebNotificationPanel: React.FC<WebNotificationPanelProps> = ({ isOpen, notifications, onClose, onMarkAllRead, onClearAll, onNotificationClick, onDismiss, onOpenSettings }) => {
   const [filter, setFilter] = useState<'unread' | 'all'>('all');
   const [showMenu, setShowMenu] = useState(false);
   const visible = filter === 'unread' ? notifications.filter((item) => !item.read) : notifications;
@@ -92,6 +94,15 @@ export const WebNotificationPanel: React.FC<WebNotificationPanelProps> = ({ isOp
                     >
                       <Check size={16} /> Mark all read
                     </button>
+                    {onOpenSettings && (
+                      <button
+                        type="button"
+                        onClick={() => { onOpenSettings(); setShowMenu(false); onClose(); }}
+                        className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#111315] transition-colors hover:bg-[#F3F4F6]"
+                      >
+                        <Settings size={16} /> Notification settings
+                      </button>
+                    )}
                     <div className="mx-2 my-1 h-px bg-black/10" />
                     <button
                       type="button"

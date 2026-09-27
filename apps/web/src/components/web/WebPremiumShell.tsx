@@ -2,12 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Bell,
+  Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
+  ExternalLink,
   HelpCircle,
   Info,
-  LayoutGrid,
   LogOut,
   Menu,
   MessageCircle,
@@ -17,7 +19,6 @@ import {
   RefreshCw,
   Search,
   Settings,
-  Settings2,
   Video,
   X,
 } from 'lucide-react';
@@ -35,8 +36,16 @@ import { useShellChatEvents } from '../../lib/useShellChatEvents';
 import { useNotificationStore, type WebNotification } from '../../store/notificationStore';
 import { useChatStore } from '../../store/chatStore';
 import { WebNotificationPanel } from './WebNotificationPanel';
+import { WebAppToast } from './WebAppToast';
 
 const logo = logoAsset.src;
+
+// Two-letter initials for the avatar fallback, as the desktop header does it.
+const initialsOf = (name?: string | null) => {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return String(name || '').slice(0, 2).toUpperCase();
+};
 const upgradeIcon = upgradeIconAsset.src;
 
 interface WebPremiumShellProps {
@@ -151,6 +160,21 @@ export const WebPremiumShell: React.FC<WebPremiumShellProps> = ({ view, title, c
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showHelpPopover, setShowHelpPopover] = useState(false);
+  // Header avatar menu (profile, plan, help, sign out) — same as the desktop.
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const [showUserDropdownHelp, setShowUserDropdownHelp] = useState(false);
+  const userDropdownRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showUserDropdown) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!userDropdownRef.current?.contains(event.target as Node)) {
+        setShowUserDropdown(false);
+        setShowUserDropdownHelp(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [showUserDropdown]);
   const [helpModal, setHelpModal] = useState<'update' | 'support' | 'privacy' | 'copyright' | 'about' | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -261,14 +285,17 @@ export const WebPremiumShell: React.FC<WebPremiumShellProps> = ({ view, title, c
   useShellChatEvents(user?.id);
 
   // Every entry opens the page it is about.
-  const openNotification = (item: WebNotification) => {
-    markNotificationRead(item.id);
-    setShowNotifications(false);
-    const target = item.target || {};
+  // Destination of a notification entry or the sliding toast.
+  const openTarget = (target: Record<string, any>) => {
     if (target.view === 'connect' && target.sessionCode) { navigate(`/join/${String(target.sessionCode).replace(/\D/g, '')}`); return; }
     if (target.view === 'meetings' && target.meetingId) { navigate(`/meeting/${String(target.meetingId).replace(/[^a-zA-Z0-9]/g, '')}`); return; }
     if (target.view === 'chat' && target.chatId) useChatStore.getState().setActiveChat(target.chatId);
     if (target.view) setCurrentView(target.view);
+  };
+  const openNotification = (item: WebNotification) => {
+    markNotificationRead(item.id);
+    setShowNotifications(false);
+    openTarget(item.target || {});
   };
 
   const unreadCount = notifications.filter((notification) => !notification.read).length;
@@ -560,33 +587,123 @@ export const WebPremiumShell: React.FC<WebPremiumShellProps> = ({ view, title, c
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              {/* Settings lives behind the header gear, like the desktop app. */}
+            {/* Gear · bell · avatar menu — the desktop header, same order and sizes. */}
+            <div className="flex items-center gap-5 text-[#1A1D21] sm:gap-7">
               <button
                 type="button"
                 onClick={() => setCurrentView('settings')}
-                className="flex h-9 w-9 items-center justify-center rounded hover:bg-[#F3F4F6]"
+                className="transition-colors hover:text-[#FF8A00]"
                 title="Settings"
               >
-                <Settings2 size={18} />
+                <Settings size={24} strokeWidth={1.5} />
               </button>
               <button
                 type="button"
                 onClick={() => setShowNotifications(true)}
-                className="relative flex h-9 w-9 items-center justify-center rounded hover:bg-[#F3F4F6]"
+                className={`relative transition-colors hover:text-[#FF8A00] ${showNotifications ? 'text-[#FF8A00]' : ''}`}
                 title="Notifications"
               >
-                <Bell size={18} />
-                {unreadCount > 0 ? <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#FF8A00]" /> : null}
+                <Bell size={24} strokeWidth={1.7} />
+                {unreadCount > 0 ? <span className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" /> : null}
               </button>
-              <button
-                type="button"
-                onClick={() => setCurrentView('meetings')}
-                className="flex h-9 w-9 items-center justify-center rounded hover:bg-[#F3F4F6]"
-                title="More solutions"
-              >
-                <LayoutGrid size={18} />
-              </button>
+
+              <div className="relative" ref={userDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => { setShowUserDropdown((open) => !open); setShowUserDropdownHelp(false); }}
+                  className="relative flex h-10 items-center gap-3"
+                  title={user?.name || 'Account'}
+                >
+                  <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-[#F9F5FF] text-base font-medium text-[#7F56D9] shadow-sm">
+                    {user?.avatar ? <img src={user.avatar} alt={user.name || ''} className="h-full w-full object-cover" /> : initialsOf(user?.name || user?.email)}
+                  </div>
+                  <span className="hidden max-w-[107px] truncate text-[14px] font-normal leading-5 text-[#111315] xl:block">{user?.name || 'User'}</span>
+                  <ChevronDown size={14} strokeWidth={1.5} className="text-[#1A1D21]" />
+                  <div className="absolute bottom-0 left-7 h-3 w-3 rounded-full border-2 border-white bg-[#34C759]" />
+                </button>
+
+                {showUserDropdown && (
+                  <div className="absolute right-0 top-full z-[100] mt-3 w-64 overflow-hidden rounded-xl border border-[rgba(0,0,0,0.08)] bg-white font-sans shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="flex items-start gap-3 p-4">
+                      <div className="relative">
+                        <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-[#E91E63] text-sm font-bold text-white shadow-sm">
+                          {user?.avatar ? <img src={user.avatar} alt="" className="h-full w-full object-cover" /> : initialsOf(user?.name || user?.email)}
+                        </div>
+                        <div className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 border-white bg-[#34C759]">
+                          <Check size={7} className="text-white" />
+                        </div>
+                      </div>
+                      <div className="flex min-w-0 flex-col">
+                        <span className="truncate text-sm font-semibold leading-tight text-[#1C1C1C]">{user?.name || 'User'}</span>
+                        <span className="mt-0.5 text-[11px] font-bold uppercase tracking-wide text-[#D4A017]">{plan || 'TRIAL'}</span>
+                        <div className="-ml-1.5 mt-1 flex items-center gap-1 rounded px-1.5 py-0.5">
+                          <span className="h-1.5 w-1.5 rounded-full bg-[#34C759]" />
+                          <span className="text-xs text-[#757575]">Online</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="h-px bg-[rgba(0,0,0,0.06)]" />
+                    <div className="py-1">
+                      <button
+                        type="button"
+                        onClick={() => { setCurrentView('settings'); setShowUserDropdown(false); }}
+                        className="flex w-full items-center justify-between px-4 py-2 text-[13px] text-[#1C1C1C] transition-colors hover:bg-[rgba(28,28,28,0.04)]"
+                      >
+                        <span>Edit profile</span>
+                      </button>
+                    </div>
+
+                    <div className="h-px bg-[rgba(0,0,0,0.06)]" />
+                    <div className="py-1">
+                      <button
+                        type="button"
+                        onClick={() => { setCurrentView('billing'); setShowUserDropdown(false); }}
+                        className="flex w-full items-center justify-between px-4 py-2 text-[13px] text-[#1C1C1C] transition-colors hover:bg-[rgba(28,28,28,0.04)]"
+                      >
+                        <span>Upgrade plan</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { window.open('/dashboard', '_blank', 'noopener,noreferrer'); setShowUserDropdown(false); }}
+                        className="flex w-full items-center justify-between px-4 py-2 text-[13px] text-[#1C1C1C] transition-colors hover:bg-[rgba(28,28,28,0.04)]"
+                      >
+                        <span>Customer portal</span>
+                        <ExternalLink size={12} className="text-[#757575]" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowUserDropdownHelp((open) => !open)}
+                        className="flex w-full items-center justify-between px-4 py-2 text-[13px] text-[#1C1C1C] transition-colors hover:bg-[rgba(28,28,28,0.04)]"
+                      >
+                        <span>Help</span>
+                        <ChevronRight size={12} className={`text-[#757575] transition-transform ${showUserDropdownHelp ? 'rotate-90' : ''}`} />
+                      </button>
+                      {showUserDropdownHelp && helpMenuItems.map((entry) => (
+                        <button
+                          key={entry.label}
+                          type="button"
+                          onClick={() => { entry.action(); setShowUserDropdown(false); setShowUserDropdownHelp(false); }}
+                          className="flex w-full items-center px-4 py-2 pl-8 text-[13px] text-[#4A4A4A] transition-colors hover:bg-[rgba(28,28,28,0.04)]"
+                        >
+                          {entry.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="h-px bg-[rgba(0,0,0,0.06)]" />
+                    <div className="py-1">
+                      <button
+                        type="button"
+                        onClick={() => { setShowUserDropdown(false); logout(); }}
+                        className="flex w-full items-center px-4 py-2 text-[13px] text-[#1C1C1C] transition-colors hover:bg-[rgba(28,28,28,0.04)]"
+                      >
+                        Sign out
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </header>
 
@@ -604,7 +721,9 @@ export const WebPremiumShell: React.FC<WebPremiumShellProps> = ({ view, title, c
         onClearAll={clearAllNotifications}
         onDismiss={(item) => dismissNotification(item.id)}
         onNotificationClick={openNotification}
+        onOpenSettings={() => setCurrentView('settings')}
       />
+      <WebAppToast onOpen={openTarget} />
 
       <HelpModalShell open={helpModal === 'update'} title="Remote365 update" onClose={() => setHelpModal(null)}>
         <div className="flex flex-col gap-[22px]">

@@ -6,6 +6,7 @@ import { useChatStore } from '../store/chatStore';
 import { useNotificationStore } from '../store/notificationStore';
 import { describeIncomingMessage } from './chatMessagePreview';
 import { playUISound } from './uiSound';
+import { pushToast } from '../store/toastStore';
 
 // OS-level notification, gated by the same Settings toggles as the desktop
 // (Windows Notification / …for incoming sessions). `silent` because the app
@@ -52,7 +53,7 @@ export function useShellChatEvents(userId: string | undefined) {
           && typeof document !== 'undefined' && document.visibilityState === 'visible'
           && window.location.pathname.startsWith('/dashboard/chat');
         if (!readingIt) {
-          notify(`${info.title}: ${info.preview}`, 'info');
+          pushToast(info.title, info.preview, info.target, info.kind);
           fireBrowserNotification(info.title, info.preview, info.isSessionEvent ? 'session' : 'general', `chat-${conversationId}`);
         }
         playUISound('connect');
