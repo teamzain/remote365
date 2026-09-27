@@ -25,10 +25,16 @@ export default {
       backgroundImage: {
         'primary-gradient': 'linear-gradient(118.29deg, #FF8A00 38.71%, #FFB347 88.95%)',
       },
+      // No `forwards` fill: each animation ends at the element's natural state
+      // anyway, and a filling opacity/transform animation keeps the element a
+      // stacking context (and, for transforms, a containing block) for good.
+      // The dashboard wraps every page in animate-fade-in, which pinned every
+      // modal opened inside a page — even at z-[1000] — underneath the shell's
+      // header, footer and sidebar.
       animation: {
-        'fade-in': 'fadeIn 0.5s ease-out forwards',
-        'slide-in-bottom': 'slideInBottom 0.5s ease-out forwards',
-        'zoom-in': 'zoomIn 0.3s ease-out forwards',
+        'fade-in': 'fadeIn 0.5s ease-out',
+        'slide-in-bottom': 'slideInBottom 0.5s ease-out',
+        'zoom-in': 'zoomIn 0.3s ease-out',
       },
       keyframes: {
         fadeIn: {
