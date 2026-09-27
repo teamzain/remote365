@@ -6,6 +6,8 @@ import {
   ScreenShare, ScreenShareOff, Volume2, User, Info, Pause, Play, Check, Maximize2
 } from 'lucide-react';
 import logo from '../../logo.png';
+import { t } from '../lib/translations';
+import { ScamWarning, useConsentArmDelay } from './modals/ScamWarning';
 
 const formatElapsed = (totalSeconds: number) => {
   const h = Math.floor(totalSeconds / 3600);
@@ -78,6 +80,8 @@ interface SnowMeetingProps {
   hostAccessKey?: string | null;
   devicePassword?: string;
   serverIP?: string;
+  /** App language, for the text this component translates itself (strings that carry a name). */
+  language?: string;
 }
 
 interface MeetingChatMessage {
@@ -115,7 +119,7 @@ const formatMeetingCode = (value: string) => {
   return clean || String(value || '').trim();
 };
 
-export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, claimHost = false, hostAccessKey, devicePassword, serverIP = DEFAULT_SERVER_HOST }) => {
+export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, claimHost = false, hostAccessKey, devicePassword, serverIP = DEFAULT_SERVER_HOST, language }) => {
   const { user } = useAuthStore();
   
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -157,6 +161,7 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
   const lastTypingSentRef = useRef(0);
   const typingClearTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [controlRequest, setControlRequest] = useState<ControlRequest | null>(null);
+  const controlArmSeconds = useConsentArmDelay(controlRequest?.requestId);
   const [controlStatus, setControlStatus] = useState('');
   const [showSecurityPanel, setShowSecurityPanel] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -1215,6 +1220,7 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
 
   const respondToControlRequest = (approved: boolean) => {
     if (!controlRequest || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (approved && controlArmSeconds > 0) return;
     const cleanAccessKey = String(hostAccessKey || '').replace(/\D/g, '');
     if (approved && !cleanAccessKey) {
       setControlStatus('Your device access key is not ready yet.');
@@ -2209,9 +2215,12 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
                   <X size={20} />
                 </button>
               </div>
-              <p className="text-[14px] font-normal leading-5">
-                {controlRequest.requesterName} wants to use your PC.
+              {/* Translated here because the text carries a name, which the
+                  app-wide phrase translator can't match. */}
+              <p className="text-[14px] font-normal leading-5" translate="no">
+                {t('meeting_control_request_body', language).replace('{name}', () => controlRequest.requesterName)}
               </p>
+              <ScamWarning />
               <div className="flex items-center justify-end gap-2 pb-2">
                 <button
                   onClick={() => respondToControlRequest(false)}
@@ -2221,9 +2230,11 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
                 </button>
                 <button
                   onClick={() => respondToControlRequest(true)}
-                  className="flex h-10 w-[124px] items-center justify-center rounded-[32px] bg-gradient-to-r from-[#FF8A00] to-[#FFB347] text-[14px] font-medium text-white transition-all hover:brightness-105"
+                  disabled={controlArmSeconds > 0}
+                  className="flex h-10 w-[124px] items-center justify-center rounded-[32px] bg-gradient-to-r from-[#FF8A00] to-[#FFB347] text-[14px] font-medium text-white transition-all hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100"
                 >
                   Approve
+                  {controlArmSeconds > 0 && <span translate="no">&nbsp;({controlArmSeconds})</span>}
                 </button>
               </div>
             </motion.div>

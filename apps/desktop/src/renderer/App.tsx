@@ -5326,6 +5326,7 @@ export default function App() {
                     hostAccessKey={hostAccessKey}
                     devicePassword={devicePassword}
                     serverIP={serverIP}
+                    language={activeLanguage}
                 />
             </React.Suspense>
         ) : (
@@ -6263,7 +6264,7 @@ export default function App() {
             )}
 
             {/* ── Viewer Access Request Dialog ── */}
-            <ViewerRequestModal state={pendingViewerRequest} setState={setPendingViewerRequest} language={user?.language} />
+            <ViewerRequestModal state={pendingViewerRequest} setState={setPendingViewerRequest} language={activeLanguage} />
 
             <ControlRequestModal state={pendingControlRequest} onClose={() => setPendingControlRequest(null)} />
 

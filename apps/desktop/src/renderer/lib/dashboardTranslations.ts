@@ -8484,5 +8484,27 @@ export const dashboardTranslations: Record<string, Record<Language, string>> = {
         "fr": "Pour confirmer, saisissez \"Delete\" ci-dessous.",
         "es": "Para confirmar, escribe \"Delete\" abajo.",
         "ar-SA": "للتأكيد، اكتب \"Delete\" أدناه."
+    },
+    // Scam warning on incoming-access prompts (components/modals/ScamWarning.tsx).
+    "Only allow people you know and trust": {
+        "en": "Only allow people you know and trust",
+        "de": "Erlauben Sie nur Personen, die Sie kennen und denen Sie vertrauen",
+        "fr": "N’autorisez que des personnes que vous connaissez et en qui vous avez confiance",
+        "es": "Permite solo a personas que conoces y en las que confías",
+        "ar-SA": "اسمح فقط للأشخاص الذين تعرفهم وتثق بهم"
+    },
+    "Scammers pose as Microsoft, a bank, a government office or Remote365 support and ask you to allow a connection. Remote365 will never contact you unexpectedly to ask for access.": {
+        "en": "Scammers pose as Microsoft, a bank, a government office or Remote365 support and ask you to allow a connection. Remote365 will never contact you unexpectedly to ask for access.",
+        "de": "Betrüger geben sich als Microsoft, eine Bank, eine Behörde oder der Remote365-Support aus und bitten Sie, eine Verbindung zu erlauben. Remote365 wird Sie nie unerwartet kontaktieren, um Zugriff zu verlangen.",
+        "fr": "Des escrocs se font passer pour Microsoft, une banque, une administration ou le support Remote365 et vous demandent d’autoriser une connexion. Remote365 ne vous contactera jamais à l’improviste pour demander un accès.",
+        "es": "Los estafadores se hacen pasar por Microsoft, un banco, una oficina del gobierno o el soporte de Remote365 y te piden que permitas una conexión. Remote365 nunca te contactará de forma inesperada para pedirte acceso.",
+        "ar-SA": "ينتحل المحتالون صفة مايكروسوفت أو بنك أو جهة حكومية أو دعم Remote365 ويطلبون منك السماح بالاتصال. لن تتواصل معك Remote365 أبداً بشكل غير متوقع لطلب الوصول."
+    },
+    "If someone contacted you out of the blue, press Deny.": {
+        "en": "If someone contacted you out of the blue, press Deny.",
+        "de": "Wenn Sie jemand unerwartet kontaktiert hat, klicken Sie auf „Ablehnen“.",
+        "fr": "Si quelqu’un vous a contacté à l’improviste, appuyez sur « Refuser ».",
+        "es": "Si alguien te contactó de forma inesperada, pulsa «Denegar».",
+        "ar-SA": "إذا تواصل معك شخص بشكل غير متوقع، فاضغط على «رفض»."
     }
 };

@@ -1517,6 +1517,49 @@ export const translations = {
         "fr": "Refus automatique dans {seconds}s",
         "es": "Denegación automática en {seconds}s"
     },
+    // Incoming-access prompts. {name} is the connecting account's display name.
+    "viewer_request_title_named": {
+        "en": "{name} is requesting to connect",
+        "de": "{name} möchte sich verbinden",
+        "fr": "{name} demande à se connecter",
+        "es": "{name} solicita conectarse",
+        "ar-SA": "يطلب {name} الاتصال"
+    },
+    "viewer_request_title": {
+        "en": "Remote Support Request",
+        "de": "Anfrage für Fernsupport",
+        "fr": "Demande d’assistance à distance",
+        "es": "Solicitud de soporte remoto",
+        "ar-SA": "طلب دعم عن بُعد"
+    },
+    "viewer_request_body_named": {
+        "en": "{name} wants to view and use this PC in a remote support session.",
+        "de": "{name} möchte diesen PC in einer Fernsupport-Sitzung sehen und bedienen.",
+        "fr": "{name} souhaite voir et utiliser ce PC lors d’une session d’assistance à distance.",
+        "es": "{name} quiere ver y usar este PC en una sesión de soporte remoto.",
+        "ar-SA": "يريد {name} عرض هذا الكمبيوتر واستخدامه في جلسة دعم عن بُعد."
+    },
+    "viewer_request_body": {
+        "en": "Someone wants to view and use this PC in a remote support session.",
+        "de": "Jemand möchte diesen PC in einer Fernsupport-Sitzung sehen und bedienen.",
+        "fr": "Quelqu’un souhaite voir et utiliser ce PC lors d’une session d’assistance à distance.",
+        "es": "Alguien quiere ver y usar este PC en una sesión de soporte remoto.",
+        "ar-SA": "يريد شخص ما عرض هذا الكمبيوتر واستخدامه في جلسة دعم عن بُعد."
+    },
+    "viewer_request_trust_named": {
+        "en": "Always Allow {name} Without Asking",
+        "de": "{name} immer ohne Nachfrage erlauben",
+        "fr": "Toujours autoriser {name} sans demander",
+        "es": "Permitir siempre a {name} sin preguntar",
+        "ar-SA": "السماح دائماً لـ {name} دون سؤال"
+    },
+    "meeting_control_request_body": {
+        "en": "{name} wants to use your PC.",
+        "de": "{name} möchte Ihren PC verwenden.",
+        "fr": "{name} souhaite utiliser votre PC.",
+        "es": "{name} quiere usar tu PC.",
+        "ar-SA": "يريد {name} استخدام جهاز الكمبيوتر الخاص بك."
+    },
     "new_connection_request": {
         "en": "Connection Request",
         "de": "Verbindungsanfrage",
