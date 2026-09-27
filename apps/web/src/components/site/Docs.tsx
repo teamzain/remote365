@@ -371,6 +371,11 @@ const Docs: React.FC = () => {
                 ))}
               </section>
             ))}
+            {/* Rare UI's licence asks for a visible link to rareui.com
+                wherever its code ships; here that is the HookSidebar above. */}
+            <p className="doc-credit">
+              Docs navigation by <a href="https://rareui.com" target="_blank" rel="noopener">Rare UI</a>.
+            </p>
           </article>
         </main>
 
@@ -544,6 +549,14 @@ const Docs: React.FC = () => {
             border-left-color: rgba(26, 29, 33, 0.35);
             color: rgba(26, 29, 33, 0.8);
           }
+          .doc-credit {
+            margin: 0;
+            font-size: 13px;
+            line-height: 20px;
+            color: rgba(26, 29, 33, 0.5);
+          }
+          .doc-credit a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+          .doc-credit a:hover { color: #FF8A00; }
 
           @media (max-width: 860px) {
             .doc-main { flex-direction: column; gap: 24px; }

@@ -4,7 +4,8 @@
 // `npx shadcn add swamimalode07/rare-ui/hook-sidebar`).
 // Copyright (c) 2026 Swami Malode. MIT + Commons Clause + Attribution:
 // https://github.com/swamimalode07/rare-ui/blob/main/LICENSE — this credit and
-// the notice must stay, and the site links to rareui.com (footer credits).
+// the notice must stay, and the site links to rareui.com (the credit at the
+// end of the docs in Docs.tsx, the one page that uses this component).
 //
 // A list whose active row is marked by a dashed rail that runs down from the
 // top and hooks into it; hovering another row draws a faint rail to that row
