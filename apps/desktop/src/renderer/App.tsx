@@ -507,28 +507,24 @@ export default function App() {
         const cleanCode = String(code || '').replace(/\D/g, '');
         if (!cleanCode) return;
 
-        // Support-session codes are unique per session (not device IDs). Try the
-        // session join first: on success THIS machine becomes the host and the
-        // session creator is notified to connect here. Unknown codes fall back to
-        // the classic direct device connect below.
+        // Support-session codes are unique per session (not device IDs). A
+        // session shares its CREATOR's computer: the join hands back a token
+        // for that machine and the viewer opens straight away. Unknown codes
+        // fall back to the classic direct device connect below.
         if (isAuthenticated && !password) {
             try {
-                // Probe without a device key first: validates the code is a real
-                // session (404 falls through to device connect) without notifying.
-                await api.post('/api/chat/remote-sessions/join', { code: cleanCode });
-                // Register this machine as a host BEFORE completing the join — the
-                // full join makes the session creator auto-connect here, so the
-                // signaling registration must already exist or they hit
-                // "Session Not Found".
-                await handleStartHosting();
-                const { data } = await api.post('/api/chat/remote-sessions/join', {
-                    code: cleanCode,
-                    deviceAccessKey: String(localAuthKey || '').replace(/\D/g, '') || undefined,
-                    deviceName: localStorage.getItem('remote365_device_name') || undefined
-                });
-                const supporter = data?.creatorName || 'The Supporter';
-                addNotification(`You're in "${data?.session?.name || 'the support session'}". ${supporter} can connect to this computer whenever they're ready.`, 'session', 'Session Joined');
-                pushSlidingToast('Session Joined', `Waiting for ${supporter} to start the remote session.`, undefined, 'accepted');
+                const { data } = await api.post('/api/chat/remote-sessions/join', { code: cleanCode });
+                const hostKey = String(data?.hostAccessKey || '').replace(/\D/g, '');
+                if (!data?.token || !hostKey) throw new Error('The session did not return access to the remote computer.');
+                const creator = data?.creatorName || 'the session creator';
+                addNotification(`Connecting to ${data?.hostName || `${creator}'s computer`} for "${data?.session?.name || 'the support session'}".`, 'session', 'Session Joined');
+                if ((window as any).electronAPI?.openViewerWindow) {
+                    await (window as any).electronAPI.openViewerWindow(hostKey, serverIP, data.token, data?.hostName || creator, 'desktop');
+                } else {
+                    setSessionCode(formatCode(hostKey));
+                    setViewerError('');
+                    setCurrentView('connect');
+                }
                 return;
             } catch (err: any) {
                 // 404 = not a session code; anything else surfaces to the device flow too.
@@ -538,6 +534,10 @@ export default function App() {
                         showError('Could Not Join Session', message);
                         return;
                     }
+                }
+                if (!err?.response) {
+                    showError('Could Not Join Session', err?.message || 'Could not open the session.');
+                    return;
                 }
             }
         }
@@ -671,36 +671,18 @@ export default function App() {
             onSessionInvite: (invite) => {
                 const senderName = invite?.senderName || 'Someone';
                 if (invite?.type === 'SESSION_JOINED') {
-                    // Someone joined a session we created: their PC is now hosting and
-                    // we hold an access grant — open the viewer straight to their machine.
+                    // Someone used the code of a session we created: they are
+                    // connecting to THIS computer. The host side takes over from
+                    // here (screen share, then the control prompt); this only tells
+                    // the user who is coming in and updates the session list.
                     const joinerName = invite?.joinerName || senderName;
-                    // Close any creator-side waiting room — the session is starting.
-                    window.dispatchEvent(new CustomEvent('remote365:session-joined', { detail: { sessionId: invite?.sessionId } }));
-                    addNotification(`${joinerName} joined "${invite?.sessionName || 'your session'}". Connecting to their computer now.`, 'accepted', 'Session Joined');
-                    pushSlidingToast('Session Joined', `${joinerName} is in. Connecting to their computer now.`, undefined, 'accepted');
-                    fireNotification('Session Joined', `${joinerName} joined your session. Connecting now.`, 'session');
+                    const expected = invite?.invited ? ' (the person you invited)' : '';
+                    window.dispatchEvent(new CustomEvent('remote365:session-joined', { detail: { sessionId: invite?.sessionId, joinerName } }));
+                    window.dispatchEvent(new CustomEvent('remote365:remote-sessions-changed'));
+                    addNotification(`${joinerName}${expected} joined "${invite?.sessionName || 'your session'}" and is connecting to this computer.`, 'accepted', 'Session Joined');
+                    pushSlidingToast('Session Joined', `${joinerName}${expected} is connecting to this computer.`, undefined, 'accepted');
+                    fireNotification('Session Joined', `${joinerName} joined your session and is connecting to this computer.`, 'session');
                     playUISound('connect');
-                    (async () => {
-                        try {
-                            if (!invite?.grantId || !invite?.joinerDeviceKey) return;
-                            // Brief buffer so the joiner's host registration settles
-                            // across services before the viewer connects.
-                            await new Promise((resolve) => setTimeout(resolve, 1200));
-                            const { data } = await api.post(`/api/chat/remote-access-grants/${invite.grantId}/token`);
-                            if ((window as any).electronAPI?.openViewerWindow) {
-                                await (window as any).electronAPI.openViewerWindow(
-                                    String(invite.joinerDeviceKey),
-                                    serverIP,
-                                    data.token,
-                                    invite?.joinerDeviceName || joinerName,
-                                    'desktop'
-                                );
-                            }
-                        } catch (err: any) {
-                            console.error('[Session] Auto-connect to joiner failed:', err);
-                            addNotification(err?.response?.data?.error || "Couldn't connect to their computer automatically. Open the session and try again.", 'system', 'Connection Failed');
-                        }
-                    })();
                     return;
                 }
                 if (invite?.type === 'VIDEO_MEETING') {
@@ -3420,7 +3402,7 @@ export default function App() {
 
     const [deviceId, setDeviceId] = useState('');
     const [pendingViewerRequest, setPendingViewerRequest] = useState<{ viewerId: string; countdown: number; trustDevice?: boolean; viewerName?: string } | null>(null);
-    const [pendingControlRequest, setPendingControlRequest] = useState<{ viewerId: string; countdown: number; viewerName?: string } | null>(null);
+    const [pendingControlRequest, setPendingControlRequest] = useState<{ viewerId: string; countdown: number; viewerName?: string; invited?: boolean } | null>(null);
 
 
     const [lockoutSeconds, setLockoutSeconds] = useState(0);
@@ -3499,7 +3481,7 @@ export default function App() {
         const unsubCancel = eAPI.onViewerRequestCancelled?.((data: { viewerId: string }) => {
             setPendingViewerRequest(prev => prev?.viewerId === data.viewerId ? null : prev);
         });
-        const unsubControl = eAPI.onControlRequest?.((data: { viewerId: string; viewerName?: string }) => {
+        const unsubControl = eAPI.onControlRequest?.((data: { viewerId: string; viewerName?: string; invited?: boolean }) => {
             if (!data.viewerId) return;
             // A — Control permission mode (Settings → Remote control).
             const controlMode = localStorage.getItem('pref_control_mode') || 'ask';
@@ -3512,7 +3494,7 @@ export default function App() {
                 eAPI.approveControl?.(data.viewerId);
                 return;
             }
-            setPendingControlRequest({ viewerId: data.viewerId, viewerName: data.viewerName || '', countdown: 20 });
+            setPendingControlRequest({ viewerId: data.viewerId, viewerName: data.viewerName || '', invited: data.invited === true, countdown: 20 });
             playUISound('connect');
         });
         // The centred consent window is the prompt the host actually sees; when

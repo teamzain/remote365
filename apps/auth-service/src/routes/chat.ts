@@ -68,10 +68,15 @@ const decorateRemoteSession = (session: any) => {
   // TTL bounds how long an UNUSED link can be joined, not how long a call may
   // run. Only an unused (ACTIVE) link expires.
   const isExpired = session.status !== 'IN_PROGRESS' && expiresAt.getTime() <= Date.now();
+  // Who took the seat (support sessions): the collaborator that joined.
+  const joined = Array.isArray(session.collaborators)
+    ? session.collaborators.find((c: any) => c?.status === 'JOINED' || (session.joinedById && c?.userId === session.joinedById))
+    : null;
   return {
     ...session,
     expiresAt,
     isExpired,
+    joinedByName: joined ? (joined.user?.name || joined.name || joined.user?.email || joined.email || null) : null,
     status: isExpired && session.status === 'ACTIVE' ? 'EXPIRED' : session.status
   };
 };
@@ -691,7 +696,7 @@ export default async function chatRoutes(fastify: FastifyInstance) {
   // the invite is stored as a structured chat message so it appears instantly.
   fastify.post('/session-invites', async (request: FastifyRequest, reply: FastifyReply) => {
     const userId = (request as any).userId;
-    const { email, conversationId, sessionName, sessionCode, sessionPassword, sessionLink, type } = request.body as {
+    const { email, conversationId, sessionName, sessionCode, sessionPassword, sessionLink, type, hostAccessKey } = request.body as {
       email?: string;
       conversationId?: string;
       sessionName: string;
@@ -699,6 +704,8 @@ export default async function chatRoutes(fastify: FastifyInstance) {
       sessionPassword?: string;
       sessionLink: string;
       type?: string;
+      /** The creator's own device: the computer this session shares (support sessions). */
+      hostAccessKey?: string;
     };
 
     const sessionType = type || 'REMOTE_CONTROL';
@@ -708,6 +715,24 @@ export default async function chatRoutes(fastify: FastifyInstance) {
       ? normalizeMeetingCode(sessionCode)
       : String(sessionCode || '').replace(/\s/g, '');
     const cleanName = (sessionName || 'Remote support session').trim();
+
+    // A support session shares the CREATOR's computer. The desktop app sends
+    // the device it runs on; a Chat invite from an older build sends that
+    // device as the session code itself. Either way the device must belong to
+    // the creator, so a code can never hand out someone else's machine.
+    let cleanHostKey = '';
+    if (sessionType === 'REMOTE_CONTROL') {
+      const candidateKey = String(hostAccessKey || '').replace(/\D/g, '') || (cleanCode.length === 9 ? cleanCode : '');
+      if (candidateKey) {
+        const hostDevice = await (prisma as any).device.findUnique({ where: { accessKey: candidateKey }, select: { ownerId: true } });
+        if (!hostDevice || hostDevice.ownerId !== userId) {
+          return reply.code(403).send({ error: 'A session can only share a computer that is registered to your account.' });
+        }
+        cleanHostKey = candidateKey;
+      } else if (!conversationId) {
+        return reply.code(400).send({ error: 'Create the session from the Remote365 desktop app on the computer you want to share.' });
+      }
+    }
 
     // Remote-control sessions get a fresh unique 9-digit code per session
     // (meeting-style) instead of reusing the creator's device ID, and they
@@ -822,6 +847,7 @@ export default async function chatRoutes(fastify: FastifyInstance) {
           conversationId: conversationId || null,
           createdById: userId,
           type: sessionType,
+          hostAccessKey: cleanHostKey || null,
           expiresAt: new Date(Date.now() + getRemoteSessionTtl(sessionType)),
           collaborators: {
             create: collaboratorUsers.map((collaborator: any) => ({
@@ -1163,24 +1189,25 @@ export default async function chatRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // Join a support session by its unique code. The JOINER's machine becomes the
-  // host: we record them as a collaborator, mint an access grant for the session
-  // CREATOR against the joiner's device, and notify the creator in-app so their
-  // client can auto-connect (reverse-control support flow, passwordless).
+  // Use a support session by its code. The session shares the CREATOR's
+  // computer: the joiner gets a remote-access token for that device and opens
+  // the viewer (desktop or web); nothing is minted against the joiner's own
+  // machine. A code works once: the first account to use it takes the seat,
+  // and only that account can reconnect with it while the session is live.
   fastify.post('/remote-sessions/join', async (request: FastifyRequest, reply: FastifyReply) => {
     const userId = (request as any).userId;
-    const { code, deviceAccessKey, deviceName } = request.body as {
-      code: string; deviceAccessKey?: string; deviceName?: string;
-    };
+    const { code } = request.body as { code: string };
     const cleanCode = String(code || '').replace(/\D/g, '');
-    const cleanDeviceKey = String(deviceAccessKey || '').replace(/\D/g, '');
     if (!cleanCode) return reply.code(400).send({ error: 'Session code is required' });
 
     try {
       const session = await (prisma as any).remoteSession.findFirst({
         where: { sessionCode: cleanCode, type: 'REMOTE_CONTROL', status: 'ACTIVE', joinLink: { not: null } },
         orderBy: { createdAt: 'desc' },
-        include: { createdBy: { select: { id: true, name: true, email: true } } }
+        include: {
+          createdBy: { select: { id: true, name: true, email: true } },
+          collaborators: { select: { userId: true, email: true, status: true } }
+        }
       });
       if (!session) return reply.code(404).send({ error: 'No active session was found for this code' });
       const sessionExpiresAt = getRemoteSessionExpiresAt(session);
@@ -1188,7 +1215,13 @@ export default async function chatRoutes(fastify: FastifyInstance) {
         return reply.code(410).send({ error: 'This session has expired' });
       }
       if (session.createdById === userId) {
-        return reply.code(400).send({ error: 'You created this session — share the code with the person who needs support' });
+        return reply.code(400).send({ error: 'This is your own session. Share the code with the person who should use this computer.' });
+      }
+      if (!session.hostAccessKey) {
+        return reply.code(409).send({ error: 'This session was created with an older version of Remote365. Ask them to create a new one.' });
+      }
+      if (session.joinedById && session.joinedById !== userId) {
+        return reply.code(409).send({ error: 'This code has already been used by someone else. Ask for a new session.' });
       }
 
       const joiner = await (prisma as any).user.findUnique({
@@ -1196,78 +1229,98 @@ export default async function chatRoutes(fastify: FastifyInstance) {
       });
       if (!joiner) return reply.code(403).send({ error: 'Sign in to join a session' });
 
-      // Record the joiner as a collaborator on the session.
+      // Invited = the creator typed this account's email when creating the
+      // session. The host's control prompt treats them as expected.
+      const joinerEmail = String(joiner.email || '').toLowerCase();
+      const invited = (session.collaborators || []).some((c: any) =>
+        (c.userId && c.userId === userId) || (c.email && String(c.email).toLowerCase() === joinerEmail)
+      );
+
+      const hostDevice = await (prisma as any).device.findUnique({
+        where: { accessKey: session.hostAccessKey },
+        select: { name: true, ownerId: true }
+      });
+      if (!hostDevice || (session.createdById && hostDevice.ownerId !== session.createdById)) {
+        return reply.code(409).send({ error: 'The computer this session shares is no longer registered to its creator.' });
+      }
+
+      const now = new Date();
       await (prisma as any).remoteSessionCollaborator.upsert({
         where: { sessionId_email: { sessionId: session.id, email: joiner.email } },
-        update: { status: 'JOINED', joinedAt: new Date(), userId: joiner.id, name: joiner.name || null },
-        create: { sessionId: session.id, userId: joiner.id, email: joiner.email, name: joiner.name || null, status: 'JOINED', joinedAt: new Date() }
+        update: { status: 'JOINED', joinedAt: now, userId: joiner.id, name: joiner.name || null },
+        create: { sessionId: session.id, userId: joiner.id, email: joiner.email, name: joiner.name || null, status: 'JOINED', joinedAt: now }
       });
+      if (!session.joinedById) {
+        await (prisma as any).remoteSession.update({
+          where: { id: session.id },
+          data: { joinedById: userId, joinedAt: now }
+        });
+      }
 
-      // The creator connects TO the joiner's machine, so a device key is required
-      // to mint the access grant. Ensure the device row exists (host bootstrap).
-      let grant = null;
-      if (cleanDeviceKey && session.createdById) {
-        const existingDevice = await (prisma as any).device.findUnique({ where: { accessKey: cleanDeviceKey }, select: { id: true, ownerId: true } });
-        if (!existingDevice) {
-          await (prisma as any).device.create({ data: { accessKey: cleanDeviceKey, ownerId: userId, name: deviceName || null } });
-        } else if (!existingDevice.ownerId) {
-          await (prisma as any).device.update({ where: { id: existingDevice.id }, data: { ownerId: userId } });
-        }
-
-        const requestId = `sessjoin-${session.id}-${userId}`;
-        const grantExpiresAt = new Date(Math.min(sessionExpiresAt.getTime(), Date.now() + 8 * 60 * 60 * 1000));
-        const existingGrant = await (prisma as any).remoteSession.findUnique({ where: { requestId } });
-        if (existingGrant) {
-          grant = await (prisma as any).remoteSession.update({
+      // The access grant for the creator's device. It lives as long as the
+      // session so a reconnect later in the day still works.
+      const requestId = `sessjoin-${session.id}-${userId}`;
+      const existingGrant = await (prisma as any).remoteSession.findUnique({ where: { requestId } });
+      const grant = existingGrant
+        ? await (prisma as any).remoteSession.update({
             where: { id: existingGrant.id },
-            data: { status: 'ACTIVE', sessionCode: cleanDeviceKey, expiresAt: grantExpiresAt, endedAt: null }
-          });
-        } else {
-          grant = await (prisma as any).remoteSession.create({
+            data: { status: 'ACTIVE', sessionCode: session.hostAccessKey, expiresAt: sessionExpiresAt, endedAt: null }
+          })
+        : await (prisma as any).remoteSession.create({
             data: {
               requestId,
               name: `${session.name || 'Support session'} access`,
-              sessionCode: cleanDeviceKey,
-              createdById: userId,
+              sessionCode: session.hostAccessKey,
+              createdById: session.createdById,
               type: 'REMOTE_CONTROL',
               status: 'ACTIVE',
-              expiresAt: grantExpiresAt,
+              expiresAt: sessionExpiresAt,
               collaborators: {
-                create: [{ userId: session.createdById, email: session.createdBy?.email || '', name: session.createdBy?.name || null, status: 'APPROVED' }]
+                create: [{ userId: joiner.id, email: joiner.email, name: joiner.name || null, status: 'APPROVED' }]
               }
             }
           });
-        }
 
-        // Live-notify the session creator so their app can open the viewer.
-        await redisPublisher.publish('chat:session-invite', JSON.stringify({
-          type: 'chat-session-invite',
-          invite: {
-            type: 'SESSION_JOINED',
-            sessionId: session.id,
-            sessionName: session.name,
-            sessionCode: session.sessionCode,
-            grantId: grant.id,
-            joinerName: joiner.name || joiner.email,
-            joinerDeviceKey: cleanDeviceKey,
-            joinerDeviceName: deviceName || null,
-            senderName: joiner.name || joiner.email,
-            createdAt: new Date().toISOString()
-          },
-          targetUserIds: [session.createdById]
-        }));
-        await redisPublisher.publish('account:sync', JSON.stringify({
-          targetUserIds: [session.createdById, userId],
-          scope: 'remote-sessions',
-          event: 'joined',
-          entityId: session.id
-        }));
-      }
+      const remainingSeconds = Math.max(60, Math.floor((sessionExpiresAt.getTime() - Date.now()) / 1000));
+      const token = generateToken({
+        type: 'remote-access',
+        accessKey: session.hostAccessKey,
+        viewerUserId: userId,
+        remoteSessionId: grant.id,
+        grantExpiresAt: sessionExpiresAt.toISOString(),
+        isTrusted: true,
+        passwordVerified: true,
+        // The creator still decides about keyboard and mouse at their PC; the
+        // invited flag only tells that prompt this is the person they asked for.
+        unattended: false,
+        invited
+      }, remainingSeconds);
+
+      // Tell the creator who is coming in, and refresh both session lists.
+      await redisPublisher.publish('chat:session-invite', JSON.stringify({
+        type: 'chat-session-invite',
+        invite: {
+          type: 'SESSION_JOINED',
+          sessionId: session.id,
+          sessionName: session.name,
+          sessionCode: session.sessionCode,
+          joinerName: joiner.name || joiner.email,
+          invited,
+          senderName: joiner.name || joiner.email,
+          createdAt: now.toISOString()
+        },
+        targetUserIds: [session.createdById]
+      }));
+      await publishAccountSync([session.createdById, userId], 'remote-sessions', 'joined', session.id);
 
       return reply.send({
         session: decorateRemoteSession(session),
-        creatorName: session.createdBy?.name || session.createdBy?.email || 'The supporter',
-        grantId: grant?.id || null
+        creatorName: session.createdBy?.name || session.createdBy?.email || 'The session creator',
+        hostAccessKey: session.hostAccessKey,
+        hostName: hostDevice.name || session.createdBy?.name || 'Remote computer',
+        token,
+        expiresAt: sessionExpiresAt.toISOString(),
+        invited
       });
     } catch (err) {
       console.error('[Chat API] Failed to join remote session', err);
@@ -1393,8 +1446,17 @@ export default async function chatRoutes(fastify: FastifyInstance) {
           createdBy: { select: { id: true, name: true, email: true } }
         }
       });
+      // Closing the session also revokes the access it handed out: the joiner's
+      // token stops working at signaling on their next connect.
+      await (prisma as any).remoteSession.updateMany({
+        where: { requestId: { startsWith: `sessjoin-${id}-` }, status: 'ACTIVE' },
+        data: { status: 'ENDED', endedAt: new Date() }
+      });
 
-      await publishAccountSync([userId], 'remote-sessions', 'ended', id);
+      await publishAccountSync(
+        [userId, ...(updated.collaborators || []).map((c: any) => c.userId)],
+        'remote-sessions', 'ended', id
+      );
       return reply.send(decorateRemoteSession(updated));
     } catch (err) {
       console.error('[Chat API] Failed to close remote session', err);

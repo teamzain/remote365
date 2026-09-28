@@ -324,6 +324,67 @@ function clearViewerExpiryTimers(connectionId: string) {
   viewerExpiryTimers.delete(connectionId);
 }
 
+// Support sessions (Quick Connect -> Sessions) share the creator's computer.
+// The grant the joiner connects with is tied to the session through its
+// requestId (`sessjoin-<sessionId>-<joinerUserId>`). When the joiner's socket
+// goes away the session ends after a short grace period, so a blip in the
+// connection can be resumed but a finished session drops off both lists.
+const SUPPORT_SESSION_END_GRACE_MS = 90_000;
+const supportSessionEndTimers = new Map<string, NodeJS.Timeout>();
+
+function parseSupportGrantRequestId(requestId: unknown): { sessionId: string; joinerUserId: string } | null {
+  const match = /^sessjoin-(.+)-([^-]+(?:-[^-]+){4})$/.exec(String(requestId || ''));
+  if (!match) return null;
+  return { sessionId: match[1], joinerUserId: match[2] };
+}
+
+function cancelSupportSessionEnd(grantId: string) {
+  const timer = supportSessionEndTimers.get(grantId);
+  if (timer) {
+    clearTimeout(timer);
+    supportSessionEndTimers.delete(grantId);
+  }
+}
+
+function scheduleSupportSessionEnd(grantId: string) {
+  cancelSupportSessionEnd(grantId);
+  supportSessionEndTimers.set(grantId, setTimeout(() => {
+    supportSessionEndTimers.delete(grantId);
+    // Someone reconnected with the same grant in the meantime: still live.
+    for (const activeGrantId of viewerGrantIds.values()) {
+      if (activeGrantId === grantId) return;
+    }
+    void endSupportSessionForGrant(grantId, 'viewer-left');
+  }, SUPPORT_SESSION_END_GRACE_MS));
+}
+
+async function endSupportSessionForGrant(grantId: string, reason: string) {
+  try {
+    const grant = await (prisma as any).remoteSession.findUnique({ where: { id: grantId }, select: { id: true, requestId: true, status: true } });
+    const link = parseSupportGrantRequestId(grant?.requestId);
+    if (!link) return;
+    const now = new Date();
+    if (grant.status === 'ACTIVE') {
+      await (prisma as any).remoteSession.updateMany({ where: { id: grantId, status: 'ACTIVE' }, data: { status: 'ENDED', endedAt: now } });
+    }
+    const session = await (prisma as any).remoteSession.findUnique({ where: { id: link.sessionId }, select: { id: true, status: true, createdById: true } });
+    if (!session || session.status !== 'ACTIVE') return;
+    await (prisma as any).remoteSession.updateMany({ where: { id: session.id, status: 'ACTIVE' }, data: { status: 'ENDED', endedAt: now } });
+    console.log(`[Signaling] Support session ${session.id} ended (${reason}).`);
+    const targetUserIds = Array.from(new Set([session.createdById, link.joinerUserId].filter(Boolean))) as string[];
+    await redisPublisher.publish('account:sync', JSON.stringify({
+      type: 'account-sync',
+      scope: 'remote-sessions',
+      action: 'ended',
+      entityId: session.id,
+      targetUserIds,
+      changedAt: now.toISOString()
+    }));
+  } catch (err) {
+    console.warn('[Signaling] Could not end the support session for grant', grantId, err);
+  }
+}
+
 async function expireRemoteGrantById(grantId: string) {
   const grant = await (prisma as any).remoteSession.findUnique({ where: { id: grantId } });
   if (grant?.status === 'ACTIVE') {
@@ -1363,6 +1424,7 @@ async function startServer() {
                 break;
               }
               viewerGrantIds.set(connectionId, grant.id);
+              cancelSupportSessionEnd(grant.id);
             }
 
             const hostId = sessionRegistry.get(targetSessionId);
@@ -1444,6 +1506,8 @@ async function startServer() {
                   // Relayed verbatim from the access token; the host decides
                   // whether the session opens in control or view-only.
                   unattended: Boolean(decoded.unattended),
+                  // Support session: the creator invited this account by email.
+                  invited: Boolean(decoded.invited),
                   viewerClientKind: String(data.clientKind || ''),
                   iceServers: createMeetingIceServers(`host:${targetSessionId}`),
                   remoteSessionId: decoded.remoteSessionId,
@@ -2281,7 +2345,9 @@ async function startServer() {
           }
         }
         viewerRegistry.delete(connectionId);
+        const leavingGrantId = viewerGrantIds.get(connectionId);
         viewerGrantIds.delete(connectionId);
+        if (leavingGrantId) scheduleSupportSessionEnd(leavingGrantId);
         clearViewerExpiryTimers(connectionId);
         if (sessionId) void releaseDeviceSession(sessionId, connectionId);
         broadcastGlobalStats();

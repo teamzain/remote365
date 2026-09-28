@@ -35,6 +35,33 @@ export const WebRemoteSupport: React.FC<{ devices?: HostDevice[]; onDevicesChang
   const [connectPassword, setConnectPassword] = useState('');
   const [pendingDeviceName, setPendingDeviceName] = useState<string | null>(null);
 
+  // Support session code -> the creator's computer opens in the viewer.
+  const runSessionJoin = async (code: string) => {
+    const cleanCode = String(code || '').replace(/\D/g, '');
+    if (!cleanCode) return;
+    setIsConnecting(true);
+    setConnectError(null);
+    try {
+      const { data } = await api.post('/api/chat/remote-sessions/join', { code: cleanCode });
+      const hostKey = String(data?.hostAccessKey || '').replace(/\D/g, '');
+      if (!data?.token || !hostKey) throw new Error('The session did not return access to the remote computer.');
+      recordRecentConnection(hostKey, data?.hostName);
+      openSessionTab(hostKey, { accessToken: data.token, deviceName: data?.hostName, accessKey: hostKey });
+    } catch (error: any) {
+      if (error?.response?.status === 404) {
+        // Not a session code: maybe a device ID typed into the wrong box.
+        setIsConnecting(false);
+        await runConnect(cleanCode);
+        return;
+      }
+      const msg = error?.response?.data?.error || error?.message || 'Could not join this session.';
+      setConnectError(msg);
+      notify(msg, 'error');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
   const runConnect = async (accessKey: string, password?: string) => {
     const cleanKey = String(accessKey || '').replace(/\D/g, '');
     if (!cleanKey) return;
@@ -87,11 +114,10 @@ export const WebRemoteSupport: React.FC<{ devices?: HostDevice[]; onDevicesChang
         onStartHosting={() => notify('Hosting a screen requires the desktop app.', 'info')}
         onStopHosting={() => {}}
         onJoinMeeting={() => navigate('/dashboard/meetings')}
-        // A session code is not a device ID: joining means sharing THIS computer
-        // with the supporter, which needs the desktop app. The join page hands
-        // off to it (runConnect used to look the code up as a device and fail
-        // with "Device not found").
-        onJoinSessionInvite={(code: string) => navigate(`/join/${String(code || '').replace(/\D/g, '')}`)}
+        // A session code shares its creator's computer: the join hands back a
+        // token for that machine and the browser viewer opens with it. Codes
+        // the server does not know are tried as a device ID (Quick Connect).
+        onJoinSessionInvite={(code: string) => runSessionJoin(code)}
         onHostOwnSession={() => notify('Open this session from the desktop app to host.', 'info')}
       />
 

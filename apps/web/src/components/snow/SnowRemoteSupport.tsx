@@ -105,9 +105,19 @@ export const SnowRemoteSupport: React.FC<SnowRemoteSupportProps> = ({
   const [waitingSession, setWaitingSession] = useState<any | null>(null);
 
   useEffect(() => {
-    const onJoined = () => setWaitingSession(null);
+    // Someone used the code: the status panel switches from "waiting" to who
+    // is connected, and the list refreshes with the joined state.
+    const onJoined = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      setWaitingSession((current: any) => {
+        if (!current || (detail.sessionId && current.id !== detail.sessionId)) return current;
+        return { ...current, joinedByName: detail.joinerName || current.joinedByName || 'Someone' };
+      });
+      fetchRemoteSessions({ silent: true });
+    };
     window.addEventListener('remote365:session-joined', onJoined);
     return () => window.removeEventListener('remote365:session-joined', onJoined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [showInviteActions, setShowInviteActions] = useState(false);
   const [showJoinSessionModal, setShowJoinSessionModal] = useState(false);
@@ -273,9 +283,8 @@ export const SnowRemoteSupport: React.FC<SnowRemoteSupportProps> = ({
       onJoinMeeting?.(formatId(code));
       return;
     }
-    // Creator clicking their own session: open the waiting room — it converts
-    // into the live remote session automatically when someone joins.
-    // (Legacy device-code sessions still self-host.)
+    // The creator's own session shares the computer it was created on: their
+    // row opens the status panel (waiting, or who is connected).
     if (session.createdById && user?.id && session.createdById === user.id) {
       if (code === sessionCode) {
         onHostOwnSession?.(session);
@@ -284,7 +293,15 @@ export const SnowRemoteSupport: React.FC<SnowRemoteSupportProps> = ({
       setWaitingSession(session);
       return;
     }
+    // Anyone else: connect to the creator's computer.
     onJoinSessionInvite?.(code);
+  };
+  const isOwnSession = (session: any) => Boolean(session?.createdById && user?.id && session.createdById === user.id);
+  const sessionJoinedBy = (session: any): string => {
+    if (session?.joinedByName) return String(session.joinedByName);
+    const list = Array.isArray(session?.collaborators) ? session.collaborators : [];
+    const joined = list.find((c: any) => c?.status === 'JOINED');
+    return joined ? String(joined.user?.name || joined.name || joined.user?.email || joined.email || '') : '';
   };
 
   const hasLoadedSessionsOnce = useRef(false);
@@ -438,12 +455,14 @@ export const SnowRemoteSupport: React.FC<SnowRemoteSupportProps> = ({
     setSessionInviteStatus('sending');
     setSessionInviteMessage('');
     try {
-      // The server issues a fresh unique session code (meeting-style) — this
-      // device's ID is no longer used, and the session is passwordless. The
-      // person who JOINS with the code becomes the host of the session.
+      // A session shares the computer it is created on. A browser has no
+      // screen to share, so this only works from the desktop app.
+      const hostKey = String(localAuthKey || '').replace(/\D/g, '');
+      if (!hostKey) throw new Error('Create the session from the Remote365 desktop app on the computer you want to share. From here you can use a code someone gave you.');
       const { data } = await api.post('/api/chat/session-invites', {
         email: sessionEmail.trim() || undefined,
-        sessionName
+        sessionName,
+        hostAccessKey: hostKey
       });
       if (data?.remoteSession) {
         setRemoteSessions((prev) => [data.remoteSession, ...prev.filter((session) => session.id !== data.remoteSession.id)]);
@@ -455,9 +474,9 @@ export const SnowRemoteSupport: React.FC<SnowRemoteSupportProps> = ({
       setSessionInviteMessage(
         hasEmail
           ? isExistingUser
-            ? `Session ${newCode} created. Invite email sent and the recipient was notified in-app.`
-            : `Session ${newCode} created. Invite email sent with an install link.`
-          : `Session ${newCode} created. Share the code — when they join, you'll connect to their PC automatically.`
+            ? `Session ${newCode} created. Invite email sent and the recipient was notified in-app. When they use the code, they connect to this computer.`
+            : `Session ${newCode} created. Invite email sent with an install link. When they use the code, they connect to this computer.`
+          : `Session ${newCode} created. Share the code — whoever uses it connects to this computer.`
       );
       setShowAddSessionModal(false);
       setShowInviteActions(false);
@@ -797,8 +816,8 @@ export const SnowRemoteSupport: React.FC<SnowRemoteSupportProps> = ({
                     <h2 className="mt-6 text-[22px] font-medium leading-[30px] text-[#000000] dark:text-[#F5F5F5]">
                       {tx('No Active Sessions')}
                     </h2>
-                    <p className="mt-2 text-[14px] font-normal leading-5 text-[#1A1D21] dark:text-[#D1D1D1]">
-                      {tx('Once you start a remote session, it will appear here.')}
+                    <p className="mt-2 max-w-[520px] text-[14px] font-normal leading-5 text-[#1A1D21] dark:text-[#D1D1D1]">
+                      {tx('Enter a code you were given to use that computer from this browser. To share your own computer, create the session in the desktop app.')}
                     </p>
                     <div className="mt-7 flex w-full flex-col items-center justify-center gap-4 sm:flex-row sm:gap-8">
                       <button
@@ -823,7 +842,7 @@ export const SnowRemoteSupport: React.FC<SnowRemoteSupportProps> = ({
                       <div>
                         <h2 className="text-[22px] font-medium leading-[30px] text-[#000000] dark:text-[#F5F5F5]">{tx('Sessions')}</h2>
                         <p className="mt-1 text-[14px] font-normal leading-5 text-[#1A1D21]/70 dark:text-[#D1D1D1]">
-                          {tx('Created sessions and invited Collaborators.')}
+                          {tx('Sessions you created share your computer. Sessions you were invited to let you use theirs.')}
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-3">
@@ -898,11 +917,13 @@ export const SnowRemoteSupport: React.FC<SnowRemoteSupportProps> = ({
                               </div>
                               <div className="flex justify-center px-6">
                                 <span className={`inline-flex items-center rounded-[16px] px-2 py-1 text-[10px] font-normal leading-[14px] ${
-                                  joinable
-                                    ? 'bg-[#ECFDF3] text-[#34C759]'
-                                    : 'bg-[#1A1D21]/10 text-[#1A1D21]/45 dark:bg-white/10 dark:text-[#A0A0A0]'
+                                  !joinable
+                                    ? 'bg-[#1A1D21]/10 text-[#1A1D21]/45 dark:bg-white/10 dark:text-[#A0A0A0]'
+                                    : sessionJoinedBy(session)
+                                      ? 'bg-[#ECFDF3] text-[#34C759]'
+                                      : 'bg-[#FFF6ED] text-[#FF8A00]'
                                 }`}>
-                                  {joinable ? tx('Active') : tx('Expired')}
+                                  {!joinable ? tx('Expired') : sessionJoinedBy(session) ? tx('In session') : tx('Waiting')}
                                 </span>
                               </div>
                               <div className="px-6">
@@ -924,7 +945,7 @@ export const SnowRemoteSupport: React.FC<SnowRemoteSupportProps> = ({
                                   disabled={!joinable}
                                   className="inline-flex h-[30px] min-w-[86px] items-center justify-center whitespace-nowrap rounded-[4px] bg-gradient-to-r from-[#FF8A00] to-[#FFB347] px-3 text-[12px] font-medium text-[#111315] transition hover:brightness-105 disabled:cursor-not-allowed disabled:bg-none disabled:bg-[#F3F4F6] disabled:text-[#1A1D21]/40 dark:disabled:bg-white/10 dark:disabled:text-white/40"
                                 >
-                                  {session.createdById && user?.id && session.createdById === user.id ? tx('Wait for join') : tx('Join Session')}
+                                  {isOwnSession(session) ? (sessionJoinedBy(session) ? tx('View status') : tx('Show code')) : tx('Connect')}
                                 </button>
                               </div>
                               <button
@@ -1023,7 +1044,9 @@ export const SnowRemoteSupport: React.FC<SnowRemoteSupportProps> = ({
                 </span>
               </div>
               <p className="text-center text-[14px] font-normal leading-5 text-[#111315] dark:text-[#F5F5F5]">
-                {tx('Waiting for someone to join with this code...')}
+                {sessionJoinedBy(waitingSession)
+                  ? `${sessionJoinedBy(waitingSession)} ${tx('is using your computer through this session.')}`
+                  : tx('Waiting for someone to use this code. They will see and, once you allow it, control the computer this session was created on.')}
               </p>
               <div className="flex items-center gap-3 rounded-[8px] border border-[#1A1D21]/30 px-4 py-2 dark:border-white/20">
                 <span className="text-[20px] font-bold tracking-[0.15em] text-[#111315] dark:text-white">{formatId(waitingSession.sessionCode)}</span>
@@ -1036,7 +1059,7 @@ export const SnowRemoteSupport: React.FC<SnowRemoteSupportProps> = ({
                 </button>
               </div>
               <p className="text-center text-[12px] leading-[17px] text-[#111315]/60 dark:text-[#A0A0A0]">
-                {tx('As soon as they join, the remote session opens here automatically.')}
+                {tx('The code works once. The desktop app asks before they can use the keyboard and mouse, and you can end the session at any time.')}
               </p>
             </div>
 
@@ -1074,7 +1097,7 @@ export const SnowRemoteSupport: React.FC<SnowRemoteSupportProps> = ({
 
             <div className="flex flex-col gap-[22px]">
               <p className="text-[14px] font-normal leading-5 text-[rgba(26,29,33,0.6)] dark:text-[#A0A0A0]">
-                {tx('A unique one-time session code is generated when you press Start — no password needed. When the other person joins with the code, you connect to their PC automatically.')}
+                {tx('Press Start to get a one-time code for this computer. Whoever uses the code sees this screen and, once allowed, can use the keyboard and mouse. Creating a session needs the desktop app.')}
               </p>
 
               {/* Invite by email */}
@@ -1133,7 +1156,7 @@ export const SnowRemoteSupport: React.FC<SnowRemoteSupportProps> = ({
             <div className="flex flex-col gap-6 pt-2">
               <div className="flex flex-col">
                 <h3 className="text-[24px] font-bold leading-[34px] text-[#111315] dark:text-[#F5F5F5]">{tx('Join session')}</h3>
-                <p className="text-[14px] font-normal leading-5 text-[rgba(26,29,33,0.6)] dark:text-[#A0A0A0]">{tx('Enter the Remote365 session code shared by the host.')}</p>
+                <p className="text-[14px] font-normal leading-5 text-[rgba(26,29,33,0.6)] dark:text-[#A0A0A0]">{tx('Enter the code you were given to use that computer from this browser.')}</p>
               </div>
 
               <div className="flex flex-col gap-2">

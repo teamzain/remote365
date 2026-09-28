@@ -365,6 +365,11 @@ const REQUIRE_CONTROL_CONSENT = process.env.CONNECT_X_REQUIRE_CONTROL_CONSENT ==
 // signaling service, a join that never carried the claim — starts view-only and
 // has to ask, which is the safe direction to fail.
 const hostViewerUnattended = new Map<string, boolean>();
+// Support sessions (Quick Connect -> Sessions): true when the person at the
+// keyboard created the session for THIS account's email. The control prompt
+// then names them as expected and skips the anti-scam hold; anyone else who
+// got the code still waits the hold out.
+const hostViewerInvited = new Map<string, boolean>();
 
 // Viewers exempt from the two-stage flow because of what they are, not how the
 // device is configured: phones and tablets. Connecting from a phone is already a
@@ -4816,6 +4821,7 @@ function cleanupHostViewerPeer(viewerId: string | null | undefined, reason = 'en
     hostViewerNames.delete(viewerId);
     hostViewerDeviceIds.delete(viewerId);
     hostViewerUnattended.delete(viewerId);
+    hostViewerInvited.delete(viewerId);
     hostViewerSkipsConsent.delete(viewerId);
     hostViewerClientKinds.delete(viewerId);
     lastControlDeniedAt.delete(viewerId);
@@ -7179,6 +7185,9 @@ function handleControlMessage(msg: any, viewerId?: string) {
       mainWindow?.webContents.send('host:control-request', {
         viewerId: requesterId,
         viewerName: hostViewerNames.get(String(requesterId || '')) || '',
+        // Support session created for this viewer's email: the in-app prompt
+        // says so, so the host knows this is the person they asked for.
+        invited: hostViewerInvited.get(String(requesterId || '')) === true,
         requestedAt: Date.now()
       });
       if (replyChannel && replyChannel.isOpen()) {
@@ -7881,6 +7890,7 @@ function handleHostSignalingMessage(data: any, reply: (payload: any) => void) {
         const sessionIce = toDatachannelIceServers(data.iceServers);
         if (hasTurnRelay(sessionIce)) hostSignalingIceServers = sessionIce;
         hostViewerUnattended.set(String(viewerId), Boolean(data.unattended));
+        hostViewerInvited.set(String(viewerId), Boolean(data.invited));
         // Per-file transfer cap for THIS viewer, stamped by the server from
         // their billing plan. -1 / absent = no server figure (older signaling
         // or an unlimited plan); the transfer engine then falls back to the

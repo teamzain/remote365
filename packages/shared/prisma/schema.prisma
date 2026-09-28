@@ -541,6 +541,11 @@ model RemoteSession {
   expiresAt      DateTime?
   updatedAt      DateTime                    @updatedAt
   endedAt        DateTime?
+  // Support sessions share the CREATOR's computer: the device the session was
+  // created on, and the first account that used the code (a code works once).
+  hostAccessKey  String?
+  joinedById     String?
+  joinedAt       DateTime?
   createdBy      User?                       @relation("CreatedRemoteSessions", fields: [createdById], references: [id], onDelete: SetNull)
   collaborators  RemoteSessionCollaborator[]
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Eye, EyeOff, RefreshCw, ShieldCheck } from 'lucide-react';
 import logoAsset from '../../assets/logo.png';
 import api from '../../lib/api';
@@ -118,11 +118,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
   // just succeeded, so the animated tick gets its moment on screen before
   // the auth screen unmounts; the modal closing releases it.
   const holdRedirectRef = useRef(false);
+  // Where to land after signing in: the page that sent us here (a session
+  // invite link) or the dashboard. Only same-site paths are honoured.
+  const location = useLocation();
+  const nextPath = (() => {
+    const raw = String((location.state as any)?.next || new URLSearchParams(location.search).get('next') || '');
+    return raw.startsWith('/') && !raw.startsWith('//') ? raw : '/dashboard';
+  })();
   useEffect(() => {
-    if (accessToken && !holdRedirectRef.current) navigate('/dashboard');
-  }, [accessToken, navigate]);
+    if (accessToken && !holdRedirectRef.current) navigate(nextPath);
+  }, [accessToken, navigate, nextPath]);
 
-  const goDashboard = () => navigate('/dashboard');
+  const goDashboard = () => navigate(nextPath);
   const closeAuthResult = () => {
     const wasSuccess = authResult?.kind === 'success';
     setAuthResult(null);

@@ -155,7 +155,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('host:control-request-resolved', listener);
     return () => ipcRenderer.removeListener('host:control-request-resolved', listener);
   },
-  onControlRequest: (callback: (data: { viewerId: string; viewerName?: string; requestedAt?: number }) => void) => {
+  onControlRequest: (callback: (data: { viewerId: string; viewerName?: string; invited?: boolean; requestedAt?: number }) => void) => {
     const listener = (_: any, data: any) => callback(data);
     ipcRenderer.on('host:control-request', listener);
     return () => ipcRenderer.removeListener('host:control-request', listener);

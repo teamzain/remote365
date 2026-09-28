@@ -7,6 +7,8 @@ export interface ControlRequestState {
   countdown: number;
   /** Connecting user's account/display name (resolved by the signaling service). */
   viewerName?: string;
+  /** Support session this PC's user created for the viewer's email. */
+  invited?: boolean;
 }
 
 interface ControlRequestModalProps {
@@ -35,6 +37,9 @@ export const ControlRequestModal: React.FC<ControlRequestModalProps> = ({ state,
               ? `${state.viewerName} wants keyboard and mouse control of this device.`
               : 'A viewer wants keyboard and mouse control of this device.'}
           </p>
+          {state.invited && (
+            <p className="mt-2 text-xs font-medium text-[#067647]">You invited {state.viewerName || 'them'} to this session.</p>
+          )}
         </div>
         <div className="w-full flex flex-col items-center gap-1">
           <div className="w-full bg-[#F8F9FA] rounded-2xl h-2 overflow-hidden cursor-none">
