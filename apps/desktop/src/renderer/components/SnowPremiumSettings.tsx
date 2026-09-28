@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { User, Shield, ShieldCheck, Wifi, Monitor, Video, Bell, CheckCircle2, ChevronRight, ChevronDown, Check, Settings as SettingsIcon, LogOut, Edit3, Loader2, Moon, Search, Layout, Mail, Type, Smartphone, Rocket, Key, Usb, Mic, Volume2, VolumeX, ExternalLink, AlertTriangle, Camera, Eye, EyeOff, RefreshCw, Download, X as CloseIcon } from 'lucide-react';
+import { User, Shield, ShieldCheck, Wifi, Monitor, Video, Bell, CheckCircle2, ChevronRight, ChevronDown, Check, Settings as SettingsIcon, LogOut, Edit3, Loader2, Moon, Search, Layout, Mail, Type, Smartphone, Rocket, Key, Mic, Volume2, VolumeX, ExternalLink, AlertTriangle, Camera, Eye, EyeOff, RefreshCw, Download, X as CloseIcon } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { t } from '../lib/translations';
 import api from '../lib/api';
@@ -43,18 +43,15 @@ const GoogleIcon = ({ size = 18 }: { size?: number }) => (
   </svg>
 );
 
+// Account-level security settings (User.securitySettings). "Confirm each
+// incoming connection" is not here: it is the device's allowControlWithoutPrompt
+// setting shown from the other side.
 interface SecuritySettings {
   blockList: string[];
   allowList: string[];
   requirePassword: boolean;
   easyAccess: boolean;
-  confirmEachConnection: boolean;
   lockOnDisconnect: boolean;
-  allowControl: boolean;
-  allowClipboard: boolean;
-  allowFileTransfer: boolean;
-  maxParticipants: number;
-  securityKeyInstalled: boolean;
 }
 
 interface LatestUpdateInfo {
@@ -223,7 +220,7 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
   currentDeviceId: hostDeviceId,
   currentDeviceAccessKey
 }) => {
-  const { user, accessToken, updateProfile, setLanguage: applyLanguage, isLoading } = useAuthStore();
+  const { user, accessToken, updateProfile, setLanguage: applyLanguage, isLoading, checkAuth } = useAuthStore();
   const [activeTab, setActiveTab] = useState('Profile');
   // Effective per-user gate: billing:view permission plus the "Licenses & Plan"
   // feature, both owner-editable per role and per member (owners always pass).
@@ -241,10 +238,13 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
   const [showSaved, setShowSaved] = useState(false);
   const [signingOutAll, setSigningOutAll] = useState(false);
 
-  // Security tab state
-  const [twoFAEnabled, setTwoFAEnabled] = useState<boolean>(
-    () => (user?.is_2fa_enabled ?? (localStorage.getItem('pref_2fa') === 'true'))
-  );
+  // Security tab state. 2FA is the account's sign-in 2FA (User.is2FAEnabled):
+  // turning it on runs the QR-code setup, turning it off asks the server,
+  // which refuses when the organization requires 2FA.
+  const [twoFAEnabled, setTwoFAEnabled] = useState<boolean>(() => Boolean(user?.is_2fa_enabled));
+  const [twoFaSetup, setTwoFaSetup] = useState<{ qr: string | null; code: string; busy: boolean; error: string } | null>(null);
+  const [twoFaBusy, setTwoFaBusy] = useState(false);
+  const [twoFaError, setTwoFaError] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetCurrent, setResetCurrent] = useState('');
   const [resetNew, setResetNew] = useState('');
@@ -255,28 +255,24 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
   const [resetError, setResetError] = useState('');
   const [pwUpdatedAt, setPwUpdatedAt] = useState(() => localStorage.getItem('pref_pw_updated') || '');
 
-  // --- Security configuration (block/allow list, auth, access control, key redirection) ---
-  const [securityModal, setSecurityModal] = useState<null | 'block' | 'auth' | 'access' | 'redirection'>(null);
+  // --- Security configuration (block/allow list, authentication) ---
+  const [securityModal, setSecurityModal] = useState<null | 'block' | 'auth'>(null);
   const [secInput, setSecInput] = useState('');
   const [allowInput, setAllowInput] = useState('');
-  const [installingKey, setInstallingKey] = useState(false);
   const [secSettings, setSecSettings] = useState<SecuritySettings>(() => {
     const defaults: SecuritySettings = {
       blockList: [],
       allowList: [],
       requirePassword: !isEasyAccessEnabled(),
       easyAccess: isEasyAccessEnabled(),
-      confirmEachConnection: localStorage.getItem('remote365_confirm_each') !== 'false',
       lockOnDisconnect: localStorage.getItem('remote365_lock_on_disconnect') === 'true',
-      allowControl: true,
-      allowClipboard: true,
-      allowFileTransfer: true,
-      maxParticipants: 1,
-      securityKeyInstalled: false,
     };
     try {
       const raw = localStorage.getItem('remote365_security_settings');
-      if (raw) return { ...defaults, ...(JSON.parse(raw) as Partial<SecuritySettings>) };
+      if (raw) {
+        const saved = JSON.parse(raw) as Partial<SecuritySettings> & Record<string, unknown>;
+        return { ...defaults, blockList: Array.isArray(saved.blockList) ? saved.blockList : [], allowList: Array.isArray(saved.allowList) ? saved.allowList : [], lockOnDisconnect: saved.lockOnDisconnect === true };
+      }
     } catch {}
     return defaults;
   });
@@ -289,11 +285,12 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
       // per-device Easy Access flag, owned by lib/easyAccess (applyEasyAccess
       // writes the keys AND syncs the server). Writing them directly used to
       // flip the device to password-required behind the landing checkbox.
-      localStorage.setItem('remote365_confirm_each', String(next.confirmEachConnection));
       localStorage.setItem('remote365_lock_on_disconnect', String(next.lockOnDisconnect));
       localStorage.setItem('remote365_block_list', JSON.stringify(next.blockList));
       localStorage.setItem('remote365_allow_list', JSON.stringify(next.allowList));
     } catch {}
+    // The host process locks the workstation when the last viewer leaves.
+    (window as any).electronAPI?.setLockOnDisconnect?.(next.lockOnDisconnect).catch?.(() => {});
   };
 
   // Security settings live on the account (User.securitySettings) so they
@@ -369,30 +366,61 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
   const removeFromList = (key: 'blockList' | 'allowList', value: string) => {
     updateSec({ [key]: secSettings[key].filter((item) => item !== value) } as any);
   };
-  const installSecurityKey = () => {
-    if (secSettings.securityKeyInstalled || installingKey) return;
-    setInstallingKey(true);
-    // The virtual key driver is a host-side component; we record the opt-in and
-    // signal the agent if it exposes an installer.
-    try { (window as any).electronAPI?.installSecurityKeyDriver?.(); } catch {}
-    setTimeout(() => {
-      setInstallingKey(false);
-      updateSec({ securityKeyInstalled: true } as any);
-    }, 1200);
+
+  // Two-factor authentication for the account's sign-in.
+  const startTwoFaSetup = async () => {
+    setTwoFaError('');
+    setTwoFaSetup({ qr: null, code: '', busy: false, error: '' });
+    try {
+      const { data } = await api.post('/api/auth/2fa/enable');
+      setTwoFaSetup((s) => (s ? { ...s, qr: String(data?.qr_code || '') } : s));
+    } catch (err: any) {
+      setTwoFaSetup(null);
+      setTwoFaError(err?.response?.data?.error || 'Could not start the two-factor setup. Try again.');
+    }
+  };
+  const confirmTwoFaSetup = async () => {
+    if (!twoFaSetup || twoFaSetup.code.length !== 6 || twoFaSetup.busy) return;
+    setTwoFaSetup({ ...twoFaSetup, busy: true, error: '' });
+    try {
+      await api.post('/api/auth/2fa/verify', { code: twoFaSetup.code });
+      setTwoFaSetup(null);
+      setTwoFAEnabled(true);
+      checkAuth({ silent: true }).catch(() => {});
+    } catch (err: any) {
+      setTwoFaSetup((s) => (s ? { ...s, busy: false, error: err?.response?.data?.error || 'That code was not accepted. Try again.' } : s));
+    }
+  };
+  const disableTwoFa = async () => {
+    if (twoFaBusy) return;
+    setTwoFaBusy(true);
+    setTwoFaError('');
+    try {
+      await api.post('/api/auth/2fa/disable');
+      setTwoFAEnabled(false);
+      checkAuth({ silent: true }).catch(() => {});
+    } catch (err: any) {
+      setTwoFaError(err?.response?.data?.error || 'Could not turn off two-factor authentication.');
+    } finally {
+      setTwoFaBusy(false);
+    }
   };
 
   // Active sign-ins — fetched from the backend /sessions endpoint.
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsError, setSessionsError] = useState('');
   const [revokingId, setRevokingId] = useState<string | null>(null);
 
   const fetchSessions = async () => {
     setSessionsLoading(true);
+    setSessionsError('');
     try {
       const { data } = await api.get('/api/auth/sessions');
       setSessions(Array.isArray(data) ? data : []);
-    } catch (err) {
+    } catch (err: any) {
       console.error('[Settings] Failed to load sessions', err);
+      setSessionsError(err?.response?.data?.error || 'Could not load your sign-ins. Check your connection and try again.');
     } finally {
       setSessionsLoading(false);
     }
@@ -400,14 +428,16 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
 
   const revokeSession = async (id: string) => {
     setRevokingId(id);
+    setSessionsError('');
     const previous = sessions;
     setSessions((prev) => prev.filter((s) => s.id !== id));
     try {
       await api.delete(`/api/auth/sessions/${id}`);
       await fetchSessions();
-    } catch (err) {
+    } catch (err: any) {
       console.error('[Settings] Failed to revoke session', err);
       setSessions(previous);
+      setSessionsError(err?.response?.data?.error || 'Could not sign that device out. Try again.');
     } finally {
       setRevokingId(null);
     }
@@ -447,7 +477,6 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
   const [deviceName, setDeviceName] = useState('');
   const [deviceNameError, setDeviceNameError] = useState('');
   const [startWithWindows, setStartWithWindows] = useState(() => readStartWithWindowsPreference(true));
-  const [useDeviceDock, setUseDeviceDock] = useState(false);
   const [windowsNotification, setWindowsNotification] = useState(() => localStorage.getItem('pref_windows_notification') !== 'false');
   const [incomingSessionNotification, setIncomingSessionNotification] = useState(() => localStorage.getItem('pref_incoming_session_notification') !== 'false');
   const [keepAgentRunning, setKeepAgentRunning] = useState(() => localStorage.getItem('pref_keep_agent') !== 'false');
@@ -963,7 +992,7 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
       setDisplayName(user.name || '');
       setLanguage(user.language || 'en');
       setIsRestricted(user.notify_session_alert ?? true);
-      setTwoFAEnabled(localStorage.getItem('pref_2fa') === 'true' || (user.is_2fa_enabled ?? false));
+      setTwoFAEnabled(Boolean(user.is_2fa_enabled));
       setDmAssignedTo(prev => prev || (user.name ? user.name.split(' ')[0] : ''));
       const customization = {
         darkMode: user.darkMode ?? initialCustomization.darkMode,
@@ -981,20 +1010,26 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
 
       const nextStartWithWindows = user.startWithWindows ?? readStartWithWindowsPreference(true);
       setStartWithWindows(nextStartWithWindows);
-      setUseDeviceDock(user.useDeviceDock ?? false);
       const nextWindowsNotification = user.windowsNotification ?? true;
       const nextIncomingSessionNotification = user.incomingSessionNotification ?? true;
       setWindowsNotification(nextWindowsNotification);
       setIncomingSessionNotification(nextIncomingSessionNotification);
       localStorage.setItem('pref_windows_notification', String(nextWindowsNotification));
       localStorage.setItem('pref_incoming_session_notification', String(nextIncomingSessionNotification));
-      setKeepAgentRunning(user.keepAgentRunning ?? true);
-      localStorage.setItem('pref_keep_agent', String(user.keepAgentRunning ?? true));
-      localStorage.setItem('pref_device_dock', String(user.useDeviceDock ?? false));
+      applyKeepAgentRunning(user.keepAgentRunning ?? true);
       applyStartWithWindowsPreference(nextStartWithWindows).then(setStartWithWindows);
 
     }
   }, [user]);
+
+  // "Keep Agent Running When App Is Closed": state + local copy + the main
+  // process, which arms or disarms the offline-recovery task live (it used to
+  // only pick the change up on the next launch).
+  const applyKeepAgentRunning = (next: boolean) => {
+    setKeepAgentRunning(next);
+    localStorage.setItem('pref_keep_agent', String(next));
+    (window as any).electronAPI?.setAdvancedFlags?.({ keepRunning: next }).catch?.(() => {});
+  };
 
   const triggerSave = async (data: any) => {
     applyCustomizationPreferences(data);
@@ -1745,9 +1780,14 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
           ) : activeTab === 'General' ? (
             <div className="animate-in fade-in slide-in-from-right-4 duration-300 font-['Mona_Sans',system-ui,sans-serif] text-[#111315] dark:text-[#F5F5F5]">
               {/* Header */}
-              <div className="mb-12">
-                <h1 className="m-0 text-[18px] font-medium leading-[25px] text-black dark:text-[#F5F5F5]">{t('general', lang)}</h1>
-                <p className="m-0 mt-1 text-[14px] leading-5 text-[#111315] dark:text-[#A0A0A0]">Manage your device identity and startup behavior.</p>
+              <div className="mb-12 flex items-start justify-between gap-6">
+                <div>
+                  <h1 className="m-0 text-[18px] font-medium leading-[25px] text-black dark:text-[#F5F5F5]">{t('general', lang)}</h1>
+                  <p className="m-0 mt-1 text-[14px] leading-5 text-[#111315] dark:text-[#A0A0A0]">Manage your device identity and startup behavior.</p>
+                </div>
+                {showSaved && (
+                  <span className="mt-1 inline-flex shrink-0 items-center gap-1 text-[12px] font-medium text-[#34C759]"><Check size={13} /> Saved</span>
+                )}
               </div>
 
               <div className="flex flex-col gap-6">
@@ -1780,26 +1820,14 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
                   </label>
                 </div>
 
-                {/* Remote365 Device Dock */}
-                <div className="flex items-start justify-between gap-6">
-                  <div className="max-w-[500px]">
-                    <h3 className="m-0 text-[16px] font-semibold leading-[23px] text-black dark:text-[#F5F5F5]">Remote365 Device Dock</h3>
-                    <p className="m-0 mt-1 text-[14px] leading-5 text-[#111315] dark:text-[#A0A0A0]">Have your devices always available on your screen in a compact view.</p>
-                  </div>
-                  <label className="relative mt-1 inline-flex shrink-0 cursor-pointer items-center">
-                    <input type="checkbox" className="sr-only peer" checked={useDeviceDock} onChange={() => { const next = !useDeviceDock; setUseDeviceDock(next); localStorage.setItem('pref_device_dock', String(next)); triggerSave({ useDeviceDock: next }); }} />
-                    <div className="h-6 w-11 rounded-full bg-gray-200 transition-colors after:absolute after:top-[2px] after:left-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-[linear-gradient(180deg,#FF8A00_0%,#FFB347_100%)] peer-checked:after:translate-x-full dark:bg-white/10"></div>
-                  </label>
-                </div>
-
                 {/* Keep agent running when app is closed */}
                 <div className="flex items-start justify-between gap-6">
                   <div className="max-w-[500px]">
-                    <h3 className="m-0 text-[16px] font-semibold leading-[23px] text-black dark:text-[#F5F5F5]">Keep agent running when app is closed</h3>
+                    <h3 className="m-0 text-[16px] font-semibold leading-[23px] text-black dark:text-[#F5F5F5]">Keep Agent Running When App Is Closed</h3>
                     <p className="m-0 mt-1 text-[14px] leading-5 text-[#111315] dark:text-[#A0A0A0]">Allow your team to connect to this device even when the app isn't open.</p>
                   </div>
                   <label className="relative mt-1 inline-flex shrink-0 cursor-pointer items-center">
-                    <input type="checkbox" className="sr-only peer" checked={keepAgentRunning} onChange={() => { const next = !keepAgentRunning; setKeepAgentRunning(next); localStorage.setItem('pref_keep_agent', String(next)); triggerSave({ keepAgentRunning: next }); }} />
+                    <input type="checkbox" className="sr-only peer" checked={keepAgentRunning} onChange={() => { const next = !keepAgentRunning; applyKeepAgentRunning(next); triggerSave({ keepAgentRunning: next }); }} />
                     <div className="h-6 w-11 rounded-full bg-gray-200 transition-colors after:absolute after:top-[2px] after:left-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-[linear-gradient(180deg,#FF8A00_0%,#FFB347_100%)] peer-checked:after:translate-x-full dark:bg-white/10"></div>
                   </label>
                 </div>
@@ -1862,25 +1890,22 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
                 )}
               </div>
 
-              {/* Two-factor authentication */}
+              {/* Two-factor authentication (account sign-in) */}
               <div className="mb-9 flex items-start justify-between gap-6">
                 <div className="max-w-[680px]">
-                  <h3 className="m-0 text-[16px] font-semibold leading-[23px] text-black dark:text-[#F5F5F5]">Two-Factor Authentication For Connections</h3>
-                  <p className="m-0 mt-1 text-[14px] leading-5 text-[#111315] dark:text-[#A0A0A0]">Protect your account and control how sessions are authenticated.</p>
+                  <h3 className="m-0 text-[16px] font-semibold leading-[23px] text-black dark:text-[#F5F5F5]">Two-Factor Authentication</h3>
+                  <p className="m-0 mt-1 text-[14px] leading-5 text-[#111315] dark:text-[#A0A0A0]">Ask for a code from your authenticator app every time you sign in.</p>
+                  {twoFaError && <p className="m-0 mt-2 text-[12px] leading-4 text-red-500">{twoFaError}</p>}
                 </div>
                 <label className="relative mt-1 inline-flex shrink-0 cursor-pointer items-center">
                   <input
                     type="checkbox"
                     className="sr-only peer"
                     checked={twoFAEnabled}
-                    onChange={() => {
-                      const next = !twoFAEnabled;
-                      setTwoFAEnabled(next);
-                      localStorage.setItem('pref_2fa', String(next));
-                      updateProfile({ is_2fa_enabled: next } as any).catch(() => {});
-                    }}
+                    disabled={twoFaBusy || !!twoFaSetup}
+                    onChange={() => { if (twoFAEnabled) disableTwoFa(); else startTwoFaSetup(); }}
                   />
-                  <div className="h-6 w-11 rounded-full bg-gray-200 transition-colors after:absolute after:top-[2px] after:left-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-[linear-gradient(180deg,#FF8A00_0%,#FFB347_100%)] peer-checked:after:translate-x-full dark:bg-white/10"></div>
+                  <div className="h-6 w-11 rounded-full bg-gray-200 transition-colors after:absolute after:top-[2px] after:left-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-[linear-gradient(180deg,#FF8A00_0%,#FFB347_100%)] peer-checked:after:translate-x-full peer-disabled:opacity-60 dark:bg-white/10"></div>
                 </label>
               </div>
 
@@ -1889,8 +1914,6 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
                 {[
                   { id: 'block', title: 'Block And Allow List', desc: 'Setup your block and allow list. You can block a specific user or define a group of users who are allowed to connect to your device.', action: 'Configure' },
                   { id: 'auth', title: 'Additional Authentication Settings', desc: 'Use these settings to optimize the authentication process for your Remote365 connections.', action: 'Configure' },
-                  { id: 'access', title: 'Access Control', desc: 'Define permissions and number of end users in the Remote365 session. You can apply rule sets or setup customize permissions for your remote connections.', action: 'Configure' },
-                  { id: 'redirection', title: 'Security Key Redirection', desc: 'Install Remote365 virtual security key driver on remote side to enable redirection of security keys from the local side via a Remote365 session.', action: 'Install' },
                 ].map(item => (
                   <div key={item.id} className="flex items-center justify-between gap-6">
                     <div className="max-w-[700px]">
@@ -1899,12 +1922,10 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
                     </div>
                     <button
                       type="button"
-                      onClick={() => setSecurityModal(item.id as any)}
+                      onClick={() => setSecurityModal(item.id as 'block' | 'auth')}
                       className="flex h-10 shrink-0 items-center justify-center gap-2 rounded border border-[rgba(26,29,33,0.3)] bg-white px-4 text-[14px] font-medium leading-5 text-[#111315] transition-colors hover:bg-[#F9FAFB] dark:bg-transparent dark:text-[#F5F5F5]"
                     >
-                      {item.id === 'redirection'
-                        ? (secSettings.securityKeyInstalled ? <><Check size={15} className="text-[#34C759]" /> Installed</> : item.action)
-                        : item.action}
+                      {item.action}
                     </button>
                   </div>
                 ))}
@@ -2142,11 +2163,17 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
                     <RefreshCw size={15} className={sessionsLoading ? 'animate-spin' : ''} />
                   </button>
                 </div>
+                {sessionsError && (
+                  <div className="mb-4 flex items-center justify-between gap-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-[13px] text-red-600 dark:border-red-500/20 dark:bg-red-500/10">
+                    <span>{sessionsError}</span>
+                    <button type="button" onClick={fetchSessions} className="shrink-0 font-medium underline-offset-2 hover:underline">Try Again</button>
+                  </div>
+                )}
                 {sessionsLoading && otherSessions.length === 0 ? (
                   <div className="rounded-xl border border-[rgba(26,29,33,0.3)] p-8 text-center text-[14px] text-[rgba(17,19,21,0.6)] dark:border-white/10">
                     Loading Sessions…
                   </div>
-                ) : otherSessions.length === 0 ? (
+                ) : sessionsError && sessions.length === 0 ? null : otherSessions.length === 0 ? (
                   <div className="rounded-xl border border-[rgba(26,29,33,0.3)] p-8 text-center text-[14px] text-[rgba(17,19,21,0.6)] dark:border-white/10">
                     No other active sessions. You're only signed in on this device.
                   </div>
@@ -3089,12 +3116,63 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
         </div>
       )}
 
+      {twoFaSetup && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200 font-['Mona_Sans',system-ui,sans-serif]">
+          <div className="mx-4 w-full max-w-md rounded-3xl border border-gray-100 bg-white shadow-2xl animate-in zoom-in-95 duration-200 dark:border-white/10 dark:bg-[#151515]">
+            <div className="flex items-start justify-between border-b border-gray-100 p-6 dark:border-white/5">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-orange-50 text-[#FF8A00] dark:bg-[#FF8A00]/10">
+                  <ShieldCheck size={18} />
+                </div>
+                <div>
+                  <h2 className="text-[18px] font-bold text-gray-900 dark:text-white">Set Up Two-Factor Authentication</h2>
+                  <p className="mt-1 text-[12px] text-gray-500 dark:text-[#A0A0A0]">Scan the QR code with an authenticator app, then enter the 6-digit code it shows.</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setTwoFaSetup(null)} className="flex h-8 w-8 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 dark:hover:bg-white/10">
+                <CloseIcon size={16} />
+              </button>
+            </div>
+            <div className="space-y-5 p-6">
+              <div className="flex min-h-[212px] items-center justify-center rounded-2xl border border-gray-200 bg-[#F8F9FA] p-4 dark:border-white/10 dark:bg-[#0A0A0A]">
+                {twoFaSetup.qr
+                  ? <img src={twoFaSetup.qr} alt="Two-factor authentication QR code" className="h-44 w-44" />
+                  : <Loader2 size={20} className="animate-spin text-[#FF8A00]" />}
+              </div>
+              <input
+                autoFocus
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="000 000"
+                value={twoFaSetup.code}
+                onChange={(e) => setTwoFaSetup({ ...twoFaSetup, code: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                onKeyDown={(e) => { if (e.key === 'Enter') confirmTwoFaSetup(); }}
+                className="h-12 w-full rounded-xl border border-gray-200 bg-white px-4 text-center font-mono text-[20px] tracking-[0.3em] text-gray-900 outline-none focus:border-[#FF8A00] dark:border-white/10 dark:bg-[#0A0A0A] dark:text-white"
+              />
+              {twoFaSetup.error && <p className="m-0 text-[12px] text-red-500">{twoFaSetup.error}</p>}
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-gray-100 p-6 dark:border-white/5">
+              <button type="button" onClick={() => setTwoFaSetup(null)} className="rounded-xl px-4 py-2 text-[13px] font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:text-[#A0A0A0] dark:hover:bg-white/5">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmTwoFaSetup}
+                disabled={!twoFaSetup.qr || twoFaSetup.code.length !== 6 || twoFaSetup.busy}
+                className="flex items-center gap-2 rounded-xl bg-[linear-gradient(110.89deg,#FF8A00_36.19%,#FFB347_93.55%)] px-5 py-2 text-[13px] font-bold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {twoFaSetup.busy && <Loader2 size={14} className="animate-spin" />}
+                Turn On
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {securityModal && (() => {
         const meta = {
           block: { icon: <Shield size={18} />, title: 'Block & Allow List', desc: 'Control exactly who can connect to this device.' },
           auth: { icon: <Key size={18} />, title: 'Authentication Settings', desc: 'Tune how incoming connections are authenticated.' },
-          access: { icon: <ShieldCheck size={18} />, title: 'Access Control', desc: 'Decide what a connected user is allowed to do.' },
-          redirection: { icon: <Usb size={18} />, title: 'Security Key Redirection', desc: 'Forward local security keys into the remote session.' },
         }[securityModal];
         const Row = ({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) => (
           <div className="flex items-center justify-between gap-4">
@@ -3167,61 +3245,16 @@ export const SnowPremiumSettings: React.FC<SnowPremiumSettingsProps> = ({
                     <Row title="Grant Easy Access" sub="Let your own account connect without a password prompt.">
                       <SecToggle checked={secSettings.easyAccess} onChange={(v) => updateSec({ easyAccess: v })} />
                     </Row>
-                    <Row title="Confirm Each Incoming Connection" sub="Show an approval dialog before a session starts.">
-                      <SecToggle checked={secSettings.confirmEachConnection} onChange={(v) => updateSec({ confirmEachConnection: v })} />
+                    <Row title="Confirm Each Incoming Connection" sub={'Show the "allow control" prompt before a session starts. The same switch as Remote Control → Allow Control Without Asking.'}>
+                      <SecToggle
+                        checked={!dmNoControlPrompt}
+                        onChange={(v) => { const noPrompt = !v; setDmNoControlPrompt(noPrompt); localStorage.setItem('pref_dm_no_control_prompt', String(noPrompt)); saveDeviceSettings({ allowControlWithoutPrompt: noPrompt }); }}
+                      />
                     </Row>
-                    <Row title="Lock Screen On Disconnect" sub="Automatically lock this device when a session ends.">
+                    <Row title="Lock Screen On Disconnect" sub="Lock this device when the last remote user disconnects.">
                       <SecToggle checked={secSettings.lockOnDisconnect} onChange={(v) => updateSec({ lockOnDisconnect: v })} />
                     </Row>
                   </>
-                )}
-
-                {securityModal === 'access' && (
-                  <>
-                    <Row title="Allow Remote Control" sub="Connected users can control mouse & keyboard.">
-                      <SecToggle checked={secSettings.allowControl} onChange={(v) => updateSec({ allowControl: v })} />
-                    </Row>
-                    <Row title="Allow Clipboard Sharing" sub="Share copied text between both sides.">
-                      <SecToggle checked={secSettings.allowClipboard} onChange={(v) => updateSec({ allowClipboard: v })} />
-                    </Row>
-                    <Row title="Allow File Transfer" sub="Permit sending and receiving files.">
-                      <SecToggle checked={secSettings.allowFileTransfer} onChange={(v) => updateSec({ allowFileTransfer: v })} />
-                    </Row>
-                    <Row title="Max Participants" sub="How many end users can join one session.">
-                      <StyledSelect
-                        value={String(secSettings.maxParticipants)}
-                        options={[{ value: '1', label: '1' }, { value: '2', label: '2' }, { value: '5', label: '5' }, { value: '10', label: '10' }]}
-                        onChange={(v) => updateSec({ maxParticipants: Number(v) })}
-                      />
-                    </Row>
-                  </>
-                )}
-
-                {securityModal === 'redirection' && (
-                  <div className="flex flex-col items-center gap-4 py-2 text-center">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-orange-50 text-[#FF8A00] dark:bg-[#FF8A00]/10">
-                      {secSettings.securityKeyInstalled ? <Check size={28} /> : <Usb size={28} />}
-                    </div>
-                    <p className="m-0 max-w-[320px] text-[13px] text-gray-600 dark:text-[#A0A0A0]">
-                      {secSettings.securityKeyInstalled
-                        ? 'The virtual security key driver is installed. Local security keys will be redirected into remote sessions.'
-                        : 'Install the Remote365 virtual security key driver to redirect local security keys into your remote sessions.'}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={installSecurityKey}
-                      disabled={secSettings.securityKeyInstalled || installingKey}
-                      className="flex h-10 items-center gap-2 rounded-xl bg-[linear-gradient(110.89deg,#FF8A00_36.19%,#FFB347_93.55%)] px-6 text-[13px] font-bold text-white disabled:opacity-60"
-                    >
-                      {installingKey && <Loader2 size={14} className="animate-spin" />}
-                      {secSettings.securityKeyInstalled ? 'Installed' : installingKey ? 'Installing…' : 'Install Driver'}
-                    </button>
-                    {secSettings.securityKeyInstalled && (
-                      <button type="button" onClick={() => updateSec({ securityKeyInstalled: false } as any)} className="text-[12px] text-gray-400 hover:text-gray-600">
-                        Uninstall
-                      </button>
-                    )}
-                  </div>
                 )}
               </div>
 

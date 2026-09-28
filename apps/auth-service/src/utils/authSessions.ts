@@ -50,6 +50,27 @@ export async function saveAuthSession(user: any, sessionId: string, request: Fas
   return session;
 }
 
+// How often one session's lastSeen is refreshed by ordinary API traffic.
+const AUTH_SESSION_TOUCH_INTERVAL_SECONDS = 120;
+
+/**
+ * Refresh a session's lastSeen (and IP) from any authenticated request, at
+ * most once per touch interval, so Settings → Active Sign-Ins shows when a
+ * device was really last used rather than when it signed in. A session that
+ * is not in Redis (legacy token) is left alone: /sessions and /refresh create it.
+ */
+export async function touchAuthSession(userId: string, sessionId: string, request: FastifyRequest) {
+  const fresh = await redisPublisher.set(`auth:sessions:seen:${userId}:${sessionId}`, '1', 'EX', AUTH_SESSION_TOUCH_INTERVAL_SECONDS, 'NX');
+  if (fresh !== 'OK') return;
+  const key = authSessionKey(userId, sessionId);
+  const raw = await redisPublisher.get(key);
+  if (!raw) return;
+  const session = JSON.parse(raw);
+  session.lastSeen = new Date().toISOString();
+  session.ip = requestIp(request);
+  await redisPublisher.set(key, JSON.stringify(session), 'EX', AUTH_SESSION_TTL_SECONDS);
+}
+
 /** Revoke every session for the account (deactivation / permanent deletion):
  * the user's next /me or token refresh fails everywhere, forcing a re-login. */
 export async function revokeAllSessions(userId: string): Promise<number> {

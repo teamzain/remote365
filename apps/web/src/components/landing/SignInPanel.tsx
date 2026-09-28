@@ -69,7 +69,7 @@ function goToApp() {
 function SignInForm() {
   const {
     email, setEmail, password, setPassword, rememberMe, setRememberMe,
-    totpCode, setTotpCode, awaitingTwoFactor, pending, error,
+    totpCode, setTotpCode, awaitingTwoFactor, twoFactorSetup, setupQr, pending, error,
     signIn, submitTwoFactor, cancelTwoFactor,
   } = useSignIn()
   const [showPassword, setShowPassword] = useState(false)
@@ -94,9 +94,11 @@ function SignInForm() {
     <form className="si-form" onSubmit={onSubmit} noValidate>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/logo.png" alt="" width={44} height={44} className="si-logo" />
-      <h2 className="si-title" id="si-title">{awaitingTwoFactor ? 'Two-factor check' : 'Welcome back'}</h2>
+      <h2 className="si-title" id="si-title">{twoFactorSetup ? 'Set up two-factor' : awaitingTwoFactor ? 'Two-factor check' : 'Welcome back'}</h2>
       <p className="si-sub">
-        {awaitingTwoFactor
+        {twoFactorSetup
+          ? 'Your organization requires two-factor authentication. Scan this QR code with an authenticator app, then enter the 6-digit code it shows.'
+          : awaitingTwoFactor
           ? 'Enter the 6-digit code from your authenticator app.'
           : 'Sign in to reach your devices, sessions and meetings.'}
       </p>
@@ -158,6 +160,15 @@ function SignInForm() {
             <a className="si-link" href="/forgot-password">Forgot password?</a>
           </div>
         </>
+      )}
+
+      {twoFactorSetup && (
+        <div className="si-qr" aria-busy={!setupQr}>
+          {setupQr
+            // eslint-disable-next-line @next/next/no-img-element
+            ? <img src={setupQr} alt="Two-factor authentication QR code" width={176} height={176} />
+            : <Loader2 size={20} className="si-spin" aria-hidden="true" />}
+        </div>
       )}
 
       {awaitingTwoFactor && (
@@ -341,6 +352,8 @@ export default function SignInPanel() {
         .si-input::placeholder { color: rgba(255, 255, 255, 0.35); }
         .si-input:focus { border-color: #ff8a00; box-shadow: 0 0 0 3px rgba(255, 138, 0, 0.25); }
         .si-code { letter-spacing: 0.4em; font-size: 20px; text-align: center; }
+        .si-qr { display: flex; align-items: center; justify-content: center; min-height: 200px; margin-bottom: 12px; padding: 12px; border: 1px solid rgba(26,29,33,0.15); border-radius: 12px; background: #fff; }
+        .si-qr img { display: block; width: 176px; height: 176px; }
         .si-password { position: relative; }
         .si-password .si-input { padding-right: 46px; }
         .si-eye {

@@ -11,6 +11,8 @@ import {
   legacySessionIdFromToken, requestIp, saveAuthSession, enforceMaxSessions,
 } from '../utils/authSessions';
 import { TOTP, NobleCryptoPlugin, ScureBase32Plugin } from 'otplib';
+import * as QRCode from 'qrcode';
+import { twoFactorGate, TWO_FACTOR_SETUP_MESSAGE } from '../utils/twoFactorGate';
 
 const totp = new TOTP({
   crypto: new NobleCryptoPlugin(),
@@ -80,22 +82,16 @@ const sanitizeSecuritySettings = (raw: any) => {
     ? Array.from(new Set(v.map((x: any) => String(x).trim().slice(0, 200)).filter(Boolean))).slice(0, 100)
     : [];
   const bool = (v: any, d: boolean) => (typeof v === 'boolean' ? v : d);
-  const clampInt = (v: any, d: number) => {
-    const n = Number(v);
-    return Number.isFinite(n) ? Math.min(50, Math.max(1, Math.floor(n))) : d;
-  };
   return {
     blockList: list(raw.blockList),
     allowList: list(raw.allowList),
     requirePassword: bool(raw.requirePassword, false),
     easyAccess: bool(raw.easyAccess, true),
-    confirmEachConnection: bool(raw.confirmEachConnection, true),
+    // Applied by the desktop host when the last viewer leaves.
     lockOnDisconnect: bool(raw.lockOnDisconnect, false),
-    allowControl: bool(raw.allowControl, true),
-    allowClipboard: bool(raw.allowClipboard, true),
-    allowFileTransfer: bool(raw.allowFileTransfer, true),
-    maxParticipants: clampInt(raw.maxParticipants, 1),
-    securityKeyInstalled: bool(raw.securityKeyInstalled, false),
+    // "Confirm each incoming connection" is the device's
+    // allowControlWithoutPrompt setting, and the access-control / security-key
+    // fields were never enforced anywhere, so none of them live here any more.
   };
 };
 
@@ -501,10 +497,13 @@ export default async function authRoutes(fastify: FastifyInstance) {
         return reply.code(403).send(googleBlock);
       }
 
-      if ((user as any).is2FAEnabled) {
-        const { generateToken } = require('@remotelink/shared');
-        const tempToken = generateToken({ userId: user!.id, type: '2fa-temp' }, '5m');
-        return reply.send({ twoFactorRequired: true, tempToken });
+      const googleGate = await twoFactorGate(user);
+      if (googleGate?.kind === 'verify') {
+        return reply.send({ twoFactorRequired: true, tempToken: googleGate.tempToken });
+      }
+      if (googleGate?.kind === 'setup') {
+        await recordLogin({ userId: user!.id, email: user!.email, ip: requestIp(request), userAgent: (request.headers['user-agent'] as string) || null, result: 'TWO_FACTOR_SETUP' });
+        return reply.code(403).send({ error: TWO_FACTOR_SETUP_MESSAGE, twoFactorSetupRequired: true, tempToken: googleGate.tempToken });
       }
 
       await recordLogin({ userId: user!.id, email: user!.email, ip: requestIp(request), userAgent: (request.headers['user-agent'] as string) || null, result: 'SUCCESS' });
@@ -548,19 +547,66 @@ export default async function authRoutes(fastify: FastifyInstance) {
       return reply.code(403).send(loginBlock);
     }
 
-    if ((user as any).is2FAEnabled) {
+    const gate = await twoFactorGate(user);
+    if (gate?.kind === 'verify') {
       await recordLogin({ userId: user.id, email, ip, userAgent, result: 'TWO_FACTOR' });
-      const tempToken = await publishEvent({ // Just mock a temp token for now or use JWT
-        channel: EventChannel.USER_CREATED, // Placeholder
-        payload: { userId: user.id, email: user.email }
-      });
-      // Better: sign a short-lived temp token
-      const jwt = require('@remotelink/shared').generateToken({ userId: user.id, type: '2fa-temp' }, '5m');
-      return reply.send({ twoFactorRequired: true, tempToken: jwt });
+      return reply.send({ twoFactorRequired: true, tempToken: gate.tempToken });
+    }
+    if (gate?.kind === 'setup') {
+      // Refused (403) rather than a 200 without tokens, so a client that does
+      // not know this step (the mobile app) shows the message instead of
+      // treating the reply as a sign-in.
+      await recordLogin({ userId: user.id, email, ip, userAgent, result: 'TWO_FACTOR_SETUP' });
+      return reply.code(403).send({ error: TWO_FACTOR_SETUP_MESSAGE, twoFactorSetupRequired: true, tempToken: gate.tempToken });
     }
 
     await recordLogin({ userId: user.id, email, ip, userAgent, result: 'SUCCESS' });
     return reply.send(await issueTokensForRequest(user, request));
+  });
+
+  // The org requires 2FA and this account has none: the sign-in's setup temp
+  // token stands in for a session. Start issues the secret + QR code, confirm
+  // checks the first code, turns 2FA on and completes the sign-in.
+  const readSetupToken = (tempToken: unknown) => {
+    const decoded = typeof tempToken === 'string' ? verifyToken(tempToken) : null;
+    return decoded && decoded.userId && decoded.type === '2fa-setup' ? decoded : null;
+  };
+
+  fastify.post('/setup-2fa', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { tempToken } = (request.body || {}) as any;
+    const decoded = readSetupToken(tempToken);
+    if (!decoded) return reply.code(401).send({ error: 'Invalid or expired 2FA setup session' });
+
+    const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
+    if (!user) return reply.code(404).send({ error: 'User not found' });
+    if ((user as any).is2FAEnabled) return reply.code(400).send({ error: '2FA is already set up. Sign in again.' });
+
+    const secret = totp.generateSecret();
+    const otpauth = totp.toURI({ label: user.email, issuer: 'Remote 365', secret });
+    const qrCode = await QRCode.toDataURL(otpauth);
+    await prisma.user.update({ where: { id: user.id }, data: { twoFactorSecret: secret } });
+    return reply.send({ qr_code: qrCode });
+  });
+
+  fastify.post('/verify-2fa-setup', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { code, tempToken } = (request.body || {}) as any;
+    if (!code) return reply.code(400).send({ error: 'Verification code required' });
+    const decoded = readSetupToken(tempToken);
+    if (!decoded) return reply.code(401).send({ error: 'Invalid or expired 2FA setup session' });
+
+    const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
+    if (!user || !(user as any).twoFactorSecret) return reply.code(400).send({ error: '2FA not initialized' });
+    if ((user as any).is2FAEnabled) return reply.code(400).send({ error: '2FA is already set up. Sign in again.' });
+
+    const isValid = totp.verify(String(code), { secret: (user as any).twoFactorSecret });
+    if (!isValid) return reply.code(401).send({ error: 'Invalid verification code' });
+
+    const loginBlock = await getAccountBlock(user);
+    if (loginBlock) return reply.code(403).send(loginBlock);
+
+    const enabled = await prisma.user.update({ where: { id: user.id }, data: { is2FAEnabled: true } });
+    await recordLogin({ userId: user.id, email: user.email, ip: requestIp(request), userAgent: (request.headers['user-agent'] as string) || null, result: 'SUCCESS' });
+    return reply.send(await issueTokensForRequest(enabled, request));
   });
 
   fastify.post('/verify-2fa', async (request: FastifyRequest, reply: FastifyReply) => {

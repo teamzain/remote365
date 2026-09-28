@@ -168,6 +168,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getFileTransferBlocked: () => ipcRenderer.invoke('host:get-file-transfer-blocked'),
   // Options → "Minimize App When A Session Starts" (main does the minimising).
   setHostAutoMinimize: (enabled: boolean) => ipcRenderer.invoke('host:set-auto-minimize', enabled),
+  // Settings → Security → "Lock Screen On Disconnect" (main locks the workstation).
+  setLockOnDisconnect: (enabled: boolean) => ipcRenderer.invoke('host:set-lock-on-disconnect', enabled),
   setIdleTimeout: (minutes: number) => ipcRenderer.invoke('host:set-idle-timeout', minutes),
   pickFolder: () => ipcRenderer.invoke('system:pickFolder'),
   setReceivedDir: (dir: string) => ipcRenderer.invoke('host:set-received-dir', dir),
@@ -267,8 +269,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('meeting:join-link', listener);
     return () => ipcRenderer.removeListener('meeting:join-link', listener);
   },
-  onTemp2faToken: (callback: (token: string) => void) => {
-    const listener = (_: any, token: string) => callback(token);
+  onTemp2faToken: (callback: (token: string, setup: boolean) => void) => {
+    const listener = (_: any, payload: string | { tempToken: string; setup?: boolean }) =>
+      typeof payload === 'string' ? callback(payload, false) : callback(payload.tempToken, Boolean(payload.setup));
     ipcRenderer.on('auth:temp-2fa-token', listener);
     return () => ipcRenderer.removeListener('auth:temp-2fa-token', listener);
   },

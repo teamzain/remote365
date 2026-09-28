@@ -55,7 +55,10 @@ type FakeUser = { id: string; email: string; name: string; role: string; organiz
 const users = new Map<string, FakeUser>([
   ['victim@example.com', { id: 'u-victim', email: 'victim@example.com', name: 'Victim', role: 'OWNER', organizationId: 'org-victim' }],
   ['mfa@example.com', { id: 'u-mfa', email: 'mfa@example.com', name: 'Mfa', role: 'OWNER', organizationId: 'org-mfa', is2FAEnabled: true }],
+  // No 2FA on the account, but the org requires it.
+  ['needs-mfa@example.com', { id: 'u-needs-mfa', email: 'needs-mfa@example.com', name: 'Needs', role: 'VIEWER', organizationId: 'org-strict' }],
 ]);
+const orgs = new Map<string, { require2FA: boolean }>([['org-strict', { require2FA: true }]]);
 const redis = new Map<string, string>();
 let tokensIssued = 0;
 
@@ -77,6 +80,7 @@ const stubs: Record<string, unknown> = {
   '@remotelink/shared': {
     prisma: {
       user: userDelegate,
+      organization: { findUnique: async ({ where }: any) => orgs.get(where.id) ?? { require2FA: false } },
       subscription: { create: async () => ({}) },
       $transaction: async (run: (tx: any) => unknown) => run({
         organization: { create: async ({ data }: any) => ({ id: `org-${data.slug}`, ...data }) },
@@ -286,6 +290,32 @@ async function main() {
     const legacy = redirectOf(await signIn('google', `platform=web&returnUrl=${enc('https://attacker.example/auth/callback')}`));
     assert.equal(`${legacy.origin}${legacy.pathname}`, 'https://pp.remote365.ai/auth/callback');
     assert.equal(legacy.searchParams.get('tempToken'), 'temp-2fa-token');
+  }
+  providerEmail = 'victim@example.com';
+
+  // 5b. The org requires 2FA and the account has none: no tokens; web and
+  //     desktop get the setup step, the mobile app gets the message.
+  providerEmail = 'needs-mfa@example.com';
+  {
+    const before = tokensIssued;
+    const to = redirectOf(await signIn('google', `platform=web&handoff=code&returnUrl=${enc('https://pp.remote365.ai/auth/callback')}`));
+    assert.deepEqual((await exchange(to.searchParams.get('code'))).json(), { twoFactorRequired: true, twoFactorSetupRequired: true, tempToken: 'temp-2fa-token' });
+
+    const legacy = redirectOf(await signIn('microsoft', `platform=web&returnUrl=${enc('https://pp.remote365.ai/auth/callback')}`));
+    assert.equal(legacy.searchParams.get('tempToken'), 'temp-2fa-token');
+    assert.equal(legacy.searchParams.get('setup2fa'), '1');
+    assert.equal(legacy.searchParams.get('accessToken'), null);
+
+    const desktop = await signIn('google', 'platform=desktop');
+    assert.equal(desktop.statusCode, 200);
+    assert.ok(desktop.body.includes('"remote365://auth/2fa?tempToken=temp-2fa-token&setup=1"'), 'desktop setup deep link');
+
+    const mobile = await signIn('google', `platform=mobile&returnUrl=${enc('remote365://auth/callback')}`);
+    assert.equal(mobile.statusCode, 200);
+    assert.ok(mobile.body.includes('remote365://auth/callback?error='), 'mobile gets the message');
+    assert.ok(!mobile.body.includes('tempToken'), 'mobile gets no setup token');
+
+    assert.equal(tokensIssued, before, 'no tokens until 2FA is set up');
   }
   providerEmail = 'victim@example.com';
 

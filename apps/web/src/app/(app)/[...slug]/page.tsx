@@ -14,7 +14,7 @@ export default async function AppPage({ params }: { params: Promise<{ slug: stri
       <AppShell />
       {/* For fetches without JavaScript (link previews, store reviews). */}
       <noscript>
-        <div style={{ fontFamily: "'Mona Sans', 'Segoe UI', system-ui, sans-serif", maxWidth: 720, margin: '15vh auto 0', padding: '0 24px', color: '#111315' }}>
+        <div style={{ fontFamily: "'Mona Sans', 'Segoe UI', system-ui, sans-serif", maxWidth: 720, margin: '15vh auto 0', padding: '0 24px', color: 'var(--ink)' }}>
           <h1 style={{ fontSize: 28, margin: '0 0 12px' }}>Remote365</h1>
           <p style={{ fontSize: 16, lineHeight: 1.6, margin: '0 0 16px' }}>
             This part of Remote365 needs JavaScript. Remote365 is a secure

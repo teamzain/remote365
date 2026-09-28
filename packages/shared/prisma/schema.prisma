@@ -118,7 +118,7 @@ model LoginEvent {
   email     String
   ip        String?
   userAgent String?
-  result    String   // SUCCESS | INCORRECT_PASSWORD | NO_ACCOUNT | SUSPENDED | TWO_FACTOR
+  result    String   // SUCCESS | INCORRECT_PASSWORD | NO_ACCOUNT | SUSPENDED | TWO_FACTOR | TWO_FACTOR_SETUP
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])

@@ -82,6 +82,7 @@ const RESULTS: Record<string, { text: string; tone: 'ok' | 'fail' | 'warn' }> = 
   NO_ACCOUNT: { text: 'Invalid Credentials', tone: 'fail' },
   SUSPENDED: { text: 'Account Suspended', tone: 'fail' },
   TWO_FACTOR: { text: 'Two-Factor Requested', tone: 'warn' },
+  TWO_FACTOR_SETUP: { text: 'Two-Factor Setup Requested', tone: 'warn' },
 };
 const resultInfo = (r: string) => RESULTS[r] || { text: r, tone: 'warn' as const };
 const toneBadge = (tone: 'ok' | 'fail' | 'warn') =>

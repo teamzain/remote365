@@ -876,12 +876,12 @@ export const dashboardTranslations: Record<string, Record<Language, string>> = {
         "es": "Exigir autenticación en dos pasos",
         "ar-SA": "طلب المصادقة الثنائية"
     },
-    "Every member of your organization must set up 2FA to sign in.": {
-        "en": "Every member of your organization must set up 2FA to sign in.",
-        "de": "Jedes Mitglied Ihrer Organisation muss 2FA einrichten, um sich anzumelden.",
-        "fr": "Chaque membre de votre organisation doit configurer la 2FA pour se connecter.",
-        "es": "Todos los miembros de tu organización deben configurar la 2FA para iniciar sesión.",
-        "ar-SA": "يجب على كل عضو في مؤسستك إعداد 2FA لتسجيل الدخول."
+    "Every member of your organization must set up 2FA to sign in. Members without it are asked to set it up the next time they sign in.": {
+        "en": "Every member of your organization must set up 2FA to sign in. Members without it are asked to set it up the next time they sign in.",
+        "de": "Jedes Mitglied Ihrer Organisation muss 2FA einrichten, um sich anzumelden. Mitglieder ohne 2FA werden bei der nächsten Anmeldung aufgefordert, sie einzurichten.",
+        "fr": "Chaque membre de votre organisation doit configurer la 2FA pour se connecter. Les membres qui ne l'ont pas encore devront la configurer à leur prochaine connexion.",
+        "es": "Todos los miembros de tu organización deben configurar la 2FA para iniciar sesión. A quienes no la tengan se les pedirá configurarla la próxima vez que inicien sesión.",
+        "ar-SA": "يجب على كل عضو في مؤسستك إعداد 2FA لتسجيل الدخول. سيُطلب من الأعضاء الذين لم يفعّلوها إعدادها عند تسجيل الدخول التالي."
     },
     "Default Role For New Members": {
         "en": "Default Role For New Members",
@@ -896,34 +896,6 @@ export const dashboardTranslations: Record<string, Record<Language, string>> = {
         "fr": "Rôle attribué automatiquement lorsqu'une personne rejoint votre organisation.",
         "es": "El rol que se asigna automáticamente cuando alguien se une a tu organización.",
         "ar-SA": "الدور الذي يُعيَّن تلقائيًا عند انضمام شخص ما إلى مؤسستك."
-    },
-    "Company Contact List": {
-        "en": "Company Contact List",
-        "de": "Firmenkontaktliste",
-        "fr": "Liste des contacts de l'entreprise",
-        "es": "Lista de contactos de la empresa",
-        "ar-SA": "قائمة جهات اتصال الشركة"
-    },
-    "Allow users to browse and interact with other users in the company.": {
-        "en": "Allow users to browse and interact with other users in the company.",
-        "de": "Benutzern erlauben, andere Benutzer im Unternehmen zu finden und mit ihnen zu interagieren.",
-        "fr": "Autoriser les utilisateurs à parcourir et à interagir avec les autres utilisateurs de l'entreprise.",
-        "es": "Permitir que los usuarios vean e interactúen con otros usuarios de la empresa.",
-        "ar-SA": "السماح للمستخدمين بتصفح المستخدمين الآخرين في الشركة والتفاعل معهم."
-    },
-    "Event Logging": {
-        "en": "Event Logging",
-        "de": "Ereignisprotokollierung",
-        "fr": "Journalisation des événements",
-        "es": "Registro de eventos",
-        "ar-SA": "تسجيل الأحداث"
-    },
-    "User event data from the company is logged on Remote365 ID servers for 1 year.": {
-        "en": "User event data from the company is logged on Remote365 ID servers for 1 year.",
-        "de": "Benutzerereignisdaten des Unternehmens werden 1 Jahr lang auf Remote365 ID-Servern protokolliert.",
-        "fr": "Les données d'événements utilisateur de l'entreprise sont enregistrées sur les serveurs Remote365 ID pendant 1 an.",
-        "es": "Los datos de eventos de usuario de la empresa se registran en los servidores de Remote365 ID durante 1 año.",
-        "ar-SA": "تُسجَّل بيانات أحداث المستخدمين في الشركة على خوادم Remote365 ID لمدة سنة واحدة."
     },
     "Aggregating Platform Data...": {
         "en": "Aggregating Platform Data...",

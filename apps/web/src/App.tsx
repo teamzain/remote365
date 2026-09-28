@@ -52,6 +52,9 @@ function App() {
     import('./lib/customizationPreferences').then(({ applyCustomizationPreferences, readCustomizationPreferences }) => {
       applyCustomizationPreferences(readCustomizationPreferences())
     }).catch(() => undefined)
+    // The dark theme belongs to the signed-in app only: drop the class if the
+    // user navigates client-side to a website page, which shares <html>.
+    return () => { document.documentElement.classList.remove('dark') }
   }, [initialize])
 
   useEffect(() => {

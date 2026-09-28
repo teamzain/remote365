@@ -80,6 +80,17 @@ export default async function mfaRoutes(fastify: FastifyInstance) {
       const decoded = verifyToken(token);
       if (!decoded || !decoded.userId) return reply.code(401).send({ error: 'Invalid token' });
 
+      // An org that requires 2FA (Admin Settings → General) keeps it on for
+      // every member; otherwise a member could turn it off right after the
+      // sign-in setup and be gated again next time.
+      const user = await prisma.user.findUnique({ where: { id: decoded.userId }, select: { organizationId: true } });
+      if (user?.organizationId) {
+        const org = await prisma.organization.findUnique({ where: { id: user.organizationId }, select: { require2FA: true } });
+        if (org?.require2FA) {
+          return reply.code(403).send({ error: 'Your organization requires two-factor authentication, so it cannot be turned off.' });
+        }
+      }
+
       await prisma.user.update({
         where: { id: decoded.userId },
         data: { is2FAEnabled: false, twoFactorSecret: null }

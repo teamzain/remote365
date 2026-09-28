@@ -185,7 +185,7 @@ export default function App() {
     const [loading, setLoading] = useState(true);
     const [showSplash, setShowSplash] = useState(false);
     const [isSplashComplete, setIsSplashComplete] = useState(false);
-    const { user, accessToken, temp2faToken, login: storeLogin, verify2fa: storeVerify2fa, setTemp2faToken, register: storeRegister, requestVerification: storeRequestVerification, logout: storeLogout, checkAuth, setAuth } = useAuthStore();
+    const { user, accessToken, temp2faToken, temp2faSetup, login: storeLogin, verify2fa: storeVerify2fa, start2faSetup, setTemp2faToken, register: storeRegister, requestVerification: storeRequestVerification, logout: storeLogout, checkAuth, setAuth } = useAuthStore();
 
     // --- Global Theme, Font Size & Locale ---
     useEffect(() => {
@@ -285,6 +285,17 @@ export default function App() {
     const chatConversations = useChatStore((state) => state.conversations);
     const [twoFaError, setTwoFaError] = useState<string | null>(null);
     const [isVerifying2fa, setIsVerifying2fa] = useState(false);
+    // Required 2FA setup (the org demands 2FA, this account has none): the QR
+    // code to scan before the first code is entered.
+    const [setupQr, setSetupQr] = useState<string | null>(null);
+    useEffect(() => {
+        if (!temp2faToken || !temp2faSetup) { setSetupQr(null); return; }
+        let cancelled = false;
+        start2faSetup()
+            .then((qr) => { if (!cancelled) setSetupQr(qr || null); })
+            .catch((err: any) => { if (!cancelled) setTwoFaError(err?.response?.data?.error || 'Could not start the two-factor setup. Sign in again.'); });
+        return () => { cancelled = true; };
+    }, [temp2faToken, temp2faSetup, start2faSetup]);
 
     type ViewType = 'home' | 'dashboard' | 'devices' | 'settings' | 'host' | 'billing' | 'profile' | 'support' | 'members' | 'organizations' | 'analytics' | 'connect' | 'org-detail' | 'admin_settings' | 'meetings' | 'support_workstation' | 'end_user_home';
     const [currentView, _setCurrentView] = useState<ViewType>(() => {
@@ -860,9 +871,9 @@ export default function App() {
         const cleanups: (() => void)[] = [];
 
         if ((window as any).electronAPI?.onTemp2faToken) {
-            const cleanup = (window as any).electronAPI.onTemp2faToken((token: string) => {
-                console.log('[Auth] Received 2FA temp token via deep link');
-                setTemp2faToken(token);
+            const cleanup = (window as any).electronAPI.onTemp2faToken((token: string, setup: boolean) => {
+                console.log(`[Auth] Received 2FA temp token via deep link${setup ? ' (setup)' : ''}`);
+                setTemp2faToken(token, setup);
             });
             if (cleanup) cleanups.push(cleanup);
         }
@@ -3559,6 +3570,7 @@ export default function App() {
         if (hotkey) eAPI?.setPanicHotkey?.(hotkey).catch?.(() => {});
         const idleMin = Number(localStorage.getItem('pref_idle_disconnect_min') || 0);
         if (idleMin > 0) eAPI?.setIdleTimeout?.(idleMin).catch?.(() => {});
+        eAPI?.setLockOnDisconnect?.(localStorage.getItem('remote365_lock_on_disconnect') === 'true').catch?.(() => {});
         const dir = localStorage.getItem('pref_received_dir') || '';
         if (dir) eAPI?.setReceivedDir?.(dir).catch?.(() => {});
         // Network settings: proxy + WebRTC transport policy.
@@ -3856,6 +3868,17 @@ export default function App() {
         return () => { cancelled = true; };
     }, []);
 
+    // While signed in, re-check the session every few minutes: a sign-in
+    // revoked from Settings → Active Sign-Ins on another device then signs
+    // this one out even when it is idle, and its "Last Active" stays current.
+    useEffect(() => {
+        if (!accessToken || isViewerWindow) return;
+        const id = setInterval(() => {
+            useAuthStore.getState().checkAuth({ silent: true }).catch(() => {});
+        }, 5 * 60 * 1000);
+        return () => clearInterval(id);
+    }, [accessToken, isViewerWindow]);
+
     useEffect(() => {
         checkAuth().then(() => {
             // If the user is already authenticated (restored from stored token),
@@ -3902,8 +3925,8 @@ export default function App() {
         });
 
         // Listen for 2FA token
-        const removeTemp2fa = (window as any).electronAPI.onTemp2faToken?.((token: string) => {
-            setTemp2faToken(token);
+        const removeTemp2fa = (window as any).electronAPI.onTemp2faToken?.((token: string, setup: boolean) => {
+            setTemp2faToken(token, setup);
         });
 
         if (isElectron) {
@@ -5452,16 +5475,25 @@ export default function App() {
                             </div>
                             <div className="flex flex-col">
                                 <span className="text-xl font-bold text-[#1C1C1C] tracking-tighter leading-none">Remote365</span>
-                                <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-[#1C1C1C] mt-1">Verification Required</span>
+                                <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-[#1C1C1C] mt-1">{temp2faSetup ? 'Setup Required' : 'Verification Required'}</span>
                             </div>
                         </div>
 
-                        <h1 className="text-3xl font-extrabold text-[#1C1C1C] tracking-tight mb-2">Two-Factor Auth</h1>
+                        <h1 className="text-3xl font-extrabold text-[#1C1C1C] tracking-tight mb-2">{temp2faSetup ? 'Set Up Two-Factor' : 'Two-Factor Auth'}</h1>
                         <p className="text-sm font-medium text-[#1C1C1C] mb-8 leading-relaxed">
-                            Open your authenticator app and enter the 6-digit verification code.
+                            {temp2faSetup
+                                ? 'Your organization requires two-factor authentication. Scan this QR code with an authenticator app, then enter the 6-digit code it shows.'
+                                : 'Open your authenticator app and enter the 6-digit verification code.'}
                         </p>
 
                         <form onSubmit={handleVerify2faLogin} className="space-y-6">
+                            {temp2faSetup && (
+                                <div className="flex items-center justify-center rounded-2xl border border-[rgba(28,28,28,0.15)] bg-[#F8F9FA] p-4 min-h-[212px]">
+                                    {setupQr
+                                        ? <img src={setupQr} alt="Two-factor authentication QR code" className="h-44 w-44" />
+                                        : <RefreshCw size={20} className="animate-spin text-[#1C1C1C]" />}
+                                </div>
+                            )}
                             <div className="space-y-1.5">
                                 <input
                                     autoFocus
@@ -5525,7 +5557,7 @@ export default function App() {
                     className="absolute left-[80px] top-[60px] flex items-center gap-2 group z-20 hover:opacity-80 transition-opacity"
                 >
                     <ArrowLeft size={16} color="#000000" />
-                    <span style={{ fontFamily: "'Mona Sans', sans-serif", fontSize: '14px', fontWeight: 400, color: '#000000' }}>Back</span>
+                    <span style={{ fontFamily: "'Mona Sans', sans-serif", fontSize: '14px', fontWeight: 400, color: 'var(--ink)' }}>Back</span>
                 </button>
                 <button
                     type="button"
@@ -5552,7 +5584,7 @@ export default function App() {
                         </div>
 
                         {/* Account toggle / mode caption */}
-                        <div className="w-[420px] h-[24px] flex items-center justify-center gap-1" style={{ fontSize: 'clamp(12px, 0.9vw, 15px)', color: 'rgba(26, 29, 33, 0.5)' }}>
+                        <div className="w-[420px] h-[24px] flex items-center justify-center gap-1" style={{ fontSize: 'clamp(12px, 0.9vw, 15px)', color: 'var(--ink-50)' }}>
                             {(authMode === 'login' || authMode === 'signup') ? (
                                 <>
                                     <span>{authMode === 'login' ? "Don't have an account?" : 'Already Have An Account?'}</span>
@@ -5592,7 +5624,7 @@ export default function App() {
                         </div>
 
                         {(authMode === 'forgot' || authMode === 'reset') && (
-                            <div style={{ width: '209px', height: '20px', fontSize: '14px', textAlign: 'center', color: '#000000' }}>
+                            <div style={{ width: '209px', height: '20px', fontSize: '14px', textAlign: 'center', color: 'var(--ink)' }}>
                                 {authMode === 'forgot' ? 'Reset your password.' : 'Enter your new password.'}
                             </div>
                         )}
@@ -5605,7 +5637,7 @@ export default function App() {
                             {viewerStep === 1 ? (
                                 <div className="space-y-4">
                                     <div className="space-y-1.5">
-                                        <div style={{ fontSize: '14px', color: '#111315', height: '24px' }}>Device Access Key</div>
+                                        <div style={{ fontSize: '14px', color: 'var(--ink)', height: '24px' }}>Device Access Key</div>
                                         <input
                                             autoFocus
                                             type="text"
@@ -5628,7 +5660,7 @@ export default function App() {
                                             background: 'linear-gradient(118.29deg, #FF8A00 38.71%, #FFB347 88.95%)',
                                             height: '40px',
                                             borderRadius: '4px',
-                                            color: '#111315',
+                                            color: 'var(--ink)',
                                             fontWeight: 500,
                                             fontSize: '14px'
                                         }}
@@ -5640,7 +5672,7 @@ export default function App() {
                             ) : (
                                 <div className="space-y-4 animate-in slide-in-from-right-4 duration-300">
                                     <div className="space-y-1.5">
-                                        <div style={{ fontSize: '14px', color: '#111315', height: '24px' }}>Device Password</div>
+                                        <div style={{ fontSize: '14px', color: 'var(--ink)', height: '24px' }}>Device Password</div>
                                         <input
                                             autoFocus
                                             type="password"
@@ -5662,7 +5694,7 @@ export default function App() {
                                             background: 'linear-gradient(118.29deg, #FF8A00 38.71%, #FFB347 88.95%)',
                                             height: '40px',
                                             borderRadius: '4px',
-                                            color: '#111315',
+                                            color: 'var(--ink)',
                                             fontWeight: 500,
                                             fontSize: '14px'
                                         }}
@@ -5680,7 +5712,7 @@ export default function App() {
                         <div className="animate-in fade-in duration-300">
                             <form onSubmit={handleForgotPassword} className="space-y-4">
                                 <div className="space-y-1.5">
-                                    <div style={{ fontSize: '14px', color: '#111315', height: '24px' }}>Account Email</div>
+                                    <div style={{ fontSize: '14px', color: 'var(--ink)', height: '24px' }}>Account Email</div>
                                     <input
                                         autoFocus
                                         type="email"
@@ -5704,7 +5736,7 @@ export default function App() {
                                         background: 'linear-gradient(118.29deg, #FF8A00 38.71%, #FFB347 88.95%)',
                                         height: '40px',
                                         borderRadius: '4px',
-                                        color: '#111315',
+                                        color: 'var(--ink)',
                                         fontWeight: 500,
                                         fontSize: '14px'
                                     }}
@@ -5719,7 +5751,7 @@ export default function App() {
                             <form onSubmit={handleResetPassword} className="space-y-4">
                                 <div className="space-y-4">
                                     <div className="space-y-1.5">
-                                        <div style={{ fontSize: '14px', color: '#111315', height: '24px' }}>Reset Code</div>
+                                        <div style={{ fontSize: '14px', color: 'var(--ink)', height: '24px' }}>Reset Code</div>
                                         <input
                                             autoFocus
                                             type="text"
@@ -5733,7 +5765,7 @@ export default function App() {
                                         />
                                     </div>
                                     <div className="space-y-1.5">
-                                        <div style={{ fontSize: '14px', color: '#111315', height: '24px' }}>New Password</div>
+                                        <div style={{ fontSize: '14px', color: 'var(--ink)', height: '24px' }}>New Password</div>
                                         <div className="relative w-full h-[40px]">
                                             <input
                                                 type={showResetPassword ? "text" : "password"}
@@ -5765,7 +5797,7 @@ export default function App() {
                                         background: 'linear-gradient(118.29deg, #FF8A00 38.71%, #FFB347 88.95%)',
                                         height: '40px',
                                         borderRadius: '4px',
-                                        color: '#111315',
+                                        color: 'var(--ink)',
                                         fontWeight: 500,
                                         fontSize: '14px'
                                     }}
@@ -5810,7 +5842,7 @@ export default function App() {
                                 {authMode === 'signup' && isAwaitingVerification ? (
                                     <div className="flex flex-col gap-3">
                                         <div className="space-y-1.5">
-                                            <div style={{ fontSize: '14px', color: '#111315', height: '24px' }}>Verification Code</div>
+                                            <div style={{ fontSize: '14px', color: 'var(--ink)', height: '24px' }}>Verification Code</div>
                                             <input
                                                 autoFocus
                                                 inputMode="numeric"
@@ -5824,13 +5856,13 @@ export default function App() {
                                                 style={{ height: '40px' }}
                                             />
                                         </div>
-                                        <p style={{ fontFamily: "'Mona Sans', sans-serif", fontSize: '12px', lineHeight: '17px', color: 'rgba(26, 29, 33, 0.6)', margin: 0 }}>
+                                        <p style={{ fontFamily: "'Mona Sans', sans-serif", fontSize: '12px', lineHeight: '17px', color: 'var(--ink-60)', margin: 0 }}>
                                             {verificationEmailSent
-                                                ? <>We emailed a 6-digit code to <strong style={{ color: '#111315' }}>{email}</strong>. It stays valid for 10 minutes. Not in your inbox? Check your spam or junk folder.</>
+                                                ? <>We emailed a 6-digit code to <strong style={{ color: 'var(--ink)' }}>{email}</strong>. It stays valid for 10 minutes. Not in your inbox? Check your spam or junk folder.</>
                                                 : <span style={{ color: '#B45309' }}>We could not send the email right now. Please try again in a few minutes or contact support.</span>}
                                         </p>
                                         <div className="flex items-center justify-between" style={{ fontFamily: "'Mona Sans', sans-serif", fontSize: '13px' }}>
-                                            <button type="button" onClick={() => { setIsAwaitingVerification(false); setVerificationCode(''); setAuthError(null); }} className="hover:underline" style={{ color: 'rgba(26, 29, 33, 0.7)', fontWeight: 500 }}>
+                                            <button type="button" onClick={() => { setIsAwaitingVerification(false); setVerificationCode(''); setAuthError(null); }} className="hover:underline" style={{ color: 'var(--ink-70)', fontWeight: 500 }}>
                                                 Back
                                             </button>
                                             <button type="button" onClick={handleResendVerification} disabled={resendCooldown > 0 || loading} className="hover:underline disabled:opacity-50 disabled:no-underline" style={{ color: '#FF8A00', fontWeight: 600 }}>
@@ -5842,7 +5874,7 @@ export default function App() {
                                     <>
                                         {/* Email Input */}
                                         <div className="flex flex-col gap-[8px]">
-                                            <div style={{ fontSize: '14px', fontWeight: 400, color: '#111315', height: '24px' }}>{authMode === 'signup' && signupAccountType === 'business' ? 'Company Email' : 'Email'}</div>
+                                            <div style={{ fontSize: '14px', fontWeight: 400, color: 'var(--ink)', height: '24px' }}>{authMode === 'signup' && signupAccountType === 'business' ? 'Company Email' : 'Email'}</div>
                                             <input
                                                 type="email" required
                                                 value={email}
@@ -5855,7 +5887,7 @@ export default function App() {
 
                                         {/* Password Input */}
                                         <div className="flex flex-col gap-[8px]">
-                                            <div style={{ fontSize: '14px', fontWeight: 400, color: '#111315', height: '24px' }}>Password</div>
+                                            <div style={{ fontSize: '14px', fontWeight: 400, color: 'var(--ink)', height: '24px' }}>Password</div>
                                             <div className="relative w-full h-[40px]">
                                                 <input
                                                     type={showLoginPassword ? "text" : "password"} 
@@ -5893,7 +5925,7 @@ export default function App() {
                                                     className="absolute w-[20px] h-[20px] opacity-0 cursor-pointer m-0 z-10"
                                                 />
                                             </div>
-                                            <span style={{ fontFamily: "'Mona Sans', sans-serif", fontSize: '13px', color: '#1A1D21' }}>Remember Me</span>
+                                            <span style={{ fontFamily: "'Mona Sans', sans-serif", fontSize: '13px', color: 'var(--ink)' }}>Remember Me</span>
                                         </label>
                                         <button
                                             type="button"
@@ -5923,7 +5955,7 @@ export default function App() {
                                         background: 'linear-gradient(118.29deg, #FF8A00 38.71%, #FFB347 88.95%)',
                                         height: '40px',
                                         borderRadius: '4px',
-                                        color: '#111315',
+                                        color: 'var(--ink)',
                                         fontWeight: 500,
                                         fontSize: '14px'
                                     }}
@@ -5936,7 +5968,7 @@ export default function App() {
                                 {/* OR Separator */}
                                 <div className="flex items-center gap-4 w-full h-[20px]">
                                     <div className="flex-grow h-[1px] bg-[rgba(26,29,33,0.3)]"></div>
-                                    <span style={{ fontFamily: "'Mona Sans', sans-serif", fontSize: '14px', color: 'rgba(26, 29, 33, 0.3)' }}>Or</span>
+                                    <span style={{ fontFamily: "'Mona Sans', sans-serif", fontSize: '14px', color: 'var(--ink-30)' }}>Or</span>
                                     <div className="flex-grow h-[1px] bg-[rgba(26,29,33,0.3)]"></div>
                                 </div>
 
@@ -5947,11 +5979,11 @@ export default function App() {
                                     style={{ 
                                         height: '40px',
                                         borderRadius: '4px',
-                                        border: '1px solid rgba(26, 29, 33, 0.3)',
+                                        border: '1px solid var(--border-strong)',
                                         fontFamily: "'Mona Sans', sans-serif",
                                         fontSize: '14px',
                                         fontWeight: 500,
-                                        color: '#111315'
+                                        color: 'var(--ink)'
                                     }}
                                     className="w-full flex items-center justify-center gap-[12px] hover:bg-slate-50 transition-colors"
                                 >
@@ -5970,11 +6002,11 @@ export default function App() {
                                     style={{
                                         height: '40px',
                                         borderRadius: '4px',
-                                        border: '1px solid rgba(26, 29, 33, 0.3)',
+                                        border: '1px solid var(--border-strong)',
                                         fontFamily: "'Mona Sans', sans-serif",
                                         fontSize: '14px',
                                         fontWeight: 500,
-                                        color: '#111315'
+                                        color: 'var(--ink)'
                                     }}
                                     className="w-full flex items-center justify-center gap-[12px] hover:bg-slate-50 transition-colors"
                                 >
@@ -6001,7 +6033,7 @@ export default function App() {
                             fontSize: '12px', 
                             lineHeight: '17px',
                             textAlign: 'center',
-                            color: '#000000'
+                            color: 'var(--ink)'
                         }}>
                             By signing in, you acknowledge that your data may be processed in accordance with our terms.
                         </div>

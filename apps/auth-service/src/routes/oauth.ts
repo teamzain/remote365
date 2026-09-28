@@ -9,6 +9,7 @@ import { saveAuthSession, enforceMaxSessions } from '../utils/authSessions';
 import { sendWelcomeEmail } from '../utils/welcomeEmail';
 import { isFreeMailDomain } from './auth';
 import { getPublicWebUrl } from '../utils/publicUrls';
+import { twoFactorGate, TWO_FACTOR_SETUP_MOBILE_MESSAGE } from '../utils/twoFactorGate';
 import {
   OauthState,
   decodeOauthState,
@@ -94,7 +95,9 @@ const INVALID_STATE_ERROR = 'This sign-in link is invalid or has expired. Please
 // POST /exchange, so the tokens never sit in a URL, the browser history or a
 // Referer. The code lives in Redis for two minutes and works once.
 
-type OauthGrant = { accessToken: string; refreshToken: string } | { tempToken: string };
+// `setup`: the org requires 2FA and the account has none, so the temp token
+// starts the 2FA setup (see utils/twoFactorGate) instead of a code check.
+type OauthGrant = { accessToken: string; refreshToken: string } | { tempToken: string; setup?: boolean };
 
 const HANDOFF_TTL_SECONDS = 120;
 const handoffKey = (code: string) => `auth:oauth:handoff:${code}`;
@@ -124,9 +127,11 @@ async function redirectToWeb(reply: FastifyReply, oauthState: OauthState, grant:
     return reply.redirect(appendParamToUrl(callbackUrl, 'code', await createHandoffCode(grant)));
   }
   // Web builds from before the code handoff read the tokens from the URL.
-  return reply.redirect('tempToken' in grant
-    ? appendParamToUrl(callbackUrl, 'tempToken', grant.tempToken)
-    : appendTokensToUrl(callbackUrl, grant));
+  if ('tempToken' in grant) {
+    const withToken = appendParamToUrl(callbackUrl, 'tempToken', grant.tempToken);
+    return reply.redirect(grant.setup ? appendParamToUrl(withToken, 'setup2fa', '1') : withToken);
+  }
+  return reply.redirect(appendTokensToUrl(callbackUrl, grant));
 }
 
 function appendTokensToUrl(returnUrl: string, tokens: { accessToken: string; refreshToken: string }) {
@@ -450,17 +455,29 @@ async function finishOauthSignIn(
     }
 
     // ── 2FA Check ──
-    if ((user as any).is2FAEnabled) {
-      const { generateToken } = require('@remotelink/shared');
-      const tempToken = generateToken({ userId: user!.id, type: '2fa-temp' }, '5m');
+    // verify: the account has 2FA, enter the code. setup: the org requires
+    // 2FA and the account has none, so the app shows the setup (QR code)
+    // step instead. The mobile app has no setup step yet: it gets the
+    // message on its sign-in screen, like a refused business sign-up.
+    const gate = await twoFactorGate(user);
+    if (gate?.kind === 'setup' && platform === 'mobile') {
+      return reply.type('text/html').send(renderDesktopLaunchPage(`remote365://auth/callback?error=${encodeURIComponent(TWO_FACTOR_SETUP_MOBILE_MESSAGE)}`, 'Remote 365 mobile app'));
+    }
+    if (gate) {
+      const { tempToken } = gate;
+      const setup = gate.kind === 'setup';
 
       if (platform === 'desktop' || platform === 'mobile') {
-        const deepLink = `remote365://auth/2fa?tempToken=${tempToken}`;
+        const deepLink = `remote365://auth/2fa?tempToken=${tempToken}${setup ? '&setup=1' : ''}`;
+        const title = setup ? 'Set Up 2FA' : '2FA Required';
+        const hint = setup
+          ? 'Your organization requires two-factor authentication. Open the Remote 365 app to set it up.'
+          : 'Please open the Remote 365 app to enter your security code.';
         return reply.type('text/html').send(`
           <!DOCTYPE html>
           <html>
             <head>
-              <title>2FA Required | Remote 365</title>
+              <title>${title} | Remote 365</title>
               <style>
                 body {
                   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -513,8 +530,8 @@ async function finishOauthSignIn(
                 <div class="icon-box">
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
                 </div>
-                <h1>2FA Required</h1>
-                <p>Please open the Remote 365 app to enter your security code.</p>
+                <h1>${title}</h1>
+                <p>${hint}</p>
                 <a href="${deepLink}" class="btn">Open Remote 365</a>
               </div>
               <script>setTimeout(() => { window.location.href = "${deepLink}"; }, 1000);</script>
@@ -523,7 +540,7 @@ async function finishOauthSignIn(
         `);
       }
 
-      return redirectToWeb(reply, oauthState, { tempToken });
+      return redirectToWeb(reply, oauthState, setup ? { tempToken, setup: true } : { tempToken });
     }
 
     // Issue our own JWT tokens
@@ -741,7 +758,9 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'This sign-in has expired. Please sign in again.' });
     }
     if ('tempToken' in grant) {
-      return reply.send({ twoFactorRequired: true, tempToken: grant.tempToken });
+      return reply.send(grant.setup
+        ? { twoFactorRequired: true, twoFactorSetupRequired: true, tempToken: grant.tempToken }
+        : { twoFactorRequired: true, tempToken: grant.tempToken });
     }
     return reply.send({ accessToken: grant.accessToken, refreshToken: grant.refreshToken });
   });

@@ -7,6 +7,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { prisma, redisPublisher, EventChannel, verifyToken } from '@remotelink/shared';
+import { touchAuthSession } from './utils/authSessions';
 import authRoutes from './routes/auth';
 import oauthRoutes from './routes/oauth';
 import mfaRoutes from './routes/2fa';
@@ -51,8 +52,11 @@ server.addHook('onRequest', async (request, reply) => {
 
   const revoked = await redisPublisher.exists(`auth:sessions:revoked:${decoded.userId}:${decoded.sid}`);
   if (revoked) {
-    return reply.code(401).send({ error: 'Session revoked' });
+    return reply.code(401).send({ error: 'This sign-in was signed out. Sign in again.', sessionRevoked: true });
   }
+  // Keep "Last Active" on Settings → Active Sign-Ins honest: any authenticated
+  // request counts as activity (throttled inside). Never blocks the request.
+  touchAuthSession(decoded.userId, decoded.sid, request).catch(() => {});
 });
 
 server.get('/health', async () => {

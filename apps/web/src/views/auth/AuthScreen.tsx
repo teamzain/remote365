@@ -32,7 +32,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
     register: storeRegister,
     requestVerification: storeRequestVerification,
     verify2fa: storeVerify2fa,
+    start2faSetup,
     temp2faToken,
+    temp2faSetup,
     setTemp2faToken,
     accessToken,
   } = useAuthStore();
@@ -101,6 +103,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
   const [totpCode, setTotpCode] = useState('');
   const [twoFaError, setTwoFaError] = useState<string | null>(null);
   const [isVerifying2fa, setIsVerifying2fa] = useState(false);
+  // Required 2FA setup: the QR code to scan before the first code is entered.
+  const [setupQr, setSetupQr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!temp2faToken || !temp2faSetup) { setSetupQr(null); return; }
+    let cancelled = false;
+    start2faSetup()
+      .then((qr) => { if (!cancelled) setSetupQr(qr || null); })
+      .catch((err: any) => { if (!cancelled) setTwoFaError(err?.response?.data?.error || 'Could not start the two-factor setup. Sign in again.'); });
+    return () => { cancelled = true; };
+  }, [temp2faToken, temp2faSetup, start2faSetup]);
 
   // Already signed in → straight to the dashboard. Held while a sign-in
   // just succeeded, so the animated tick gets its moment on screen before
@@ -282,7 +294,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
     background: ORANGE_GRADIENT,
     height: '40px',
     borderRadius: '4px',
-    color: '#111315',
+    color: 'var(--ink)',
     fontWeight: 500,
     fontSize: '14px',
   };
@@ -298,17 +310,24 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
             </div>
             <div className="flex flex-col">
               <span className="text-xl font-bold text-[#1C1C1C] tracking-tighter leading-none">Remote365</span>
-              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-[#1C1C1C] mt-1">{ta('twoFactorTag', language)}</span>
+              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-[#1C1C1C] mt-1">{ta(temp2faSetup ? 'twoFactorSetupTag' : 'twoFactorTag', language)}</span>
             </div>
           </div>
 
-          <h1 className="text-3xl font-extrabold text-[#1C1C1C] tracking-tight mb-2">{ta('twoFactorTitle', language)}</h1>
+          <h1 className="text-3xl font-extrabold text-[#1C1C1C] tracking-tight mb-2">{ta(temp2faSetup ? 'twoFactorSetupTitle' : 'twoFactorTitle', language)}</h1>
           <p className="text-sm font-medium text-[#1C1C1C] mb-8 leading-relaxed">
-            {ta('twoFactorHint', language)}
+            {ta(temp2faSetup ? 'twoFactorSetupHint' : 'twoFactorHint', language)}
           </p>
 
           <form onSubmit={handleVerify2faLogin} className="space-y-6">
             <AuthResultModal state={authResult} onClose={closeAuthResult} />
+            {temp2faSetup && (
+              <div className="flex items-center justify-center rounded-2xl border border-[rgba(28,28,28,0.15)] bg-[#F8F9FA] p-4 min-h-[212px]">
+                {setupQr
+                  ? <img src={setupQr} alt="Two-factor authentication QR code" className="h-44 w-44" />
+                  : <RefreshCw size={20} className="animate-spin text-[#1C1C1C]" />}
+              </div>
+            )}
             <input
               autoFocus
               type="text"
@@ -383,7 +402,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
         className="absolute left-4 top-5 sm:left-[80px] sm:top-[60px] flex items-center gap-2 z-20 hover:opacity-80 transition-opacity"
       >
         <ArrowLeft size={16} color="#000000" />
-        <span style={{ fontFamily: MONA, fontSize: '14px', fontWeight: 400, color: '#000000' }}>{ta('back', language)}</span>
+        <span style={{ fontFamily: MONA, fontSize: '14px', fontWeight: 400, color: 'var(--ink)' }}>{ta('back', language)}</span>
       </button>
 
       {/* Card */}
@@ -399,7 +418,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
 
           <div
             className="w-full max-w-[420px] h-[24px] flex items-center justify-center gap-1"
-            style={{ fontSize: 'clamp(12px, 0.9vw, 15px)', color: 'rgba(26, 29, 33, 0.5)' }}
+            style={{ fontSize: 'clamp(12px, 0.9vw, 15px)', color: 'var(--ink-50)' }}
           >
             {authMode === 'login' || authMode === 'signup' ? (
               <>
@@ -437,7 +456,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
             )}
           </div>
 
-          <div style={{ maxWidth: '100%', height: captionCopy ? '20px' : '0', fontSize: '14px', textAlign: 'center', color: '#000000' }}>
+          <div style={{ maxWidth: '100%', height: captionCopy ? '20px' : '0', fontSize: '14px', textAlign: 'center', color: 'var(--ink)' }}>
             {captionCopy}
           </div>
         </div>
@@ -447,7 +466,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
           {authMode === 'forgot' ? (
             <form onSubmit={handleForgotPassword} className="space-y-4 animate-fade-in">
               <div className="space-y-1.5">
-                <div style={{ fontSize: '14px', color: '#111315', height: '24px' }}>{ta('accountEmail', language)}</div>
+                <div style={{ fontSize: '14px', color: 'var(--ink)', height: '24px' }}>{ta('accountEmail', language)}</div>
                 <input
                   autoFocus
                   type="email"
@@ -470,7 +489,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
           ) : authMode === 'reset' ? (
             <form onSubmit={handleResetPassword} className="space-y-4 animate-fade-in">
               <div className="space-y-1.5">
-                <div style={{ fontSize: '14px', color: '#111315', height: '24px' }}>{ta('resetCode', language)}</div>
+                <div style={{ fontSize: '14px', color: 'var(--ink)', height: '24px' }}>{ta('resetCode', language)}</div>
                 <input
                   autoFocus
                   type="text"
@@ -484,7 +503,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
                 />
               </div>
               <div className="space-y-1.5">
-                <div style={{ fontSize: '14px', color: '#111315', height: '24px' }}>{ta('newPassword', language)}</div>
+                <div style={{ fontSize: '14px', color: 'var(--ink)', height: '24px' }}>{ta('newPassword', language)}</div>
                 <div className="relative w-full h-[40px]">
                   <input
                     type={showResetPassword ? 'text' : 'password'}
@@ -518,7 +537,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
               <form onSubmit={authMode === 'login' ? handleLogin : handleSignup} className="flex flex-col gap-[16px]">
                 {authMode === 'signup' && isAwaitingVerification ? (
                   <div className="flex flex-col gap-[8px]">
-                    <div style={{ fontSize: '14px', color: '#111315', height: '24px' }}>{ta('verificationCode', language)}</div>
+                    <div style={{ fontSize: '14px', color: 'var(--ink)', height: '24px' }}>{ta('verificationCode', language)}</div>
                     <input
                       autoFocus
                       inputMode="numeric"
@@ -531,7 +550,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
                       className={`${inputClass} text-center text-xl font-mono font-bold tracking-[0.2em]`}
                       style={{ height: '40px' }}
                     />
-                    <p className="text-[11px]" style={{ color: 'rgba(26,29,33,0.5)' }}>
+                    <p className="text-[11px]" style={{ color: 'var(--ink-50)' }}>
                       {ta('codeSent', language, { email })}
                     </p>
                   </div>
@@ -566,7 +585,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
                     )}
                     <div className={authMode === 'signup' && signupAccountType === 'business' && businessStep < 3 ? 'hidden' : 'contents'}>
                     <div className="flex flex-col gap-[8px]">
-                      <div style={{ fontSize: '14px', fontWeight: 400, color: '#111315', height: '24px' }}>{ta(authMode === 'signup' && signupAccountType === 'business' ? 'companyEmail' : 'email', language)}</div>
+                      <div style={{ fontSize: '14px', fontWeight: 400, color: 'var(--ink)', height: '24px' }}>{ta(authMode === 'signup' && signupAccountType === 'business' ? 'companyEmail' : 'email', language)}</div>
                       <input
                         type="email"
                         required
@@ -579,7 +598,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
                     </div>
 
                     <div className="flex flex-col gap-[8px]">
-                      <div style={{ fontSize: '14px', fontWeight: 400, color: '#111315', height: '24px' }}>{ta('password', language)}</div>
+                      <div style={{ fontSize: '14px', fontWeight: 400, color: 'var(--ink)', height: '24px' }}>{ta('password', language)}</div>
                       <div className="relative w-full h-[40px]">
                         <input
                           type={showLoginPassword ? 'text' : 'password'}
@@ -620,7 +639,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
                           className="absolute w-[20px] h-[20px] opacity-0 cursor-pointer m-0 z-10"
                         />
                       </div>
-                      <span style={{ fontFamily: MONA, fontSize: '13px', color: '#1A1D21' }}>{ta('rememberMe', language)}</span>
+                      <span style={{ fontFamily: MONA, fontSize: '13px', color: 'var(--ink)' }}>{ta('rememberMe', language)}</span>
                     </label>
                     <button
                       type="button"
@@ -654,7 +673,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
 
                 <div className="flex items-center gap-4 w-full h-[20px]">
                   <div className="flex-grow h-[1px] bg-[rgba(26,29,33,0.3)]" />
-                  <span style={{ fontFamily: MONA, fontSize: '14px', color: 'rgba(26, 29, 33, 0.3)' }}>{ta('or', language)}</span>
+                  <span style={{ fontFamily: MONA, fontSize: '14px', color: 'var(--ink-30)' }}>{ta('or', language)}</span>
                   <div className="flex-grow h-[1px] bg-[rgba(26,29,33,0.3)]" />
                 </div>
 
@@ -664,11 +683,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
                   style={{
                     height: '40px',
                     borderRadius: '4px',
-                    border: '1px solid rgba(26, 29, 33, 0.3)',
+                    border: '1px solid var(--border-strong)',
                     fontFamily: MONA,
                     fontSize: '14px',
                     fontWeight: 500,
-                    color: '#111315',
+                    color: 'var(--ink)',
                   }}
                   className="w-full flex items-center justify-center gap-[12px] hover:bg-slate-50 transition-colors"
                 >
@@ -687,11 +706,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
                   style={{
                     height: '40px',
                     borderRadius: '4px',
-                    border: '1px solid rgba(26, 29, 33, 0.3)',
+                    border: '1px solid var(--border-strong)',
                     fontFamily: MONA,
                     fontSize: '14px',
                     fontWeight: 500,
-                    color: '#111315',
+                    color: 'var(--ink)',
                   }}
                   className="w-full flex items-center justify-center gap-[12px] hover:bg-slate-50 transition-colors"
                 >
@@ -718,7 +737,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ initialMode = 'login' })
               fontSize: '12px',
               lineHeight: '17px',
               textAlign: 'center',
-              color: '#000000',
+              color: 'var(--ink)',
             }}
           >
             {ta('disclaimer', language)}

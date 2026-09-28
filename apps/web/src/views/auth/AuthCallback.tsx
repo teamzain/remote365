@@ -5,7 +5,9 @@ import { Box, CircularProgress, Typography } from '@mui/material';
 import { useAuthStore } from '../../store/authStore';
 import api from '../../lib/api';
 
-type OAuthGrant = { accessToken?: string; refreshToken?: string; tempToken?: string };
+// twoFactorSetupRequired: the org requires 2FA and this account has none, so
+// the temp token starts the setup step instead of the code prompt.
+type OAuthGrant = { accessToken?: string; refreshToken?: string; tempToken?: string; twoFactorSetupRequired?: boolean };
 
 // These calls carry the NEW sign-in's credentials, so they skip `api`: its
 // interceptor swaps in whatever token an earlier session left in storage
@@ -39,10 +41,11 @@ const AuthCallback: React.FC = () => {
               accessToken: searchParams.get('accessToken') || undefined,
               refreshToken: searchParams.get('refreshToken') || undefined,
               tempToken: searchParams.get('tempToken') || undefined,
+              twoFactorSetupRequired: searchParams.get('setup2fa') === '1',
             };
 
         if (grant.tempToken) {
-          useAuthStore.getState().setTemp2faToken(grant.tempToken);
+          useAuthStore.getState().setTemp2faToken(grant.tempToken, Boolean(grant.twoFactorSetupRequired));
           navigate('/2fa', { replace: true });
           return;
         }

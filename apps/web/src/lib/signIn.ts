@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 import { API_URL } from './env'
 
@@ -79,7 +79,9 @@ export type SignInOutcome = 'signed-in' | 'two-factor' | 'failed'
 export function useSignIn() {
   const login = useAuthStore(s => s.login)
   const verify2fa = useAuthStore(s => s.verify2fa)
+  const start2faSetup = useAuthStore(s => s.start2faSetup)
   const temp2faToken = useAuthStore(s => s.temp2faToken)
+  const temp2faSetup = useAuthStore(s => s.temp2faSetup)
   const setTemp2faToken = useAuthStore(s => s.setTemp2faToken)
 
   const [email, setEmail] = useState(rememberedEmail)
@@ -88,6 +90,17 @@ export function useSignIn() {
   const [totpCode, setTotpCode] = useState('')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<SignInFailure | null>(null)
+  // Required 2FA setup (the org demands 2FA, the account has none): the QR
+  // code to scan before the first code is entered.
+  const [setupQr, setSetupQr] = useState<string | null>(null)
+  useEffect(() => {
+    if (!temp2faToken || !temp2faSetup) { setSetupQr(null); return }
+    let cancelled = false
+    start2faSetup()
+      .then(qr => { if (!cancelled) setSetupQr(qr || null) })
+      .catch(err => { if (!cancelled) setError({ title: 'Could not start setup', message: (err as ApiError)?.response?.data?.error || 'Sign in again to set up two-factor authentication.' }) })
+    return () => { cancelled = true }
+  }, [temp2faToken, temp2faSetup, start2faSetup])
 
   const signIn = async (): Promise<SignInOutcome> => {
     setError(null)
@@ -132,6 +145,10 @@ export function useSignIn() {
     rememberMe, setRememberMe,
     totpCode, setTotpCode,
     awaitingTwoFactor: Boolean(temp2faToken),
+    /** The pending step is the required 2FA setup, not a code check. */
+    twoFactorSetup: Boolean(temp2faToken) && temp2faSetup,
+    /** QR code (data URL) for the setup step; null while it loads. */
+    setupQr,
     pending,
     error,
     signIn,

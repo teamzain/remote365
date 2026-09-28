@@ -262,6 +262,9 @@ let isHostGuestMode = false;
 // Options → "Minimize App When A Session Starts"; the renderer pushes it at
 // boot and on change (lib/hostPreferences).
 let hostAutoMinimizeEnabled = true;
+// Settings → Security → "Lock Screen On Disconnect": lock the workstation once
+// the last viewer has left. The renderer pushes it at boot and on change.
+let hostLockOnDisconnect = false;
 // Pre-logon mode: launched by Remote365InputSvc as SYSTEM while the machine sits
 // at the Windows sign-in screen, so the device is reachable after a reboot with
 // nobody signed in. No window, no tray, no updater — it registers with the
@@ -3413,6 +3416,27 @@ ipcMain.handle('host:set-auto-minimize', (_event: any, enabled: any) => {
   hostAutoMinimizeEnabled = enabled !== false;
   return hostAutoMinimizeEnabled;
 });
+ipcMain.handle('host:set-lock-on-disconnect', (_event: any, enabled: any) => {
+  hostLockOnDisconnect = enabled === true;
+  return hostLockOnDisconnect;
+});
+
+// Lock this machine's session after a remote session ends, when the owner asked
+// for it. Fire-and-forget: the lock command outlives nothing we care about.
+function lockWorkstationAfterSession() {
+  if (!hostLockOnDisconnect) return;
+  try {
+    const command = process.platform === 'win32'
+      ? { file: 'rundll32.exe', args: ['user32.dll,LockWorkStation'] }
+      : process.platform === 'darwin'
+        ? { file: '/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession', args: ['-suspend'] }
+        : { file: 'loginctl', args: ['lock-session'] };
+    spawn(command.file, command.args, { detached: true, stdio: 'ignore' }).unref();
+    log.info('[Host] Locked the workstation after the session ended (Lock Screen On Disconnect)');
+  } catch (err: any) {
+    log.warn(`[Host] Could not lock the workstation: ${err?.message || err}`);
+  }
+}
 // Chat attachments: hand the URL to Chromium's download manager (native Save
 // As) instead of letting a cross-origin <a download> navigate the app window.
 ipcMain.handle('chat:download-file', (event: any, url: any) => {
@@ -4848,6 +4872,7 @@ function cleanupHostViewerPeer(viewerId: string | null | undefined, reason = 'en
     iceCandidatesQueue = [];
     hasRemoteDescription = false;
     scheduleDeferredUpdateInstall('host-session-ended');
+    lockWorkstationAfterSession();
   } else {
     if (!hasActiveMediaViewer(hostViewerPeers.values())) {
       stopStreaming();
@@ -8122,9 +8147,12 @@ function handleDeepLink(url: string) {
 
     if (parsed.host === 'auth' && parsed.pathname === '/2fa') {
       const tempToken = parsed.searchParams.get('tempToken');
+      // setup=1: the org requires 2FA and this account has none yet, so the
+      // renderer shows the QR-code setup step instead of the code prompt.
+      const setup = parsed.searchParams.get('setup') === '1';
       if (tempToken) {
-        log.info('[DeepLink] Received 2FA temp token');
-        mainWindow?.webContents.send('auth:temp-2fa-token', tempToken);
+        log.info(`[DeepLink] Received 2FA temp token${setup ? ' (setup)' : ''}`);
+        mainWindow?.webContents.send('auth:temp-2fa-token', { tempToken, setup });
         if (mainWindow) {
           if (mainWindow.isMinimized()) mainWindow.restore();
           mainWindow.show();

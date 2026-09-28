@@ -38,12 +38,17 @@ interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
   temp2faToken: string | null;
+  // The pending second step: verify an existing authenticator, or set one up
+  // because the organization requires 2FA and this account has none yet.
+  temp2faSetup: boolean;
   isLoading: boolean;
   isInitialized: boolean;
   setAuth: (user: User, accessToken: string, refreshToken: string) => void;
   updateUser: (user: User) => void;
-  setTemp2faToken: (token: string | null) => void;
+  setTemp2faToken: (token: string | null, setup?: boolean) => void;
   login: (email: string, password: string) => Promise<{ twoFactorRequired?: boolean }>;
+  /** Starts the required 2FA setup for the pending sign-in; resolves to the QR code data URL. */
+  start2faSetup: () => Promise<string>;
   requestVerification: (email: string, extras?: Record<string, any>) => Promise<void>;
   register: (name: string, email: string, password: string, verificationCode: string, extras?: Record<string, any>) => Promise<void>;
   verify2fa: (code: string, tempToken: string) => Promise<void>;
@@ -60,6 +65,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   accessToken: typeof window === 'undefined' ? null : localStorage.getItem(TOKEN_KEY),
   refreshToken: typeof window === 'undefined' ? null : localStorage.getItem(REFRESH_KEY),
   temp2faToken: null,
+  temp2faSetup: false,
   isLoading: false,
   isInitialized: false,
 
@@ -102,28 +108,42 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setAuth: (user, accessToken, refreshToken) => {
     localStorage.setItem(TOKEN_KEY, accessToken);
     localStorage.setItem(REFRESH_KEY, refreshToken);
-    set({ user, accessToken, refreshToken, temp2faToken: null });
+    set({ user, accessToken, refreshToken, temp2faToken: null, temp2faSetup: false });
   },
 
   updateUser: (user) => set((state) => ({ user: { ...(state.user || {}), ...user } as User })),
 
-  setTemp2faToken: (token) => set({ temp2faToken: token }),
+  setTemp2faToken: (token, setup = false) => set({ temp2faToken: token, temp2faSetup: Boolean(token) && setup }),
 
   login: async (email, password) => {
     set({ isLoading: true });
     try {
       const { data } = await api.post('/api/auth/login', { email, password });
-      
+
       if (data.twoFactorRequired) {
-        set({ temp2faToken: data.tempToken });
+        set({ temp2faToken: data.tempToken, temp2faSetup: false });
         return { twoFactorRequired: true };
       }
 
       get().setAuth(data.user, data.accessToken, data.refreshToken);
       return { twoFactorRequired: false };
+    } catch (err: any) {
+      // The org requires 2FA and this account has none: a 403 that carries
+      // the setup token. Same panel as the code prompt, in setup mode.
+      const refused = err?.response?.data;
+      if (err?.response?.status === 403 && refused?.twoFactorSetupRequired && refused?.tempToken) {
+        set({ temp2faToken: refused.tempToken, temp2faSetup: true });
+        return { twoFactorRequired: true };
+      }
+      throw err;
     } finally {
       set({ isLoading: false });
     }
+  },
+
+  start2faSetup: async () => {
+    const { data } = await api.post('/api/auth/setup-2fa', { tempToken: get().temp2faToken });
+    return String(data?.qr_code || '');
   },
 
   requestVerification: async (email, extras) => {
@@ -148,7 +168,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   verify2fa: async (code, tempToken) => {
     set({ isLoading: true });
     try {
-      const { data } = await api.post('/api/auth/verify-2fa', { code, tempToken });
+      const { data } = await api.post(get().temp2faSetup ? '/api/auth/verify-2fa-setup' : '/api/auth/verify-2fa', { code, tempToken });
       get().setAuth(data.user, data.accessToken, data.refreshToken);
     } finally {
       set({ isLoading: false });

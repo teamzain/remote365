@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Shield, Server, Building2, Check, Loader2, Settings,
+  Shield, Building2, Check, Loader2, Settings,
   Globe, Lock, Zap, RefreshCw, Power, ChevronRight, AlertCircle, WifiOff,
   LayoutGrid, Monitor, FileText, Settings2, Smartphone, Key, CreditCard, Receipt,
   Users, CheckCircle2, ArrowRight, ArrowLeftRight, Mic,
@@ -79,7 +79,7 @@ const SLIDES = [
     icon: Settings,
     image: cardImage22,
     button: 'Open Policies',
-    tab: 'Policies'
+    tab: 'policies'
   },
   {
     tag: 'Team',
@@ -88,7 +88,7 @@ const SLIDES = [
     icon: Users,
     image: cardImage33,
     button: 'Manage Roles',
-    tab: 'Roles'
+    tab: 'roles'
   },
   {
     tag: 'Organization',
@@ -97,7 +97,7 @@ const SLIDES = [
     icon: Lock,
     image: cardImage11,
     button: 'Security Center',
-    tab: 'Security'
+    tab: 'security'
   }
 ];
 
@@ -926,7 +926,7 @@ export const SnowAdminSettings: React.FC<{ setCurrentView?: (v: any) => void, us
           <SettingRow
             icon={Shield}
             title="Require Two-Factor Authentication"
-            description="Every member of your organization must set up 2FA to sign in."
+            description="Every member of your organization must set up 2FA to sign in. Members without it are asked to set it up the next time they sign in."
             action={<Toggle checked={require2FA} onChange={v => { if (orgReadOnly) return; setRequire2FA(v); saveOrg({ require2FA: v }); }} />}
           />
           <SettingRow
@@ -944,20 +944,6 @@ export const SnowAdminSettings: React.FC<{ setCurrentView?: (v: any) => void, us
                 <option value="ADMIN">Admin</option>
               </select>
             }
-          />
-          <SettingRow
-            icon={FileText}
-            title="Company Contact List"
-            description="Allow users to browse and interact with other users in the company."
-            locked
-            action={<button onClick={() => setActiveTab('subs')} className="text-[13px] font-semibold text-blue-600 hover:underline whitespace-nowrap">Upgrade Plan</button>}
-          />
-          <SettingRow
-            icon={Server}
-            title="Event Logging"
-            description="User event data from the company is logged on Remote365 ID servers for 1 year."
-            locked
-            action={<button onClick={() => setActiveTab('subs')} className="text-[13px] font-semibold text-blue-600 hover:underline whitespace-nowrap">Upgrade Plan</button>}
           />
         </div>
       </div>

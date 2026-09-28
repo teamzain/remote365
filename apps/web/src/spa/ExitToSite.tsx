@@ -17,9 +17,9 @@ export default function ExitToSite() {
 
   if (!inApp) return null
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24, fontFamily: "'Mona Sans', system-ui, sans-serif", color: '#111315', textAlign: 'center' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24, fontFamily: "'Mona Sans', system-ui, sans-serif", color: 'var(--ink)', textAlign: 'center' }}>
       <h1 style={{ margin: 0, fontSize: 28 }}>Page not found</h1>
-      <p style={{ margin: 0, color: 'rgba(17,19,21,0.7)' }}>This page doesn’t exist in Remote365.</p>
+      <p style={{ margin: 0, color: 'var(--ink-70)' }}>This page doesn’t exist in Remote365.</p>
       <Link to="/dashboard" style={{ color: '#FF8A00', fontWeight: 600 }}>Go to your dashboard</Link>
     </div>
   )
