@@ -206,7 +206,7 @@ export const WebDashboardPage: React.FC<WebDashboardPageProps> = ({ view, title 
 
   const handleDeviceClick = (device: any) => {
     if (!device.is_online) {
-      notify('Device is offline', 'warning');
+      notify(`${device.device_name || 'This device'} is offline. Turn it on and make sure Remote365 is running on it.`, 'warning');
       return;
     }
     if (passwordUpdateKeys.includes(device.access_key)) {
@@ -219,7 +219,7 @@ export const WebDashboardPage: React.FC<WebDashboardPageProps> = ({ view, title 
     setDeviceMutationLabel(ids.length === 1 ? 'Deleting device…' : `Deleting ${ids.length} devices…`);
     try {
       await Promise.all(ids.map((id) => removeDevice(id)));
-      notify(`Successfully removed ${ids.length} devices`, 'success');
+      notify(ids.length === 1 ? 'Device removed' : `${ids.length} devices removed`, 'success');
     } catch {
       notify('Some devices could not be removed', 'error');
     } finally {

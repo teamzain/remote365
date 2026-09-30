@@ -22,6 +22,7 @@ const FULL_ACCESS_ROLES = ['OWNER', 'SUPER_ADMIN'];
 const ROLE_FALLBACK_PERMISSIONS: Record<string, readonly string[]> = {
   ADMIN: [
     'devices:register', 'devices:configure', 'devices:remove', 'devices:assign',
+    'devices:groups:create', 'devices:groups:delete',
     'members:view', 'members:invite', 'members:edit', 'members:remove', 'members:assignRole',
     'sessions:start', 'sessions:join', 'sessions:viewHistoryAll', 'sessions:recordings:view',
     'billing:view', 'org:settings',

@@ -2868,7 +2868,7 @@ export default function App() {
                 addNotification(`Wake packet sent to ${device.device_name}. It usually comes online within a minute.`, 'system', 'Wake-on-LAN');
                 return;
             }
-            showError('Endpoint Unreachable', `${device.device_name} is currently offline. Please ensure the host service is running.`);
+            showError('Device Is Offline', `${device.device_name || 'This device'} is offline. Turn it on and make sure Remote365 is running on it, then try again.`);
             return;
         }
 
@@ -2947,9 +2947,11 @@ export default function App() {
             if (removedLocalHost) localStorage.removeItem('remote365_current_device_added_to_list');
             setDevices(prev => applyDeviceListVisibility(prev.filter((device: any) => !ids.includes(device.id))));
             await pollDevices();
-            setGlobalError(`Successfully removed ${ids.length} devices.`);
+            toast.success(ids.length === 1 ? 'Device removed' : `${ids.length} devices removed`);
         } catch (e: any) {
-            setGlobalError('Failed To Remove Some Devices: ' + e.message);
+            // Some deletes may have gone through — show what is really left.
+            pollDevices();
+            toast.error('Some devices could not be removed: ' + (e.response?.data?.error || e.message));
         }
     };
 
@@ -3316,6 +3318,7 @@ export default function App() {
                 setDevices(prev => applyDeviceListVisibility(prev.filter((item: any) => item.id !== device.id)));
                 setActionModal(null);
                 if (selectedDevice?.id === device.id) setSelectedDevice(null);
+                toast.success('This computer is hidden from your list');
                 return;
             }
             await api.delete(`/api/devices/${device.id}`);
@@ -3323,7 +3326,8 @@ export default function App() {
             await pollDevices();
             setActionModal(null);
             if (selectedDevice?.id === device.id) setSelectedDevice(null);
-        } catch (e: any) { setGlobalError(e.message); }
+            toast.success(`${device?.device_name || 'Device'} removed`);
+        } catch (e: any) { toast.error(e.response?.data?.error || e.message || 'Could not remove this device.'); }
     };
 
     const handleArchiveDevice = (device: any) => {
@@ -3342,7 +3346,7 @@ export default function App() {
         try {
             const creds = await (window as any).electronAPI.getToken();
             await api.delete(`/api/devices/${id}/trust`);
-            setGlobalError('Success: Trust revoked for this device.');
+            toast.success('Trust revoked for this device');
             pollDevices();
         } catch (e) { }
     };
@@ -7442,12 +7446,14 @@ export default function App() {
                             <h3 className="text-[20px] font-medium leading-[28px] text-[#111315] mb-2">
                                 {actionModal.type === 'rename' ? 'Change Device Name' :
                                     actionModal.type === 'password' ? 'Set Device Password' :
-                                        actionModal.type === 'remove' ? 'Delete Device' : ''}
+                                        actionModal.type === 'remove' ? (isLocalHostDevice(actionModal.device) ? 'Hide This Computer' : 'Delete Device') : ''}
                             </h3>
                             <p className="text-[14px] font-normal leading-5 text-[#1A1D21]/60 max-w-[260px] mx-auto">
                                 {actionModal.type === 'rename' ? 'Set a nickname for this device.' :
                                     actionModal.type === 'password' ? 'Update the access password for this device.' :
-                                        actionModal.type === 'remove' ? `Remove ${actionModal.device.device_name} from your account? This can't be undone.` : ''}
+                                        actionModal.type === 'remove' ? (isLocalHostDevice(actionModal.device)
+                                            ? 'This hides this computer from your list. It stays registered, and anyone with its ID and password can still connect. To stop that, turn off Allow Incoming Connections in Settings. Add it back any time with Add Device.'
+                                            : `Remove ${actionModal.device.device_name} from your account? This can't be undone.`) : ''}
                             </p>
                         </div>
 
@@ -7502,7 +7508,7 @@ export default function App() {
                                     ? { background: '#FF2D55' }
                                     : { background: 'linear-gradient(110.89deg, #FF8A00 36.19%, #FFB347 93.55%)' }}
                             >
-                                {actionModal.type === 'remove' ? 'Delete' : 'Save'}
+                                {actionModal.type === 'remove' ? (isLocalHostDevice(actionModal.device) ? 'Hide' : 'Delete') : 'Save'}
                             </button>
                         </div>
                     </div>

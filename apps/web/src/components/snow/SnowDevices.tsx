@@ -22,6 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import api from '../../lib/api';
+import { notify } from '../NotificationProvider';
 import { hasUserPermission } from '../../lib/permissions';
 import { LottieScene } from '../lottie/LottieScene';
 import devicesEmptyAnimation from '../../assets/animations/devicesEmpty.json';
@@ -174,6 +175,10 @@ export const SnowDevices: React.FC<SnowDevicesProps> = ({
   const canConnect = can('sessions:start');
   const canReport = can('devices:reportIssue');
   const canAddDevice = can('devices:register');
+  // Same permissions the server checks, so nobody is offered a button that 403s.
+  const canCreateGroup = can('devices:groups:create');
+  const canDeleteGroup = can('devices:groups:delete');
+  const canAssignGroup = can('devices:assign');
   const [reportDevice, setReportDevice] = useState<Device | null>(null);
   const [reportMessage, setReportMessage] = useState('');
   const [reportBusy, setReportBusy] = useState(false);
@@ -253,7 +258,6 @@ export const SnowDevices: React.FC<SnowDevicesProps> = ({
     try {
       const { data } = await api.get('/api/devices/user-groups');
       setUserGroups(data.groups || []);
-      setLastSyncedAt(new Date());
     } catch (err) {
       console.error('Failed to load account device groups:', err);
     }
@@ -310,7 +314,13 @@ export const SnowDevices: React.FC<SnowDevicesProps> = ({
         if (filterStatus === 'active' && !isDeviceInSession(device)) return false;
         const query = searchQuery.trim().toLowerCase();
         if (!query || query === ':online') return true;
-        return device.device_name?.toLowerCase().includes(query) || device.access_key?.toLowerCase().includes(query);
+        // Match the name, the ID (typed with or without spaces) and group names.
+        const keyQuery = query.replace(/\s/g, '');
+        return Boolean(
+          device.device_name?.toLowerCase().includes(query)
+          || (keyQuery && normalizeKey(device.access_key).toLowerCase().includes(keyQuery))
+          || (device.device_groups || []).some((group) => group.name.replace(/^#/, '').toLowerCase().includes(query))
+        );
       })
       .sort((a, b) => {
         const groupOf = (device: Device) => device.device_groups?.[0]?.name || '';
@@ -336,18 +346,36 @@ export const SnowDevices: React.FC<SnowDevicesProps> = ({
     return { total: devices.length, online, offline: devices.length - online, active };
   }, [devices, isDeviceInSession]);
 
+  // The list is "synced" whenever a fresh device list arrives (the background
+  // poll, a push update, or the refresh button) — the label counts up from there.
+  useEffect(() => {
+    setLastSyncedAt(new Date());
+  }, [devices]);
+  const [syncNow, setSyncNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setSyncNow(Date.now()), 10000);
+    return () => window.clearInterval(timer);
+  }, []);
   const syncLabel = useMemo(() => {
-    const seconds = Math.max(1, Math.round((Date.now() - lastSyncedAt.getTime()) / 1000));
-    return `Last Synced ${seconds}s ago`;
-  }, [lastSyncedAt]);
+    const seconds = Math.max(0, Math.round((Math.max(syncNow, lastSyncedAt.getTime()) - lastSyncedAt.getTime()) / 1000));
+    if (seconds < 10) return 'Synced Just Now';
+    if (seconds < 60) return `Synced ${Math.floor(seconds / 10) * 10}s Ago`;
+    const minutes = Math.floor(seconds / 60);
+    return `Synced ${minutes} Min Ago`;
+  }, [lastSyncedAt, syncNow]);
 
+  // Refresh refetches the device list and groups in place — it does not reload the app.
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const refreshAll = async () => {
-    const electronApi = (window as any).electronAPI;
-    if (electronApi?.forceReload) {
-      await electronApi.forceReload();
-      return;
+    if (isManualRefreshing) return;
+    setIsManualRefreshing(true);
+    try {
+      await Promise.all([Promise.resolve(onRefresh?.()), loadUserGroups()]);
+      setLastSyncedAt(new Date());
+      setSyncNow(Date.now());
+    } finally {
+      setIsManualRefreshing(false);
     }
-    window.location.reload();
   };
 
   // Group names must stay unique (case-insensitively) — two "Sales" groups are
@@ -410,8 +438,9 @@ export const SnowDevices: React.FC<SnowDevicesProps> = ({
       await loadUserGroups();
       onRefresh?.();
       notifyGroupsChanged();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to update account device groups:', err);
+      notify(err?.response?.data?.error || 'Could not change the group. Please try again.', 'error');
     } finally {
       onMutationStateChange?.(false);
     }
@@ -426,8 +455,10 @@ export const SnowDevices: React.FC<SnowDevicesProps> = ({
       await Promise.resolve(onRefresh?.());
       await loadUserGroups();
       notifyGroupsChanged();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to delete account device group:', err);
+      notify(err?.response?.data?.error || 'Could not delete the group. Please try again.', 'error');
+      loadUserGroups();
     } finally {
       onMutationStateChange?.(false);
     }
@@ -444,7 +475,7 @@ export const SnowDevices: React.FC<SnowDevicesProps> = ({
 
   const scopeItems = [
     { id: 'all', label: 'All Devices', icon: Grid2X2 },
-    { id: 'recent', label: 'Recent Connections', icon: History },
+    { id: 'recent', label: 'Recently Active', icon: History },
   ] as const;
 
   const getDeviceGroupName = (device: Device) => {
@@ -497,9 +528,11 @@ export const SnowDevices: React.FC<SnowDevicesProps> = ({
               <h2 className="m-0 text-[18px] font-medium leading-[25px] text-black">
                 Groups{groupFilters.length > 0 ? <span className="ml-1 text-[13px] text-[rgba(26,29,33,0.45)]">({groupFilters.length})</span> : null}
               </h2>
-              <button type="button" onClick={() => { setPendingGroupDeviceId(null); setGroupCreateError(''); setShowAddGroupModal(true); }} className="flex h-[18px] w-[18px] items-center justify-center text-[#111315]">
-                <Plus size={18} />
-              </button>
+              {canCreateGroup && (
+                <button type="button" onClick={() => { setPendingGroupDeviceId(null); setGroupCreateError(''); setShowAddGroupModal(true); }} title="Add group" className="flex h-[18px] w-[18px] items-center justify-center text-[#111315]">
+                  <Plus size={18} />
+                </button>
+              )}
             </div>
             <div className="flex items-start gap-1 overflow-x-auto pb-1 md:min-h-0 md:flex-1 md:flex-col md:overflow-x-hidden md:overflow-y-auto md:pb-0 md:pr-1">
               {groupFilters.length === 0 ? (
@@ -522,7 +555,7 @@ export const SnowDevices: React.FC<SnowDevicesProps> = ({
                       <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: tone.dot }} />
                       <span className="max-w-[128px] truncate">{label}</span>
                     </button>
-                    <button
+                    {canDeleteGroup && <button
                       type="button"
                       onClick={() => {
                         setConfirmDialog({
@@ -537,7 +570,7 @@ export const SnowDevices: React.FC<SnowDevicesProps> = ({
                       title="Delete group"
                     >
                       <X size={12} />
-                    </button>
+                    </button>}
                   </div>
                 );
               })}
@@ -591,9 +624,9 @@ export const SnowDevices: React.FC<SnowDevicesProps> = ({
               </button>
             </div>
           </div>
-          <button type="button" onClick={refreshAll} disabled={isLoading} title="Force Reload" className="flex shrink-0 items-center gap-2 text-[14px] leading-5 text-black disabled:opacity-60 lg:mt-5">
-            {syncLabel}
-            <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
+          <button type="button" onClick={refreshAll} disabled={isLoading || isManualRefreshing} title="Refresh devices" className="flex shrink-0 items-center gap-2 text-[14px] leading-5 text-black disabled:opacity-60 lg:mt-5">
+            {isManualRefreshing ? 'Syncing…' : syncLabel}
+            <RefreshCw size={18} className={isLoading || isManualRefreshing ? 'animate-spin' : ''} />
           </button>
         </header>
 
@@ -948,18 +981,28 @@ export const SnowDevices: React.FC<SnowDevicesProps> = ({
               <div className="fixed inset-0 z-[81]" onClick={() => setShowBulkMenu(false)} />
               <div className="absolute bottom-12 right-0 z-[82] w-60 overflow-hidden rounded-xl border border-black/5 bg-white py-1 shadow-2xl">
                 {handleBulkArchive && (
-                  // Archive is reversible (Archived tab → Restore), so no confirm.
+                  // Reversible (Archived tab → Restore), but a whole selection
+                  // vanishing on one click reads as data loss, so ask first.
                   <button
                     type="button"
                     onClick={() => {
-                      handleBulkArchive([...selectedIds]);
-                      setSelectedIds([]);
+                      const ids = [...selectedIds];
                       setShowBulkMenu(false);
+                      setConfirmDialog({
+                        title: `Archive ${ids.length} ${ids.length === 1 ? 'device' : 'devices'}?`,
+                        body: 'They stay on your account but are hidden from this list. You can restore them any time from Archived.',
+                        confirmLabel: 'Archive selected',
+                        tone: 'neutral',
+                        onConfirm: () => {
+                          handleBulkArchive(ids);
+                          setSelectedIds([]);
+                        },
+                      });
                     }}
                     className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[13px] font-medium text-[#111315] hover:bg-[#F3F4F6]"
                   >
                     <Archive size={15} />
-                    Archive selected
+                    Archive selected…
                   </button>
                 )}
                 {can('devices:remove') && (
@@ -1182,10 +1225,12 @@ export const SnowDevices: React.FC<SnowDevicesProps> = ({
                   );
                 })}
               </div>
-              <button type="button" onClick={() => { setPendingGroupDeviceId(actionModal.device.id); setGroupCreateError(''); setActionModal(null); setShowAddGroupModal(true); }} className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#F3F4F6] text-[13px] font-medium">
-                <Plus size={16} />
-                Create New Group
-              </button>
+              {canCreateGroup && (
+                <button type="button" onClick={() => { setPendingGroupDeviceId(actionModal.device.id); setGroupCreateError(''); setActionModal(null); setShowAddGroupModal(true); }} className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#F3F4F6] text-[13px] font-medium">
+                  <Plus size={16} />
+                  Create New Group
+                </button>
+              )}
             </div>
           </div>
         </div>
