@@ -35,7 +35,7 @@ import { ensureUnattendedCredential, readUnattendedCredential, setAppSupervision
 import { clearHostIntent, hasNetworkLink, readHostIntent, saveHostIntent, startNetworkRestoreWatcher } from './hostAutostart';
 import { armUpdateLock, clearUpdateLock, updateLockPath } from './updateGuard';
 import { decodeCompactInput, isCompactInput } from '../shared/inputProtocol';
-import { handleFileTransferCommand, handleFileTransferChunk, cancelAllFileTransfers, startHostPull, uniquePath } from './fileTransfer';
+import { handleFileTransferCommand, handleFileTransferChunk, cancelAllFileTransfers, startHostPull, uniquePath, whenDrained } from './fileTransfer';
 import { registerLocalFileHandlers, closeAllLocalWrites } from './localFiles';
 import {
   showViewerCameraWindow,
@@ -301,7 +301,20 @@ let fileTransfers = new Map<string, {
   transferredBytes: number;
   lastProgressAt: number;
   inactivityTimer: NodeJS.Timeout;
+  /** The sending viewer's per-file plan cap; null = no cap known. */
+  maxBytes: number | null;
 }>();
+// v1 transfers that were refused or failed. The sender keeps streaming the
+// rest of the file, and each later chunk used to start a new (empty) file.
+// Cleared per id when that id starts over at chunk 0.
+const rejectedV1Transfers = new Set<string>();
+function rejectV1Transfer(transferId: string) {
+  if (rejectedV1Transfers.size > 500) rejectedV1Transfers.clear();
+  rejectedV1Transfers.add(transferId);
+}
+const describeFileCap = (bytes: number) => bytes >= 1024 ** 3
+  ? `${Math.round(bytes / 1024 ** 3)} GB`
+  : `${Math.round(bytes / 1024 ** 2)} MB`;
 
 // Keep the machine (and its display) awake while a remote session is active in
 // either direction: a sleeping host display stalls DXGI capture, and a viewer
@@ -6817,6 +6830,11 @@ async function initiateHostWebRTC(viewerId: string) {
       try { localDataChannel.sendMessage(JSON.stringify({ type: 'recording-state', on: true, byName })); } catch { /* closing */ }
     }
     localDataChannel.sendMessage(JSON.stringify({ type: 'input-capabilities', compactV1: true }));
+    // This viewer's per-file transfer cap (their plan, stamped by the server
+    // on the join). The web viewer shows it and refuses an oversized upload
+    // before sending a byte; the v1 receive path below enforces it regardless.
+    const viewerFileCap = hostViewerFileCaps.get(String(viewerPeerId));
+    if (viewerFileCap) localDataChannel.sendMessage(JSON.stringify({ type: 'file-transfer-limit', maxBytes: viewerFileCap }));
     minimizeHostWindowForRemoteSession('control-channel-open');
 
     // 1. Start Ping Heartbeat (1s)
@@ -7022,10 +7040,30 @@ function handleControlMessage(msg: any, viewerId?: string) {
         // every ft: command, and the same Block File Transfer switch.
         if (!(activePeer?.controlGranted ?? controlGranted) || fileTransferBlocked) return;
         const transferId = header.transferId || `${header.name}-${header.totalSize || header.totalChunks}`;
+        if (Number(header.chunkIndex) === 0) rejectedV1Transfers.delete(transferId);
+        else if (rejectedV1Transfers.has(transferId)) return;
         let transfer = fileTransfers.get(transferId);
         if (!transfer) {
           const safeName = basename(String(header.name || 'received-file').replace(/[\\/]+/g, '/'))
             .replace(/[<>:"|?*\u0000-\u001f]/g, '_').trim() || 'received-file';
+          // The viewer's plan cap applies to uploads too. v2 pushes and "Get
+          // files" were already capped; a browser upload was not checked at all.
+          const viewerCap = hostViewerFileCaps.get(String(viewerId || currentViewerId || '')) ?? null;
+          if (viewerCap !== null && Number(header.totalSize) > viewerCap) {
+            rejectV1Transfer(transferId);
+            log.info(`[Host] Refused ${safeName}: ${header.totalSize} bytes is over the viewer's ${describeFileCap(viewerCap)} per-file limit.`);
+            if (replyChannel?.isOpen?.()) {
+              replyChannel.sendMessage(JSON.stringify({
+                type: 'file-transfer-error',
+                direction: 'send',
+                transferId,
+                name: safeName,
+                totalSize: header.totalSize,
+                message: `${safeName} is over your plan's ${describeFileCap(viewerCap)} per-file limit and was not sent.`,
+              }));
+            }
+            return;
+          }
           // Same folder and the same never-overwrite rule as v2 transfers: a
           // browser upload used to land in the Downloads root and silently
           // replace any file with that name.
@@ -7051,6 +7089,7 @@ function handleControlMessage(msg: any, viewerId?: string) {
             transferredBytes: 0,
             lastProgressAt: 0,
             inactivityTimer,
+            maxBytes: viewerCap,
           };
           fileTransfers.set(transferId, transfer);
           stream.on('error', (err: any) => {
@@ -7059,6 +7098,7 @@ function handleControlMessage(msg: any, viewerId?: string) {
               clearTimeout(failed.inactivityTimer);
               fileTransfers.delete(transferId);
             }
+            rejectV1Transfer(transferId);
             log.error(`[Host] Failed to stream received file: ${err.message}`);
             if (replyChannel?.isOpen?.()) {
               replyChannel.sendMessage(JSON.stringify({
@@ -7087,6 +7127,28 @@ function handleControlMessage(msg: any, viewerId?: string) {
         }
         if (!transfer.receivedIndices.has(chunkIndex)) {
           transfer.receivedIndices.add(chunkIndex);
+          // The declared size is the sender's word; the bytes are not. A file
+          // that outgrows the cap is dropped and its partial copy removed.
+          if (transfer.maxBytes !== null && transfer.transferredBytes + chunk.length > transfer.maxBytes) {
+            clearTimeout(transfer.inactivityTimer);
+            fileTransfers.delete(transferId);
+            rejectV1Transfer(transferId);
+            const partialPath = transfer.filePath;
+            transfer.stream.destroy();
+            fs.unlink(partialPath).catch(() => { /* never created, or already gone */ });
+            log.info(`[Host] Stopped ${transfer.name}: it grew past the viewer's ${describeFileCap(transfer.maxBytes)} per-file limit.`);
+            if (replyChannel?.isOpen?.()) {
+              replyChannel.sendMessage(JSON.stringify({
+                type: 'file-transfer-error',
+                direction: 'send',
+                transferId,
+                name: transfer.name,
+                totalSize: transfer.totalSize,
+                message: `${transfer.name} is over your plan's ${describeFileCap(transfer.maxBytes)} per-file limit and was not sent.`,
+              }));
+            }
+            return;
+          }
           transfer.stream.write(chunk);
           transfer.received++;
           transfer.transferredBytes += chunk.length;
@@ -9039,29 +9101,46 @@ async function sendFileFromHost(selectedPath?: string, targetViewerId?: string) 
     if (!stats.isFile()) throw new Error('Choose a file, not a folder.');
     const totalSize = stats.size;
 
-    // Chunking 16KB
-    const CHUNK_SIZE = 16 * 1024;
+    // 64KB messages paced by the channel's own send buffer, like the v2
+    // engine. This used to be 16KB chunks with a 10ms sleep every five, which
+    // capped a web viewer's "Get files" at ~5MB/s on any link, and with no
+    // backpressure a slow link had the whole file queued on the control
+    // channel ahead of everything else.
+    const CHUNK_SIZE = 64 * 1024;
     const totalChunks = Math.max(1, Math.ceil(totalSize / CHUNK_SIZE));
     const transferId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     targetChannel.sendMessage(JSON.stringify({ type: 'file-transfer-start', direction: 'receive', transferId, name: fileName, totalSize, totalChunks }));
     const fd = await fs.open(filePath, 'r');
     let bytesSent = 0;
     let lastSendProgressAt = 0;
+    const sendStartedAt = Date.now();
 
     try {
       for (let i = 0; i < totalChunks; i++) {
-        const buffer = Buffer.alloc(CHUNK_SIZE);
+        const buffer = Buffer.allocUnsafe(CHUNK_SIZE);
         const { bytesRead } = await fd.read(buffer, 0, CHUNK_SIZE, i * CHUNK_SIZE);
-        const chunk = buffer.slice(0, bytesRead);
+        const chunk = buffer.subarray(0, bytesRead);
 
         const header = JSON.stringify({ type: 'file-chunk', transferId, name: fileName, totalSize, chunkIndex: i, totalChunks });
         const headerBuffer = Buffer.from(header);
-        const fullBuffer = Buffer.alloc(4 + headerBuffer.length + chunk.length);
+        const fullBuffer = Buffer.allocUnsafe(4 + headerBuffer.length + chunk.length);
         fullBuffer.writeUInt32LE(headerBuffer.length, 0);
         headerBuffer.copy(fullBuffer, 4);
         chunk.copy(fullBuffer, 4 + headerBuffer.length);
 
-        targetChannel.sendMessageBinary(fullBuffer);
+        await whenDrained(targetChannel, fileTransferDeps.log);
+        if (!targetChannel.isOpen()) throw new Error('The viewer disconnected during the transfer.');
+        // sendMessageBinary returns FALSE on failure rather than throwing; a
+        // chunk dropped here would leave the viewer waiting on it forever.
+        let sent = false;
+        for (let attempt = 0; attempt < 20 && !sent; attempt++) {
+          sent = targetChannel.sendMessageBinary(fullBuffer) !== false;
+          if (!sent) {
+            await new Promise(r => setTimeout(r, 100 + attempt * 50));
+            if (!targetChannel.isOpen()) break;
+          }
+        }
+        if (!sent) throw new Error('The connection stopped accepting data.');
         bytesSent += bytesRead;
         // Progress throttled to ~250ms (final chunk always reported) — a
         // per-chunk send doubles the message count on the shared control channel.
@@ -9078,9 +9157,9 @@ async function sendFileFromHost(selectedPath?: string, targetViewerId?: string) 
             progress: Math.round(((i + 1) / totalChunks) * 100)
           }));
         }
-        // Small delay to prevent saturation
-        if (i % 5 === 0) await new Promise(r => setTimeout(r, 10));
       }
+      const seconds = Math.max(0.001, (Date.now() - sendStartedAt) / 1000);
+      log.info(`[Host] Sent ${fileName} to the viewer (v1): ${bytesSent} bytes in ${seconds.toFixed(1)}s (${(bytesSent / 1048576 / seconds).toFixed(2)} MB/s)`);
     } catch (err: any) {
       if (targetChannel && targetChannel.isOpen()) {
         targetChannel.sendMessage(JSON.stringify({

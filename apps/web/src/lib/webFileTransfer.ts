@@ -13,7 +13,16 @@
  *   get:   {type:'ft:host-pick'} makes the host open its own file picker on
  *          its screen. Chosen files arrive as 'file-transfer-start' + the
  *          same binary frames, and are handed to the browser as a download.
+ *   limit: the host announces this viewer's per-file plan cap with
+ *          {type:'file-transfer-limit', maxBytes} when the channel opens
+ *          (desktop >= 1.2.139). An oversized file is refused here before a
+ *          byte moves; the host enforces the same cap either way.
  */
+
+/** "500 MB" / "2 GB", the way the desktop app words the plan cap. */
+export const describeFileLimit = (bytes: number): string => bytes >= 1024 ** 3
+  ? `${Math.round(bytes / 1024 ** 3)} GB`
+  : `${Math.round(bytes / 1024 ** 2)} MB`;
 
 export type WebTransferState = 'waiting' | 'active' | 'done' | 'error';
 
@@ -39,15 +48,35 @@ const HOST_CONFIRM_TIMEOUT_MS = 60_000;
 
 const newId = (prefix: string) => `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
-type Incoming = { id: string; name: string; totalSize: number; totalChunks: number; parts: Uint8Array[]; received: number };
+// Receive side: chunks collect in `parts` and are folded into a Blob every
+// FOLD_BYTES, so a large file ends up in the browser's blob store (which can
+// spill to disk) instead of sitting in the JS heap until the last chunk.
+const FOLD_BYTES = 8 * 1024 * 1024;
+// A card update per chunk re-rendered the whole viewer hundreds of times a
+// second during a transfer; the progress bar needs a few a second.
+const PROGRESS_INTERVAL_MS = 150;
+
+type Incoming = {
+  id: string; name: string; totalSize: number; totalChunks: number;
+  blobs: Blob[]; parts: Uint8Array[]; partBytes: number;
+  received: number; bytes: number; lastEmitAt: number;
+};
+
+const newIncoming = (id: string, name: string, totalSize: number, totalChunks: number): Incoming =>
+  ({ id, name, totalSize, totalChunks, blobs: [], parts: [], partBytes: 0, received: 0, bytes: 0, lastEmitAt: 0 });
 
 export class WebFileTransfer {
   private transfers = new Map<string, WebTransfer>();
   private incoming = new Map<string, Incoming>();
   private hostWaiters = new Map<string, { resolve: (ok: boolean, message?: string) => void; timer: ReturnType<typeof setTimeout> }>();
   private listeners = new Set<Listener>();
+  /** Per-file cap the host announced for this viewer; null until it does. */
+  private maxFileBytes: number | null = null;
 
-  constructor(private getChannel: () => RTCDataChannel | null) {}
+  constructor(
+    private getChannel: () => RTCDataChannel | null,
+    private onLimit?: (maxBytes: number | null) => void,
+  ) {}
 
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
@@ -92,11 +121,20 @@ export class WebFileTransfer {
   /* ---------------- send (browser -> host) ---------------- */
 
   async sendFiles(files: File[]): Promise<void> {
-    const queued = files.map((file) => {
+    const limit = this.maxFileBytes;
+    const queued: Array<{ id: string; file: File }> = [];
+    for (const file of files) {
       const id = newId('w');
+      if (limit !== null && file.size > limit) {
+        this.upsert(id, {
+          direction: 'send', name: file.name, totalBytes: file.size, state: 'error',
+          message: `${file.name} is over your plan's ${describeFileLimit(limit)} per-file limit and was not sent.`,
+        });
+        continue;
+      }
       this.upsert(id, { direction: 'send', name: file.name, totalBytes: file.size, state: 'waiting', message: 'Waiting…' });
-      return { id, file };
-    });
+      queued.push({ id, file });
+    }
     // One at a time: the host writes v1 files sequentially per channel.
     for (const { id, file } of queued) await this.sendOne(id, file);
   }
@@ -116,9 +154,14 @@ export class WebFileTransfer {
       }, HOST_CONFIRM_TIMEOUT_MS + totalChunks * 50);
       this.hostWaiters.set(id, { resolve: (ok, message) => resolve({ ok, message }), timer });
     });
+    // The host can refuse mid-stream (over the limit, disk error): stop
+    // uploading the rest of a file it has already turned down.
+    const host = { refused: false };
+    void confirmed.then((result) => { if (!result.ok) host.refused = true; });
     try {
       const encoder = new TextEncoder();
       for (let i = 0; i < totalChunks; i++) {
+        if (host.refused) break;
         const live = this.getChannel();
         if (!live || live.readyState !== 'open') throw new Error('The connection dropped while sending.');
         const start = i * CHUNK_SIZE;
@@ -137,7 +180,7 @@ export class WebFileTransfer {
       this.upsert(id, { state: 'error', message: err?.message || 'Sending failed.' });
       return;
     }
-    this.upsert(id, { message: 'Waiting for the remote computer to save it…' });
+    if (!host.refused) this.upsert(id, { message: 'Waiting for the remote computer to save it…' });
     const result = await confirmed;
     this.upsert(id, result.ok
       ? { state: 'done', transferredBytes: file.size, message: '' }
@@ -169,6 +212,12 @@ export class WebFileTransfer {
   /** Feed every JSON message from the control channel. True = consumed. */
   handleJson(data: any): boolean {
     switch (data?.type) {
+      case 'file-transfer-limit': {
+        const bytes = Number(data.maxBytes);
+        this.maxFileBytes = Number.isFinite(bytes) && bytes > 0 ? bytes : null;
+        this.onLimit?.(this.maxFileBytes);
+        return true;
+      }
       case 'ft:host-pick-result': {
         const placeholder = this.transfers.get(String(data.reqId || ''));
         if (!placeholder || data.chosen) return true;
@@ -180,7 +229,7 @@ export class WebFileTransfer {
         if (data.direction !== 'receive') return true;
         this.clearPickPlaceholders();
         const id = String(data.transferId || newId('r'));
-        this.incoming.set(id, { id, name: String(data.name || 'file'), totalSize: Number(data.totalSize) || 0, totalChunks: Number(data.totalChunks) || 0, parts: [], received: 0 });
+        this.incoming.set(id, newIncoming(id, String(data.name || 'file'), Number(data.totalSize) || 0, Number(data.totalChunks) || 0));
         this.upsert(id, { direction: 'receive', name: String(data.name || 'file'), totalBytes: Number(data.totalSize) || 0, state: 'active', message: '' });
         return true;
       }
@@ -227,24 +276,37 @@ export class WebFileTransfer {
     let job = this.incoming.get(id);
     if (!job) {
       // Chunks without a start message (older host): start the job here.
-      job = { id, name: String(header.name || 'file'), totalSize: Number(header.totalSize) || 0, totalChunks: Number(header.totalChunks) || 0, parts: [], received: 0 };
+      job = newIncoming(id, String(header.name || 'file'), Number(header.totalSize) || 0, Number(header.totalChunks) || 0);
       this.incoming.set(id, job);
       this.clearPickPlaceholders();
     }
-    job.parts.push(new Uint8Array(buffer.slice(4 + headerLength)));
+    // A view, not a copy: every message arrives in its own ArrayBuffer.
+    const chunk = new Uint8Array(buffer, 4 + headerLength);
+    job.parts.push(chunk);
+    job.partBytes += chunk.length;
+    job.bytes += chunk.length;
     job.received++;
-    const bytes = job.parts.reduce((sum, part) => sum + part.length, 0);
-    this.upsert(id, { direction: 'receive', name: job.name, totalBytes: job.totalSize, transferredBytes: bytes, state: 'active', message: '' });
-    if (job.totalChunks && job.received >= job.totalChunks) {
+    if (job.partBytes >= FOLD_BYTES) {
+      job.blobs.push(new Blob(job.parts as BlobPart[]));
+      job.parts = [];
+      job.partBytes = 0;
+    }
+    const finished = Boolean(job.totalChunks) && job.received >= job.totalChunks;
+    const now = Date.now();
+    if (!finished && now - job.lastEmitAt >= PROGRESS_INTERVAL_MS) {
+      job.lastEmitAt = now;
+      this.upsert(id, { direction: 'receive', name: job.name, totalBytes: job.totalSize, transferredBytes: job.bytes, state: 'active', message: '' });
+    }
+    if (finished) {
       this.incoming.delete(id);
       this.saveDownload(job);
-      this.upsert(id, { state: 'done', transferredBytes: bytes, message: '' });
+      this.upsert(id, { direction: 'receive', name: job.name, totalBytes: job.totalSize, transferredBytes: job.bytes, state: 'done', message: '' });
     }
     return true;
   }
 
   private saveDownload(job: Incoming): void {
-    const url = URL.createObjectURL(new Blob(job.parts as BlobPart[]));
+    const url = URL.createObjectURL(new Blob([...job.blobs, ...job.parts] as BlobPart[]));
     const link = document.createElement('a');
     link.href = url;
     link.download = job.name.replace(/[\\/]/g, '_') || 'file';

@@ -46,7 +46,7 @@ import {
 } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import api from '../../lib/api';
-import { WebFileTransfer, type WebTransfer } from '../../lib/webFileTransfer';
+import { WebFileTransfer, describeFileLimit, type WebTransfer } from '../../lib/webFileTransfer';
 import { publishActiveSession } from '../../lib/activeSessions';
 import waitIllustrationAsset from '../../assets/wait.png';
 import {
@@ -251,8 +251,11 @@ const SessionViewer: React.FC = () => {
   const [zoomMode, setZoomMode] = useState<'fit' | 'fill' | 'original'>('fit');
   // "Send files" / "Get files" — see lib/webFileTransfer. One engine per
   // viewer; it reads the live control channel on every send.
+  // Per-file cap for this viewer's plan, announced by the host (null until it
+  // does, and for hosts older than 1.2.139 that never announce one).
+  const [fileLimitBytes, setFileLimitBytes] = useState<number | null>(null);
   const fileXferRef = useRef<WebFileTransfer | null>(null);
-  if (!fileXferRef.current) fileXferRef.current = new WebFileTransfer(() => dataChannelRef.current);
+  if (!fileXferRef.current) fileXferRef.current = new WebFileTransfer(() => dataChannelRef.current, setFileLimitBytes);
   const [fileTransfers, setFileTransfers] = useState<WebTransfer[]>([]);
   useEffect(() => fileXferRef.current!.subscribe(setFileTransfers), []);
   useEffect(() => () => { fileXferRef.current?.dispose(); }, []);
@@ -1879,6 +1882,10 @@ const SessionViewer: React.FC = () => {
     if (needControlForFiles()) return;
     fileXferRef.current?.requestHostPick(deviceName);
   };
+  // The hover hints carry the plan's per-file limit once the host has said it.
+  const fileLimitNote = fileLimitBytes ? ` (up to ${describeFileLimit(fileLimitBytes)} per file)` : '';
+  const sendFilesHint = `Send files${fileLimitNote}`;
+  const getFilesHint = `Get files${fileLimitNote}`;
   const confirmHostAction = (action: string, title: string, message: string, confirmLabel: string) => () =>
     setPendingAction({ action, title, message, confirmLabel });
   const pickQuality = (mode: 'auto' | 'speed' | 'quality') => () => {
@@ -2262,8 +2269,8 @@ const SessionViewer: React.FC = () => {
                 type="button"
                 aria-label="Send files"
                 onClick={sendFilesClick}
-                onMouseEnter={showQuickHint('Send files')}
-                onMouseLeave={hideQuickHint('Send files')}
+                onMouseEnter={showQuickHint(sendFilesHint)}
+                onMouseLeave={hideQuickHint(sendFilesHint)}
                 className="flex h-10 w-10 items-center justify-center rounded-full text-[#FF8A00] transition-colors hover:bg-[#FFF1E0] active:scale-95"
               >
                 <UploadCloud size={20} strokeWidth={1.75} />
@@ -2272,8 +2279,8 @@ const SessionViewer: React.FC = () => {
                 type="button"
                 aria-label="Get files"
                 onClick={getFilesClick}
-                onMouseEnter={showQuickHint('Get files')}
-                onMouseLeave={hideQuickHint('Get files')}
+                onMouseEnter={showQuickHint(getFilesHint)}
+                onMouseLeave={hideQuickHint(getFilesHint)}
                 className="flex h-10 w-10 items-center justify-center rounded-full text-[#FF8A00] transition-colors hover:bg-[#FFF1E0] active:scale-95"
               >
                 <DownloadCloud size={20} strokeWidth={1.75} />

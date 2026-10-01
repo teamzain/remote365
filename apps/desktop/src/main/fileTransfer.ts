@@ -93,7 +93,7 @@ function armDrainSignal(channel: TransferChannel): Set<Waiter> {
   return waiters;
 }
 
-function whenDrained(channel: TransferChannel, log?: FileTransferDeps['log']): Promise<void> {
+export function whenDrained(channel: TransferChannel, log?: FileTransferDeps['log']): Promise<void> {
   const buffered = typeof channel.bufferedAmount === 'function' ? channel.bufferedAmount() : -1;
   if (buffered === -1) {
     // No bufferedAmount on this channel wrapper: flow control is BLIND. Say
