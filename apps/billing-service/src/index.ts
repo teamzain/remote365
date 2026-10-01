@@ -15,6 +15,7 @@ import {
 } from '@remotelink/shared';
 import rawBody from 'fastify-raw-body';
 import cors from '@fastify/cors';
+import { planForPrice, subscriptionEffect } from './stripeMapping';
 
 const cleanStripeKey = (key?: string) => {
   if (!key) return '';
@@ -128,6 +129,36 @@ const applyPlanChange = async (userId: string, target: MergedPlan, extra: Record
   return (prisma as any).subscription.upsert({ where: { userId }, update, create });
 };
 
+// Record a PAID Stripe subscription on the user's row. The single place a
+// Stripe payment turns into a plan: checkout, the post-3DS confirm call and
+// the webhook all come through here, and each of them only calls it once
+// Stripe reports the subscription as paid.
+const grantPaidPlan = async (
+  userId: string,
+  plan: string,
+  subscription: Stripe.Subscription,
+  opts: { boughtByUser?: boolean } = {},
+) => {
+  const effect = subscriptionEffect(subscription.status);
+  const existing = await (prisma as any).subscription.findUnique({ where: { userId }, select: { paidSince: true } });
+  await (prisma as any).subscription.update({
+    where: { userId },
+    data: {
+      plan: plan as any,
+      status: effect.kind === 'paid' ? effect.status : 'ACTIVE',
+      stripeSubscriptionId: subscription.id,
+      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+      cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+      paidSince: existing?.paidSince ?? new Date(),
+      // A plan the customer just bought replaces a custom plan they were on
+      // (customPlanKey wins over the enum everywhere). The webhook leaves it
+      // alone, so a later super-admin grant survives routine Stripe updates.
+      ...(opts.boughtByUser ? { customPlanKey: null } : {}),
+    }
+  });
+  await publishBillingSync(userId);
+};
+
 // 1. GET /billing/plans — merged catalog: built-ins with the super admin's
 // overrides applied, plus admin-created custom plans (disabled plans hidden).
 server.get('/billing/plans', async (request, reply) => {
@@ -137,10 +168,20 @@ server.get('/billing/plans', async (request, reply) => {
   };
 });
 
-// 2. POST /billing/create-customer — Internal call after registration
+// 2. POST /billing/create-customer — Internal call after registration.
+// Caddy routes /api/billing* here, so this was reachable from the internet
+// with no credentials at all: anyone holding an owner's user id could give
+// them a fresh trial and re-point their row at a new, empty Stripe customer.
+// It now takes a service token only auth-service can mint (signed with the
+// same key as user tokens, carrying a `svc` claim no user token has), and it
+// never rewrites a row that is already set up.
 server.post('/billing/create-customer', async (request, reply) => {
-  const { userId, email } = request.body as any;
-  if (!userId || !email) return reply.code(400).send({ error: 'userId and email required' });
+  const serviceToken = String(request.headers.authorization || '').split(' ')[1];
+  const caller = serviceToken ? verifyToken(serviceToken) : null;
+  if (caller?.svc !== 'auth-service') return reply.code(401).send({ error: 'Unauthorized' });
+
+  const { userId } = request.body as any;
+  if (!userId) return reply.code(400).send({ error: 'userId required' });
 
   try {
     const user = await (prisma as any).user.findUnique({ where: { id: userId } });
@@ -149,9 +190,13 @@ server.post('/billing/create-customer', async (request, reply) => {
       return { success: true, skipped: true, reason: 'Only organization owners receive subscriptions' };
     }
 
-    const customer = await stripe.customers.create({ email });
+    const existing = await (prisma as any).subscription.findUnique({ where: { userId } });
+    if (existing?.stripeCustomerId && !String(existing.stripeCustomerId).startsWith('local_')) {
+      return { success: true, stripeCustomerId: existing.stripeCustomerId };
+    }
 
-    const trialEnd = await trialEndDate();
+    const customer = await stripe.customers.create({ email: user.email });
+
     await (prisma as any).subscription.upsert({
       where: { userId },
       create: {
@@ -159,12 +204,10 @@ server.post('/billing/create-customer', async (request, reply) => {
         stripeCustomerId: customer.id,
         plan: 'TRIAL',
         status: 'ACTIVE',
-        currentPeriodEnd: trialEnd
+        currentPeriodEnd: await trialEndDate()
       },
-      update: {
-        stripeCustomerId: customer.id,
-        currentPeriodEnd: trialEnd
-      }
+      // The trial deadline belongs to the row auth-service created at sign-up.
+      update: { stripeCustomerId: customer.id }
     });
 
     return { success: true, stripeCustomerId: customer.id };
@@ -304,7 +347,11 @@ server.post('/billing/subscribe', async (request, reply) => {
     if (sub.stripeSubscriptionId) {
       try {
         const existingSubscription = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId);
-        if (!TERMINAL_STRIPE_STATUSES.has(existingSubscription.status)) {
+        if (existingSubscription.status === 'incomplete') {
+          // An earlier checkout that was never paid. Stripe will not re-price
+          // it, so drop it and start a clean one below.
+          await stripe.subscriptions.cancel(existingSubscription.id).catch(() => { /* already gone */ });
+        } else if (!TERMINAL_STRIPE_STATUSES.has(existingSubscription.status)) {
           const existingItem = existingSubscription.items.data[0];
           if (!existingItem) {
             return reply.code(409).send({ error: 'The existing subscription has no plan item to update' });
@@ -318,11 +365,18 @@ server.post('/billing/subscribe', async (request, reply) => {
       }
     }
 
+    // 'allow_incomplete' makes Stripe attempt the charge NOW with the card just
+    // attached. This used to be 'default_incomplete', which never charges on
+    // the server: the payment sits at requires_confirmation waiting for the
+    // browser. The code below only handed the browser a requires_action
+    // payment and treated every other state as paid, so the plan was granted
+    // with no money taken and the Stripe subscription expired unpaid a day
+    // later.
     if (existingItemId) {
       subscription = await stripe.subscriptions.update(sub.stripeSubscriptionId as string, {
         items: [{ id: existingItemId, price: priceId }],
         default_payment_method: paymentMethodId,
-        payment_behavior: 'default_incomplete',
+        payment_behavior: 'allow_incomplete',
         proration_behavior: 'create_prorations',
         expand: ['latest_invoice.payment_intent'],
       });
@@ -331,34 +385,84 @@ server.post('/billing/subscribe', async (request, reply) => {
         customer: sub.stripeCustomerId,
         items: [{ price: priceId }],
         default_payment_method: paymentMethodId,
-        payment_behavior: 'default_incomplete',
+        payment_behavior: 'allow_incomplete',
         expand: ['latest_invoice.payment_intent'],
       });
     }
 
-    const latestInvoice = subscription.latest_invoice as Stripe.Invoice;
-    const paymentIntent = latestInvoice.payment_intent as Stripe.PaymentIntent;
-
-    if (paymentIntent && paymentIntent.status === 'requires_action') {
-      return { clientSecret: paymentIntent.client_secret, requiresAction: true };
+    // The plan is granted on Stripe's word that the subscription is paid, and
+    // on nothing else.
+    if (subscriptionEffect(subscription.status).kind === 'paid') {
+      await grantPaidPlan(decoded.userId, plan.toUpperCase(), subscription, { boughtByUser: true });
+      return { success: true, subscriptionId: subscription.id };
     }
 
-    await (prisma as any).subscription.update({
-      where: { userId: decoded.userId },
-      data: {
-        plan: plan.toUpperCase() as any,
-        status: 'ACTIVE',
-        stripeSubscriptionId: subscription.id,
-        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-        paidSince: sub.paidSince ?? new Date(),
-      }
-    });
-    await publishBillingSync(decoded.userId);
+    const latestInvoice = subscription.latest_invoice as Stripe.Invoice | null;
+    const paymentIntent = (latestInvoice && typeof latestInvoice !== 'string'
+      ? latestInvoice.payment_intent : null) as Stripe.PaymentIntent | null;
 
-    return { success: true, subscriptionId: subscription.id };
+    if (paymentIntent && (paymentIntent.status === 'requires_action' || paymentIntent.status === 'requires_confirmation')) {
+      // The bank wants the customer to approve the payment (3-D Secure).
+      // Remember the subscription so /billing/subscribe/confirm and the
+      // webhook can find this row once the payment clears; the plan itself
+      // stays as it is until then.
+      await (prisma as any).subscription.update({
+        where: { userId: decoded.userId },
+        data: { stripeSubscriptionId: subscription.id }
+      });
+      return { clientSecret: paymentIntent.client_secret, requiresAction: true, subscriptionId: subscription.id };
+    }
+
+    // Not paid and nothing the customer can approve: the card was declined
+    // (or an existing subscription is overdue). A brand-new subscription that
+    // failed its first payment is removed so the next attempt starts clean.
+    if (!existingItemId) {
+      await stripe.subscriptions.cancel(subscription.id).catch(() => { /* already gone */ });
+    }
+    const declineReason = paymentIntent?.last_payment_error?.message;
+    server.log.warn(`[Billing] Subscribe for ${decoded.userId} not paid: subscription ${subscription.status}, payment ${paymentIntent?.status || 'none'}.`);
+    return reply.code(402).send({
+      error: declineReason
+        || (existingItemId
+          ? 'Your current subscription has an unpaid invoice. Update your payment method under Manage Billing, then try again.'
+          : 'The payment did not go through. Check the card details or try another card.'),
+    });
   } catch (err: any) {
     server.log.error(err);
+    // Card errors (declined, wrong CVC, expired) are the customer's to fix and
+    // carry a message written for them.
+    if (err?.type === 'StripeCardError') {
+      return reply.code(402).send({ error: err.message });
+    }
     return reply.code(500).send({ error: 'Subscription failed: ' + err.message });
+  }
+});
+
+// 3a. POST /billing/subscribe/confirm — called by the checkout after the
+// customer approves a payment in the browser (3-D Secure). Asks Stripe for the
+// truth and grants the plan only if the subscription is now paid. The webhook
+// does the same on its own; this just means the customer does not have to
+// wait for it (or depend on it being configured).
+server.post('/billing/subscribe/confirm', async (request, reply) => {
+  const decoded = requirePermission(request, reply, 'billing:manage');
+  if (!decoded) return;
+
+  try {
+    const row = await (prisma as any).subscription.findUnique({ where: { userId: decoded.userId } });
+    if (!row?.stripeSubscriptionId || String(row.stripeSubscriptionId).startsWith('local_')) {
+      return reply.code(404).send({ error: 'No subscription is waiting for payment.' });
+    }
+    const subscription = await stripe.subscriptions.retrieve(row.stripeSubscriptionId);
+    if (subscriptionEffect(subscription.status).kind !== 'paid') {
+      return reply.code(402).send({ error: 'The payment has not completed yet.', status: subscription.status });
+    }
+    const plan = planForPrice(subscription.items.data[0]?.price?.id);
+    if (!plan) return reply.code(409).send({ error: 'This subscription is not for a known plan.' });
+    await grantPaidPlan(decoded.userId, plan, subscription, { boughtByUser: true });
+    return { success: true, plan };
+  } catch (err: any) {
+    server.log.error(err);
+    return reply.code(500).send({ error: 'Could not confirm the subscription: ' + err.message });
   }
 });
 
@@ -833,65 +937,105 @@ server.post('/billing/webhook', { config: { rawBody: true } }, async (request: a
 
   const data = event.data.object as any;
 
-  switch (event.type as string) {
-    case 'customer.subscription.updated':
-      // Map back to plan
-      const planMap: Record<string, any> = {
-        [process.env.STRIPE_PRICE_ID_PRO!]: 'PRO',
-        [process.env.STRIPE_PRICE_ID_BUSINESS!]: 'BUSINESS',
-        [process.env.STRIPE_PRICE_ID_ENTERPRISE!]: 'ENTERPRISE'
-      };
-      const newPlan = planMap[data.items.data[0].price.id] || 'TRIAL';
+  // Every row lookup is by Stripe subscription id, and an event for a
+  // subscription we hold no row for is acknowledged, not failed: it is one we
+  // replaced or never recorded (an abandoned checkout), and throwing here made
+  // Stripe redeliver it for days. Anything that DOES throw below is a real
+  // failure (database down, Stripe unreachable) and is answered with a 500 so
+  // Stripe retries it.
+  const rowForSubscription = (stripeSubscriptionId: unknown) =>
+    typeof stripeSubscriptionId === 'string' && stripeSubscriptionId
+      ? (prisma as any).subscription.findUnique({ where: { stripeSubscriptionId } })
+      : Promise.resolve(null);
+  const endSubscription = async (row: any) => {
+    await (prisma as any).subscription.update({
+      where: { id: row.id },
+      data: { status: 'CANCELLED', plan: 'TRIAL', paidSince: null }
+    });
+    await publishBillingSync(row.userId);
+  };
 
-      const priorSub = await (prisma as any).subscription.findUnique({
-        where: { stripeSubscriptionId: data.id },
-        select: { paidSince: true },
-      });
-      const updatedSub = await (prisma as any).subscription.update({
-        where: { stripeSubscriptionId: data.id },
-        data: {
-          plan: newPlan,
-          status: data.status.toUpperCase() as any,
-          currentPeriodEnd: new Date(data.current_period_end * 1000),
-          paidSince: newPlan === 'TRIAL' ? null : (priorSub?.paidSince ?? new Date()),
+  try {
+    switch (event.type as string) {
+      case 'customer.subscription.updated': {
+        const row = await rowForSubscription(data.id);
+        if (!row) {
+          server.log.info(`[Billing] Webhook ${event.type}: no row for subscription ${data.id}; ignored.`);
+          break;
         }
-      });
-      await publishBillingSync(updatedSub.userId);
-      break;
+        const effect = subscriptionEffect(data.status);
+        if (effect.kind === 'paid') {
+          const plan = planForPrice(data.items?.data?.[0]?.price?.id);
+          if (plan) {
+            await grantPaidPlan(row.userId, plan, data as Stripe.Subscription);
+          } else {
+            // A price that is not one of ours must never be read as "TRIAL":
+            // keep the plan the row has and only refresh the dates.
+            server.log.warn(`[Billing] Webhook: subscription ${data.id} is on an unrecognised price; plan left as ${row.plan}.`);
+            await (prisma as any).subscription.update({
+              where: { id: row.id },
+              data: {
+                status: effect.status,
+                currentPeriodEnd: new Date(data.current_period_end * 1000),
+                cancelAtPeriodEnd: Boolean(data.cancel_at_period_end),
+              }
+            });
+            await publishBillingSync(row.userId);
+          }
+        } else if (effect.kind === 'past-due') {
+          await (prisma as any).subscription.update({ where: { id: row.id }, data: { status: 'PAST_DUE' } });
+          await publishBillingSync(row.userId);
+        } else if (effect.kind === 'ended') {
+          await endSubscription(row);
+        } else if (effect.kind === 'abandoned') {
+          // A checkout that was never paid expired. Nothing was granted for
+          // it, so only the pointer goes; the plan stays as it was.
+          await (prisma as any).subscription.update({ where: { id: row.id }, data: { stripeSubscriptionId: null } });
+        }
+        // 'pending' (incomplete): still waiting on the customer; nothing to record.
+        break;
+      }
 
-    case 'customer.subscription.deleted':
-      const deletedSub = await (prisma as any).subscription.update({
-        where: { stripeSubscriptionId: data.id },
-        data: { status: 'CANCELLED', plan: 'TRIAL', paidSince: null }
-      });
-      await publishBillingSync(deletedSub.userId);
-      break;
+      case 'customer.subscription.deleted': {
+        const row = await rowForSubscription(data.id);
+        if (row) await endSubscription(row);
+        break;
+      }
 
-    case 'invoice.payment_succeeded':
-      if (data.subscription) {
+      case 'invoice.payment_succeeded': {
+        const row = await rowForSubscription(data.subscription);
+        if (!row) break;
         const sub = await stripe.subscriptions.retrieve(data.subscription);
-        const paidSub = await (prisma as any).subscription.update({
-          where: { stripeSubscriptionId: data.subscription },
+        await (prisma as any).subscription.update({
+          where: { id: row.id },
           data: { currentPeriodEnd: new Date(sub.current_period_end * 1000) }
         });
-        await publishBillingSync(paidSub.userId);
+        await publishBillingSync(row.userId);
+        break;
       }
-      break;
 
-    case 'invoice.payment_failed':
-      const failedSub = await (prisma as any).subscription.update({
-        where: { stripeSubscriptionId: data.subscription },
-        data: { status: 'PAST_DUE' }
-      });
-      await publishBillingSync(failedSub.userId);
-      console.warn(`Payment failed for customer ${data.customer}. Notifying user...`);
-      // TODO: Call email service to notify payment failure
-      break;
+      case 'invoice.payment_failed': {
+        // The first invoice of a new subscription failing is a declined
+        // checkout: no plan was granted, so there is nothing to mark overdue
+        // (and marking a trial row PAST_DUE would have the nightly job cancel it).
+        if (data.billing_reason === 'subscription_create') break;
+        const row = await rowForSubscription(data.subscription);
+        if (!row) break;
+        await (prisma as any).subscription.update({ where: { id: row.id }, data: { status: 'PAST_DUE' } });
+        await publishBillingSync(row.userId);
+        console.warn(`Payment failed for customer ${data.customer}. Notifying user...`);
+        // TODO: Call email service to notify payment failure
+        break;
+      }
 
-    case 'customer.subscription.trial_ending':
-      console.info(`Trial ending for customer ${data.customer}. Notifying user...`);
-      // TODO: Call email service to notify trial ending in 3 days
-      break;
+      case 'customer.subscription.trial_ending':
+        console.info(`Trial ending for customer ${data.customer}. Notifying user...`);
+        // TODO: Call email service to notify trial ending in 3 days
+        break;
+    }
+  } catch (err: any) {
+    server.log.error(`[Billing] Webhook ${event.type} (${event.id}) failed: ${err?.message || err}`);
+    return reply.code(500).send({ error: 'Webhook handling failed' });
   }
 
   return { received: true };

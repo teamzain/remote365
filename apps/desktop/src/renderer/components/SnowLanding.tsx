@@ -843,7 +843,7 @@ export const SnowLanding: React.FC<SnowLandingProps> = ({
                         </div>
                         <div className="tv-options-row">
                           <label>Password</label>
-                          <input type="text" value={devicePassword ? 'Set' : 'Not Set'} readOnly />
+                          <input type="text" value={devicePassword || 'Not Set'} readOnly />
                         </div>
                         <div className="tv-options-row">
                           <label>Host Status</label>

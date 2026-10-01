@@ -51,12 +51,27 @@ const CheckoutForm: React.FC<{ plan: string, price: string, onClose: () => void,
       if (data.requiresAction) {
         const { error: confirmError } = await stripe.confirmCardPayment(data.clientSecret);
         if (confirmError) throw new Error(confirmError.message);
+        // The bank approved it in the browser; have the server check with
+        // Stripe and switch the plan now. 402 = Stripe has not marked the
+        // subscription paid yet, so ask again shortly. Any other failure
+        // (an older server without this route) is left to the webhook.
+        for (let attempt = 0; attempt < 5; attempt++) {
+          try {
+            await api.post('/api/billing/subscribe/confirm');
+            break;
+          } catch (confirmErr: any) {
+            if (confirmErr?.response?.status !== 402) break;
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+          }
+        }
       }
 
       onSuccess();
     } catch (err: any) {
       console.error('Subscription error:', err);
-      setError(err.message || 'An unexpected error occurred.');
+      // The server's message (a declined card, an unpaid invoice) beats axios's
+      // generic "Request failed with status code 402".
+      setError(err?.response?.data?.error || err.message || 'An unexpected error occurred.');
     } finally {
       setLoading(false);
     }

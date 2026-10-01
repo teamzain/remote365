@@ -44,8 +44,11 @@ export const AccessPasswordModal: React.FC<AccessPasswordModalProps> = ({ open, 
     onSubmit(value);
   };
 
+  // z-[1100]: above the landing Options window (.tv-settings-modal-wrap,
+  // z-index 1000). Its Change Password button opens this, and at z-200 the
+  // dialog appeared BEHIND it.
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-[#1C1C1C]/20 backdrop-blur-md animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[1100] flex items-center justify-center p-6 bg-[#1C1C1C]/20 backdrop-blur-md animate-in fade-in duration-300">
       <div className="w-full max-w-md bg-white p-8 rounded-[24px] shadow-2xl border border-[rgba(28,28,28,0.08)] animate-in zoom-in-95 duration-300">
         <div className="flex items-start justify-between mb-2">
           <div className="flex items-center gap-3">

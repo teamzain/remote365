@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { createHmac } from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
-import { prisma, publishEvent, EventChannel, verifyToken, blacklistToken, isTokenBlacklisted, redisPublisher, recordActivity, recordLogin, resolveRoleFeatures, resolveEffectivePermissions, getPlanLimits, getCloudflareTurnEntry, hostSecretMatches, getTrialDays, trialDurationMs } from '@remotelink/shared';
+import { prisma, publishEvent, EventChannel, verifyToken, generateToken, blacklistToken, isTokenBlacklisted, redisPublisher, recordActivity, recordLogin, resolveRoleFeatures, resolveEffectivePermissions, getPlanLimits, getCloudflareTurnEntry, hostSecretMatches, getTrialDays, trialDurationMs } from '@remotelink/shared';
 import { issueTokens } from '../utils/token-utils';
 import { sendTemplatedEmail, smtpConfigured } from '../utils/emailTemplates';
 import { sendWelcomeEmail } from '../utils/welcomeEmail';
@@ -98,6 +98,11 @@ const sanitizeSecuritySettings = (raw: any) => {
 // When a Super Admin suspends an organization, every member is locked out
 // everywhere: login is blocked, token refresh fails, and /me rejects so any
 // already-signed-in client is kicked out on its next check.
+// billing-service's /billing/create-customer is reachable through Caddy, so it
+// only answers a caller holding this: a short-lived token signed with our key
+// and carrying a `svc` claim, which no user token has.
+const billingServiceToken = () => generateToken({ svc: 'auth-service' }, '5m');
+
 const SUSPENDED_MESSAGE = 'Your account has been suspended. Please contact support.';
 // An org admin toggled the member Inactive (Members page): a temporary,
 // reversible lock with its own message so the user knows who to contact.
@@ -331,7 +336,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
       const billingUrl = process.env.BILLING_SERVICE_URL || 'http://localhost:3004';
       await fetch(`${billingUrl}/billing/create-customer`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${billingServiceToken()}` },
         body: JSON.stringify({ userId: user.id, email: user.email })
       });
     } catch (err) {
@@ -486,7 +491,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
           const billingUrl = process.env.BILLING_SERVICE_URL || 'http://localhost:3004';
           await fetch(`${billingUrl}/billing/create-customer`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${billingServiceToken()}` },
             body: JSON.stringify({ userId: user!.id, email: user!.email })
           });
         } catch (err) { }
