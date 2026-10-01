@@ -1213,6 +1213,52 @@ const SessionViewer: React.FC = () => {
     return () => clearInterval(timer);
   }, [viewerStatus, remoteStream, onControlEvent]);
 
+  // Live-stall recovery (desktop viewer parity). The watchdog above only covers
+  // a stream that never painted; a picture that froze MID-session had nothing
+  // watching it, so the viewer sat on a dead frame (clicks landing unseen)
+  // until the host happened to produce a keyframe. When no frame has been
+  // presented for 5s, ask for an urgent keyframe and report how long the stall
+  // is — past 6s the host restarts its encoder (15s cooldown on its side).
+  // A hidden tab presents no frames at all, which is not a stall: the probe
+  // stands down while hidden and starts a fresh clock, with a keyframe, when
+  // the tab comes back.
+  const onControlEventRef = useRef(onControlEvent);
+  onControlEventRef.current = onControlEvent;
+  useEffect(() => {
+    if (viewerStatus !== 'streaming' || !remoteStream) return;
+    const video = videoRef.current as any;
+    if (!video || typeof video.requestVideoFrameCallback !== 'function') return;
+    let cancelled = false;
+    let lastPresentedAt = performance.now();
+    let callbackId: number | null = null;
+    const onPresentedFrame = () => {
+      if (cancelled) return;
+      lastPresentedAt = performance.now();
+      callbackId = video.requestVideoFrameCallback(onPresentedFrame);
+    };
+    callbackId = video.requestVideoFrameCallback(onPresentedFrame);
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      lastPresentedAt = performance.now();
+      onControlEventRef.current({ type: 'request-keyframe', reason: 'tab-visible' });
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    const probe = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      if (video.videoWidth === 0 || video.videoHeight === 0 || video.readyState < 2) return;
+      const stalledMs = performance.now() - lastPresentedAt;
+      if (stalledMs < 5000) return;
+      console.warn(`[Web] No frame presented for ${Math.round(stalledMs)}ms — requesting recovery keyframe`);
+      onControlEventRef.current({ type: 'request-keyframe', urgent: true, reason: 'presentation-stalled', stalledMs: Math.round(stalledMs) });
+    }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(probe);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (callbackId != null && typeof video.cancelVideoFrameCallback === 'function') video.cancelVideoFrameCallback(callbackId);
+    };
+  }, [viewerStatus, remoteStream]);
+
   // Desktop-mouse scroll → remote scroll. Attached manually (passive: false)
   // so preventDefault works — React's onWheel is passive and the page would
   // scroll instead of the remote screen. In "Actual size" mode the wheel keeps
