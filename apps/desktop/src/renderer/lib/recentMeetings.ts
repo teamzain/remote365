@@ -3,6 +3,8 @@
 // account's server-backed Recent Meetings instead.)
 const STORAGE_KEY = 'remote365_recent_meetings';
 const MAX_ENTRIES = 8;
+// Same window the signed-in Recent Meetings list uses for ended meetings.
+const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export interface RecentMeeting {
   /** Bare code, letters and digits only, upper-cased. */
@@ -19,6 +21,10 @@ export const formatRecentMeetingCode = (raw: string | null | undefined): string 
   const clean = cleanMeetingCode(raw);
   return (clean.match(/.{1,3}/g) || [clean]).join('-');
 };
+
+/** Not used for a day (or carrying an unreadable date): kept in the list, shown inactive. */
+export const isRecentMeetingExpired = (entry: RecentMeeting): boolean =>
+  !(Date.parse(entry.lastUsedAt) > Date.now() - MAX_AGE_MS);
 
 const safeParse = (raw: string | null): RecentMeeting[] => {
   if (!raw) return [];

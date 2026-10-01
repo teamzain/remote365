@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, Clock, Copy, Eye, EyeOff, Globe2, Languages, CircleHelp, Lock, LogIn, Monitor, RefreshCw, Settings, Trash2, Video, Wand2, X } from 'lucide-react';
 import { RecentConnection, formatAccessKey, getAllRecentConnections, removeRecentConnectionEverywhere } from '../lib/recentConnections';
-import { RecentMeeting, formatRecentMeetingCode, getRecentMeetings, recordRecentMeeting, removeRecentMeeting } from '../lib/recentMeetings';
+import { RecentMeeting, formatRecentMeetingCode, getRecentMeetings, isRecentMeetingExpired, recordRecentMeeting, removeRecentMeeting } from '../lib/recentMeetings';
 import { LottieScene } from './lottie/LottieScene';
 // Connect Anything is not built yet: the tab shows this looping teaser (816x372 export).
 import connectAnythingSoonAnimation from '../assets/animations/connectAnythingSoon.json';
@@ -450,6 +450,14 @@ export const SnowLanding: React.FC<SnowLandingProps> = ({
     window.addEventListener('focus', refresh);
     return () => window.removeEventListener('focus', refresh);
   }, [connectStep, connectStatus]);
+
+  // Recent meetings go inactive after a day; re-read when the window comes back
+  // so an app left open does not keep showing a stale one as joinable.
+  useEffect(() => {
+    const refresh = () => setRecentMeetings(getRecentMeetings());
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, []);
 
   useEffect(() => {
     const lists = HEIGHT_TIER_QUERIES.map((query) => window.matchMedia(query));
@@ -960,19 +968,22 @@ export const SnowLanding: React.FC<SnowLandingProps> = ({
                       <Clock size={14} /><span>Recent Meetings</span><em>{recentMeetings.length}</em><ChevronDown size={14} className={recentMeetingsOpen ? 'open' : ''} />
                     </button>
                     {recentMeetingsOpen && <div className="tv-recent-list">
-                      {recentMeetings.slice(0, 6).map((entry) => (
-                        <div key={entry.code} className="tv-recent-item">
-                          <button type="button" className="tv-recent-pick" onClick={() => handlePickRecentMeeting(entry)}>
-                            <span className="tv-recent-name">{formatRecentMeetingCode(entry.code)}</span>
-                            <span className="tv-recent-id">
-                              {entry.role === 'created' ? 'Created' : 'Joined'} · {new Date(entry.lastUsedAt).toLocaleDateString('en-GB')}
-                            </span>
-                          </button>
-                          <button type="button" className="tv-recent-remove" onClick={(e) => handleRemoveRecentMeeting(e, entry)} title="Remove" aria-label="Remove">
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      ))}
+                      {recentMeetings.slice(0, 6).map((entry) => {
+                        const expired = isRecentMeetingExpired(entry);
+                        return (
+                          <div key={entry.code} className={`tv-recent-item${expired ? ' expired' : ''}`} title={expired ? 'This Meeting Has Expired' : undefined}>
+                            <button type="button" className="tv-recent-pick" onClick={() => handlePickRecentMeeting(entry)} disabled={expired}>
+                              <span className="tv-recent-name">{formatRecentMeetingCode(entry.code)}</span>
+                              <span className="tv-recent-id">
+                                {entry.role === 'created' ? 'Created' : 'Joined'} · {new Date(entry.lastUsedAt).toLocaleDateString('en-GB')}{expired ? ' · Expired' : ''}
+                              </span>
+                            </button>
+                            <button type="button" className="tv-recent-remove" onClick={(e) => handleRemoveRecentMeeting(e, entry)} title="Remove" aria-label="Remove">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>}
                   </div>
                 )}
