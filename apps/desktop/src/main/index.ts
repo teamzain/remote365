@@ -1,5 +1,6 @@
 import { app, shell, dialog, BrowserWindow, BrowserView, ipcMain, safeStorage, clipboard, screen, Notification, session, Menu, Tray, desktopCapturer, globalShortcut, powerMonitor, powerSaveBlocker } from 'electron';
 import { isViewerMediaActive, hasActiveMediaViewer, updateHostMediaActivity } from '../shared/viewerMediaPolicy';
+import { buildHostVideoRtpChain } from '../shared/hostVideoRtpChain';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import { join, basename, resolve, dirname, extname } from 'path';
@@ -6741,23 +6742,10 @@ async function initiateHostWebRTC(viewerId: string) {
   video.addH264Codec(96, "profile-level-id=42e01f;level-asymmetry-allowed=1;packetization-mode=1");
   // node-datachannel: (ssrc, cname, payloadType, clockRate)
   videoRtpConfig = new datachannel.RtpPacketizationConfig(1, "video", 96, 90000);
-  const packetizer = new datachannel.H264RtpPacketizer("StartSequence", videoRtpConfig);
-  // A packetizer alone cannot repair UDP loss. Keep enough already-packetized
-  // RTP data for at least a long-haul RTT and retransmit fragments requested by
-  // Chromium via RTCP NACK. Without this chain, losing one FU-A fragment from a
-  // large IDR permanently poisoned the decoder reference picture and produced
-  // the black/multicolour barcode mosaic seen on affected devices.
-  const srReporter = new datachannel.RtcpSrReporter(videoRtpConfig);
-  packetizer.addToChain(srReporter);
-  // H.264 IDRs fragment into hundreds of RTP packets. Sending the whole access
-  // unit at once created a microburst that lost 40-93% of packets on the
-  // measured 250-400ms route. Pace the packet train at the configured 12Mbps
-  // ceiling so normal frames do not queue while keyframes are spread over the
-  // wire instead of dumped into one UDP burst.
-  const pacingHandler = new datachannel.PacingHandler(12_000_000, 5);
-  packetizer.addToChain(pacingHandler);
-  const nackResponder = new datachannel.RtcpNackResponder(2048);
-  packetizer.addToChain(nackResponder);
+  // Packetizer -> sender reports -> NACK retransmission -> pacing. The order is
+  // load-bearing (a responder behind the pacer never sees a packet), so it
+  // lives in one tested place.
+  const packetizer = buildHostVideoRtpChain(datachannel, videoRtpConfig);
 
   firstFrameSent = false;
   frameCount = 0;
