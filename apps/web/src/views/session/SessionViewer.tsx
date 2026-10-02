@@ -385,6 +385,15 @@ const SessionViewer: React.FC = () => {
   // 'input' (unordered, lossy), state transitions on 'input-critical'.
   const inputChannelRef = useRef<RTCDataChannel | null>(null);
   const criticalInputChannelRef = useRef<RTCDataChannel | null>(null);
+  // Desktop hosts ping on the control channel every second. ICE keepalives run
+  // on the host's network threads, so a host whose app has hung keeps the
+  // connection "connected" while sending no picture and injecting no input —
+  // from here that is a frozen screen and dead clicks with nothing to explain
+  // it. Silence on a channel that had been pinging is how the viewer tells.
+  // (Android hosts never ping, so the check only arms once a ping is seen.)
+  const lastHostMessageAtRef = useRef(0);
+  const hostHeartbeatSeenRef = useRef(false);
+  const [hostSilent, setHostSilent] = useState(false);
 
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   // The stream the <video> is playing, readable from inside pc.ontrack. The
@@ -781,6 +790,7 @@ const SessionViewer: React.FC = () => {
     // Fresh connection, fresh stream: folding a new pc's tracks into a stream
     // from a previous attempt would leave the <video> on dead tracks.
     remoteStreamRef.current = null;
+    hostHeartbeatSeenRef.current = false;
     pc.ontrack = (event) => {
       console.log(`[WebRTC] Stream Track Received: ${event.track?.kind || 'unknown'}`);
       // Prime the playout buffer IMMEDIATELY (~2 frame intervals). Without
@@ -832,12 +842,14 @@ const SessionViewer: React.FC = () => {
         // File chunks from the host arrive as binary frames on this channel.
         channel.binaryType = 'arraybuffer';
         channel.onmessage = (e) => {
+          lastHostMessageAtRef.current = performance.now();
           if (e.data instanceof ArrayBuffer) {
             fileXferRef.current?.handleBinary(e.data);
             return;
           }
           try {
             const data = JSON.parse(e.data);
+            if (data.type === 'ping') { hostHeartbeatSeenRef.current = true; return; }
             if (fileXferRef.current?.handleJson(data)) return;
             if (data.type === 'clipboard' && data.text) navigator.clipboard.writeText(data.text).catch(() => {});
             else if (data.type === 'control-granted') { setHostAnnouncedControl(true); setControlStatus('granted'); }
@@ -993,17 +1005,29 @@ const SessionViewer: React.FC = () => {
   // Mirrors the desktop viewer's loss-based tuner (apps/desktop/src/renderer/App.tsx):
   // only packet loss (real congestion) lowers the tier; RTT alone must not blur
   // the picture on long-haul links. Stands down while the user pins a quality.
-  // Phones start at 'balanced': the first sample always syncs the tier to the
-  // host, and pinning 'ultra' pushed portrait Android hosts past what phone
-  // H264 decoders accept (loss-only tuner can never back off from that).
-  const lastAdaptiveModeRef = useRef<'smooth' | 'balanced' | 'sharp' | 'ultra'>(isMobileViewport ? 'balanced' : 'ultra');
+  //
+  // Every tier change makes the host stop and restart capture and its encoder
+  // (new resolution, new frame rate, a fresh keyframe burst), so the ladder has
+  // to move as carefully as the desktop viewer's does. It used to start at
+  // 'ultra' and report that on its first sample, which overrode the host's own
+  // 'balanced' start 1.5s into every session, and it climbed a tier after 4.5
+  // clean seconds: on a link that cannot hold the top tier the host was
+  // restarting its encoder every few seconds, and the picture stops at each
+  // restart until the new keyframe arrives. Now it starts where the host
+  // starts and only reports changes.
+  const lastAdaptiveModeRef = useRef<'smooth' | 'balanced' | 'sharp' | 'ultra'>('balanced');
   useEffect(() => {
     if (viewerStatus !== 'streaming' || qualityMode !== 'auto') return;
     let prevReceived = 0;
     let prevLost = 0;
     let upshiftStreak = 0;
     let downshiftStreak = 0; // two lossy samples required before dropping a tier
-    let synced = false; // first sample always reports, so host and viewer agree on the tier
+    let warmedUp = false; // first sample's counters are cumulative: never act on it
+    // Only loss that matters (>=0.5% of a sample) holds the climb back; a stray
+    // packet must not pin the session at a blurry tier.
+    let lastMeaningfulLossAt = 0;
+    // Samples run every 1.5s: about ten clean seconds per tier going up.
+    const UPSHIFT_SAMPLES = 7;
     const rank: Record<string, number> = { smooth: 0, balanced: 1, sharp: 2, ultra: 3 };
     const order: Array<'smooth' | 'balanced' | 'sharp' | 'ultra'> = ['smooth', 'balanced', 'sharp', 'ultra'];
     const interval = window.setInterval(async () => {
@@ -1016,11 +1040,13 @@ const SessionViewer: React.FC = () => {
         let fps = 0;
         let received = prevReceived;
         let lost = prevLost;
+        let sawVideoRtp = false;
         stats.forEach((report: any) => {
           if (report.type === 'candidate-pair' && (report.nominated || report.selected) && typeof report.currentRoundTripTime === 'number') {
             rttMs = Math.max(rttMs, Math.round(report.currentRoundTripTime * 1000));
           }
           if (report.type === 'inbound-rtp' && report.kind === 'video') {
+            sawVideoRtp = true;
             received = Number(report.packetsReceived || 0);
             lost = Math.max(0, Number(report.packetsLost || 0));
             fps = Number(report.framesPerSecond || 0);
@@ -1047,31 +1073,45 @@ const SessionViewer: React.FC = () => {
         }
 
         const reason = lossPct >= 5 ? 'loss-high' : lossPct >= 1.5 ? 'loss-moderate' : 'healthy';
-        // Long-haul ceiling (desktop parity): past ~300ms RTT the 'ultra' tier's
+        // Long-haul ceiling (desktop parity): past ~180ms RTT the 'ultra' tier's
         // bitrate just deepens queueing delay on the bottleneck link.
-        const healthyCeiling = rttMs >= 300 ? 'sharp' : 'ultra';
+        const healthyCeiling = rttMs >= 180 ? 'sharp' : 'ultra';
         const target = lossPct >= 5 ? 'smooth' : lossPct >= 1.5 ? 'balanced' : healthyCeiling;
+        if (lossPct >= 0.5) lastMeaningfulLossAt = Date.now();
+        const painted = remoteStreamRef.current
+          ? (videoRef.current?.videoWidth ?? 0) > 0
+          : hasReceivedKeyframeRef.current;
         const current = lastAdaptiveModeRef.current;
         let next = current;
-        if (!synced) {
-          // First sample's counters are cumulative (handshake losses included):
-          // never act on it — the sync send below just aligns host and viewer.
+        if (!painted) {
+          // Never restart the encoder while the first picture is still on its
+          // way: that throws away the startup keyframe the viewer is waiting for.
+          upshiftStreak = 0;
+          downshiftStreak = 0;
+        } else if (!warmedUp) {
+          warmedUp = true;
         } else if (rank[target] < rank[current]) {
           // Congestion — require TWO consecutive lossy samples before dropping:
           // every tier change restarts the host encoder (a visible quality
-          // flip), so one 1.5s blip must not trigger it.
+          // flip), so one 1.5s blip must not trigger it. One tier at a time;
+          // only catastrophic loss drops straight to the safe tier.
           downshiftStreak++;
           upshiftStreak = 0;
-          if (downshiftStreak >= 2) {
-            next = target as typeof current;
+          const catastrophicLoss = lossPct >= 30;
+          if (catastrophicLoss || downshiftStreak >= 2) {
+            next = catastrophicLoss ? target : order[Math.max(rank[current] - 1, rank[target])];
             downshiftStreak = 0;
           }
         } else if (rank[target] > rank[current]) {
-          // Headroom: raise only after sustained good samples, one tier at a
-          // time, so we don't overshoot the link and re-congest.
+          // Headroom: raise one tier at a time, and only after a sustained
+          // clean window, so we don't overshoot the link and re-congest. An
+          // interval with no video packets at all proves nothing about the
+          // link (the picture is stalled), so it never counts as clean.
           downshiftStreak = 0;
-          upshiftStreak++;
-          if (upshiftStreak >= 3) {
+          const cleanLongEnough = lastMeaningfulLossAt === 0 || Date.now() - lastMeaningfulLossAt >= 20_000;
+          const stalled = sawVideoRtp && dReceived === 0;
+          upshiftStreak = cleanLongEnough && !stalled ? upshiftStreak + 1 : 0;
+          if (upshiftStreak >= UPSHIFT_SAMPLES) {
             next = order[Math.min(rank[current] + 1, order.length - 1)];
             upshiftStreak = 0;
           }
@@ -1079,8 +1119,7 @@ const SessionViewer: React.FC = () => {
           upshiftStreak = 0;
           downshiftStreak = 0;
         }
-        if (!synced || next !== lastAdaptiveModeRef.current) {
-          synced = true;
+        if (next !== lastAdaptiveModeRef.current) {
           lastAdaptiveModeRef.current = next;
           channel.send(JSON.stringify({ type: 'stream-quality', mode: next, rttMs, lossPct, fps: Math.round(fps), reason }));
         }
@@ -1255,6 +1294,34 @@ const SessionViewer: React.FC = () => {
       if (callbackId != null && typeof video.cancelVideoFrameCallback === 'function') video.cancelVideoFrameCallback(callbackId);
     };
   }, [viewerStatus, remoteStream]);
+
+  // Host-heartbeat watch (see lastHostMessageAtRef). After 6s of silence say so
+  // on screen; after 30s the session is over in all but name, so end it and
+  // offer Reconnect instead of leaving a frozen picture. A hidden tab's timers
+  // are throttled and may run before queued messages are delivered, so the
+  // clock restarts when the tab comes back rather than counting hidden time.
+  useEffect(() => {
+    if (viewerStatus !== 'streaming') return;
+    lastHostMessageAtRef.current = performance.now();
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') lastHostMessageAtRef.current = performance.now();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    const timer = window.setInterval(() => {
+      if (!hostHeartbeatSeenRef.current || document.visibilityState !== 'visible') return;
+      const silentMs = performance.now() - lastHostMessageAtRef.current;
+      if (silentMs >= 30_000) {
+        console.warn(`[Web] Host silent for ${Math.round(silentMs)}ms on the control channel — ending the session.`);
+        setViewerStatus('connection_lost');
+        return;
+      }
+      setHostSilent(silentMs >= 6000);
+    }, 2000);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [viewerStatus]);
 
   // Desktop-mouse scroll → remote scroll. Attached manually (passive: false)
   // so preventDefault works — React's onWheel is passive and the page would
@@ -1930,7 +1997,10 @@ const SessionViewer: React.FC = () => {
   const pickQuality = (mode: 'auto' | 'speed' | 'quality') => () => {
     setQualityMode(mode);
     // reason:'user' pins the host encoder; the bandwidth auto-tuner stands
-    // down until the viewer picks "Auto select" again.
+    // down until the viewer picks "Auto select" again. The host stays on the
+    // pinned tier when Auto comes back, so the tuner resumes from that tier.
+    if (mode === 'speed') lastAdaptiveModeRef.current = 'smooth';
+    else if (mode === 'quality') lastAdaptiveModeRef.current = 'ultra';
     onControlEvent({ type: 'stream-quality', mode, reason: 'user' });
   };
   const endSession = () => {
@@ -2044,6 +2114,14 @@ const SessionViewer: React.FC = () => {
         style={isMobileViewport && hostIsMobileDevice ? { marginTop: 28 } : undefined}
       >
         {renderVideoContent()}
+
+        {/* Inside the fullscreen container, so it shows there too. */}
+        {hostSilent && viewerStatus === 'streaming' && (
+          <div role="status" className="pointer-events-none absolute left-1/2 top-4 z-[90] flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-lg bg-black/85 px-4 py-2.5 text-[13px] font-medium text-white shadow-2xl">
+            <Loader2 size={15} className="flex-none animate-spin text-[#FF8A00]" />
+            {deviceName} has stopped responding. Waiting for it to come back…
+          </div>
+        )}
 
         {isMobileViewport && (
           <button
