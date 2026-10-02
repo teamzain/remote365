@@ -2199,28 +2199,34 @@ const SessionViewer: React.FC = () => {
         )}
 
         {/* Send files / Get files progress (desktop parity): newest first, at
-            most four; finished cards can be closed. */}
+            most four. The X cancels a transfer that is still running and
+            closes a finished one. */}
         {fileTransfers.length > 0 && (
           <div className="pointer-events-none absolute bottom-24 right-4 z-[105] flex w-[300px] max-w-[calc(100%-2rem)] flex-col gap-2">
             {fileTransfers.slice(0, 4).map((t) => {
               const running = t.state === 'active' || t.state === 'waiting';
               const pct = t.totalBytes > 0 ? Math.min(100, Math.round((t.transferredBytes / t.totalBytes) * 100)) : 0;
               const Icon = t.state === 'done' ? Check : t.state === 'error' ? AlertCircle : t.hostPick ? Loader2 : t.direction === 'send' ? Upload : Download;
-              const iconColor = t.state === 'done' ? 'text-[#1E8E3E]' : t.state === 'error' ? 'text-[#FF383C]' : 'text-[#FF8A00]';
+              const iconColor = t.state === 'done' ? 'text-[#1E8E3E]' : t.state === 'error' ? 'text-[#FF383C]' : t.state === 'cancelled' ? 'text-[#111315]/40' : 'text-[#FF8A00]';
               const line = t.state === 'done'
-                ? (t.direction === 'send' ? `Saved on ${deviceName} in Downloads\Remote365` : 'Saved to your browser downloads')
+                ? (t.direction === 'send' ? `Saved on ${deviceName} in Downloads\\Remote365` : 'Saved to your browser downloads')
                 : t.state === 'error' ? t.message
-                  : t.message || `${pct}%`;
+                  : t.state === 'cancelled' ? 'Cancelled'
+                    : t.message || `${pct}%`;
               return (
                 <div key={t.id} className="pointer-events-auto rounded-xl border border-black/10 bg-white px-3 py-2.5 text-[#111315] shadow-lg" role="status">
                   <div className="flex items-center gap-2">
                     <Icon size={16} className={`flex-none ${iconColor} ${t.hostPick && running ? 'animate-spin' : ''}`} />
                     <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{t.name}</span>
-                    {!running && (
-                      <button type="button" aria-label="Close" title="Close" onClick={() => fileXferRef.current?.dismiss(t.id)} className="flex h-6 w-6 items-center justify-center rounded text-[#111315]/60 hover:bg-black/5 hover:text-[#111315]">
-                        <X size={14} />
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      aria-label={running ? 'Cancel' : 'Close'}
+                      title={running ? 'Cancel' : 'Close'}
+                      onClick={() => (running ? fileXferRef.current?.cancel(t.id) : fileXferRef.current?.dismiss(t.id))}
+                      className="flex h-6 w-6 flex-none items-center justify-center rounded text-[#111315]/60 hover:bg-black/5 hover:text-[#111315]"
+                    >
+                      <X size={14} />
+                    </button>
                   </div>
                   <p className={`m-0 mt-1 line-clamp-2 text-[11px] leading-4 ${t.state === 'error' ? 'text-[#FF383C]' : 'text-[#111315]/60'}`}>{line}</p>
                   {running && !t.hostPick && (
