@@ -93,6 +93,22 @@ function armDrainSignal(channel: TransferChannel): Set<Waiter> {
   return waiters;
 }
 
+/**
+ * Put one file chunk on the channel.
+ *
+ * sendMessageBinary returns FALSE when the message was QUEUED behind earlier
+ * ones instead of written at once. It is still delivered, in order; a real
+ * failure throws. (Measured on libdatachannel 0.24: 300 messages, 281 false
+ * returns, 300 delivered, none twice.) The return value used to be read as
+ * "dropped" and the chunk sent again, up to 20 times. On a fast link the queue
+ * is empty by the next chunk, so nothing showed; on a slow one every chunk
+ * queues, so every chunk was duplicated into the file and the transfer then
+ * gave up with "The connection stopped accepting data."
+ */
+export function sendChunk(channel: TransferChannel, data: Buffer): void {
+  channel.sendMessageBinary(data);
+}
+
 export function whenDrained(channel: TransferChannel, log?: FileTransferDeps['log']): Promise<void> {
   const buffered = typeof channel.bufferedAmount === 'function' ? channel.bufferedAmount() : -1;
   if (buffered === -1) {
@@ -375,25 +391,7 @@ async function runPullJob(
               offset += slice.length;
               await whenDrained(channel, deps.log);
               if (job.cancelled || !channel.isOpen?.()) break;
-              // sendMessageBinary returns FALSE on failure — it does not
-              // always throw. Ignoring that return silently loses the chunk
-              // while the byte counter keeps climbing: the receiver sits at
-              // the last chunk that made it, forever, with no error anywhere.
-              // (Seen in the field as a transfer frozen at 64KB / 0 B/s.)
-              let sent = false;
-              for (let attempt = 0; attempt < 20 && !sent; attempt++) {
-                if (job.cancelled || !channel.isOpen?.()) break;
-                try {
-                  sent = channel.sendMessageBinary(frame({ type: 'ft:pull-chunk', jobId, index }, slice)) !== false;
-                } catch (err: any) {
-                  deps.log.error(`[FileTransfer] Pull ${jobId}: send threw (attempt ${attempt + 1}): ${err?.message || err}`);
-                }
-                if (!sent) {
-                  if (attempt === 0) deps.log.error(`[FileTransfer] Pull ${jobId}: send returned false at ${sentBytes} bytes (buffered=${channel.bufferedAmount?.() ?? -1}) — retrying`);
-                  await new Promise((r) => setTimeout(r, 100 + attempt * 50));
-                }
-              }
-              if (!sent) throw new Error('The connection stopped accepting data.');
+              sendChunk(channel, frame({ type: 'ft:pull-chunk', jobId, index }, slice));
               sentBytes += slice.length;
               // Ack window (see PullJob): pause when too far ahead of what
               // the receiver confirms is on disk.

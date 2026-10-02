@@ -36,7 +36,7 @@ import { ensureUnattendedCredential, readUnattendedCredential, setAppSupervision
 import { clearHostIntent, hasNetworkLink, readHostIntent, saveHostIntent, startNetworkRestoreWatcher } from './hostAutostart';
 import { armUpdateLock, clearUpdateLock, updateLockPath } from './updateGuard';
 import { decodeCompactInput, isCompactInput } from '../shared/inputProtocol';
-import { handleFileTransferCommand, handleFileTransferChunk, cancelAllFileTransfers, startHostPull, uniquePath, whenDrained } from './fileTransfer';
+import { handleFileTransferCommand, handleFileTransferChunk, cancelAllFileTransfers, startHostPull, uniquePath, whenDrained, sendChunk } from './fileTransfer';
 import { registerLocalFileHandlers, closeAllLocalWrites } from './localFiles';
 import {
   showViewerCameraWindow,
@@ -313,6 +313,9 @@ function rejectV1Transfer(transferId: string) {
   if (rejectedV1Transfers.size > 500) rejectedV1Transfers.clear();
   rejectedV1Transfers.add(transferId);
 }
+// v1 host -> viewer sends the viewer asked to stop ("Cancel" on a Get files
+// card in the web viewer). The send loop takes its id out when it stops.
+const cancelledHostSends = new Set<string>();
 const describeFileCap = (bytes: number) => bytes >= 1024 ** 3
   ? `${Math.round(bytes / 1024 ** 3)} GB`
   : `${Math.round(bytes / 1024 ** 2)} MB`;
@@ -7558,6 +7561,29 @@ function handleControlMessage(msg: any, viewerId?: string) {
         viewerCameraOwnerId = null;
         log.info('[Host] Viewer camera stopped.');
         break;
+      case 'file-transfer-cancel': {
+        // "Cancel" on a transfer card in the web viewer (protocol v1).
+        const cancelId = String(event.transferId || '');
+        if (!cancelId) break;
+        if (event.direction === 'receive') {
+          // This PC is sending; the loop in sendFileFromHost stops at its
+          // next chunk and tells the viewer.
+          if (cancelledHostSends.size > 200) cancelledHostSends.clear();
+          cancelledHostSends.add(cancelId);
+          break;
+        }
+        // This PC is receiving: drop the partial file. The viewer may still
+        // have chunks in flight, so the id is refused from here on.
+        rejectV1Transfer(cancelId);
+        const cancelled = fileTransfers.get(cancelId);
+        if (!cancelled) break;
+        clearTimeout(cancelled.inactivityTimer);
+        fileTransfers.delete(cancelId);
+        cancelled.stream.destroy();
+        fs.unlink(cancelled.filePath).catch(() => { /* never created, or already gone */ });
+        log.info(`[Host] Viewer cancelled the upload of ${cancelled.name}; partial file removed.`);
+        break;
+      }
       case 'request-file-from-host':
       case 'file-browser-list':
       case 'request-file-from-host-path':
@@ -9118,17 +9144,14 @@ async function sendFileFromHost(selectedPath?: string, targetViewerId?: string) 
 
         await whenDrained(targetChannel, fileTransferDeps.log);
         if (!targetChannel.isOpen()) throw new Error('The viewer disconnected during the transfer.');
-        // sendMessageBinary returns FALSE on failure rather than throwing; a
-        // chunk dropped here would leave the viewer waiting on it forever.
-        let sent = false;
-        for (let attempt = 0; attempt < 20 && !sent; attempt++) {
-          sent = targetChannel.sendMessageBinary(fullBuffer) !== false;
-          if (!sent) {
-            await new Promise(r => setTimeout(r, 100 + attempt * 50));
-            if (!targetChannel.isOpen()) break;
-          }
+        // The viewer pressed Cancel on this file (checked after the wait, so
+        // a transfer parked on a slow link stops at once).
+        if (cancelledHostSends.delete(transferId)) {
+          log.info(`[Host] Viewer cancelled ${fileName} after ${bytesSent} of ${totalSize} bytes.`);
+          targetChannel.sendMessage(JSON.stringify({ type: 'file-transfer-cancelled', direction: 'receive', transferId, name: fileName }));
+          return;
         }
-        if (!sent) throw new Error('The connection stopped accepting data.');
+        sendChunk(targetChannel, fullBuffer);
         bytesSent += bytesRead;
         // Progress throttled to ~250ms (final chunk always reported) — a
         // per-chunk send doubles the message count on the shared control channel.
