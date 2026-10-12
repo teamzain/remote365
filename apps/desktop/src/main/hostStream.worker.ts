@@ -156,7 +156,10 @@ function startPipeline(opts: any): void {
   });
 
   // Capture loop (mirrors main's captureTick): DXGI grab -> ffmpeg.stdin, paced to fps.
-  const frameInterval = 1000 / Math.max(15, fps);
+  // Floor of 5, not 15: the thin-link tiers run at 8-15 fps, and pacing them at
+  // 15 while the IVF header says 8 would feed the encoder twice the frames its
+  // rate control is budgeting for.
+  const frameInterval = 1000 / Math.max(5, fps);
   let nextFrameAt = performance.now();
   // Prime the loop so ffmpeg gets fed from tick one even on a static screen:
   // prefer the probe frame main captured, else the last frame of the previous

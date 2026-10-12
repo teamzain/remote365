@@ -924,8 +924,23 @@ const VideoPlayer = forwardRef<any, VideoPlayerProps>(({
                     const text = electronApi?.clipboard?.readText
                         ? await electronApi.clipboard.readText()
                         : await navigator.clipboard?.readText?.();
-                    if (text) onControlEvent(isMobileDevice ? { type: 'pasteText', text } : { type: 'clipboard', text });
-                    if (isMobileDevice) return;
+                    if (text && isMobileDevice) { onControlEvent({ type: 'pasteText', text }); return; }
+                    // One message that carries the text AND the paste: the host
+                    // puts the text on its clipboard and presses Ctrl+V itself.
+                    // This used to be two things on two channels — the text on
+                    // the control channel, the V key on the input channel — with
+                    // nothing ordering them, so every so often the key won and
+                    // the host pasted whatever was on its clipboard before
+                    // ("paste works sometimes"). The V key is not forwarded as
+                    // well, or the host would paste twice. Text too long for one
+                    // data-channel message keeps the old path; the automatic
+                    // sync delivers that in chunks.
+                    if (text && text.length <= 32 * 1024) {
+                        onControlEvent({ type: 'paste-clipboard', text });
+                        electronApi?.log?.(`[Viewer] Ctrl+V: ${text.length} characters sent to the host to paste.`);
+                        return;
+                    }
+                    if (text) onControlEvent({ type: 'clipboard', text });
                 }
             }
 

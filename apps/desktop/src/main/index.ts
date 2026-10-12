@@ -1,6 +1,11 @@
-import { app, shell, dialog, BrowserWindow, BrowserView, ipcMain, safeStorage, clipboard, screen, Notification, session, Menu, Tray, desktopCapturer, globalShortcut, powerMonitor, powerSaveBlocker } from 'electron';
+import { app, shell, dialog, BrowserWindow, BrowserView, ipcMain, safeStorage, clipboard, nativeImage, screen, Notification, session, Menu, Tray, desktopCapturer, globalShortcut, powerMonitor, powerSaveBlocker } from 'electron';
 import { isViewerMediaActive, hasActiveMediaViewer, updateHostMediaActivity } from '../shared/viewerMediaPolicy';
 import { buildHostVideoRtpChain } from '../shared/hostVideoRtpChain';
+import { QUALITY_ORDER, QUALITY_RANK, isQualityTier } from '../shared/streamQualityTuner';
+import { applyLeanDesktop, restoreLeanDesktop, recoverLeanDesktop } from './leanDesktop';
+import { installSessionLog, type ActiveSession } from './sessionLog';
+import { isVpnCandidate, stripVpnCandidates, vpnSubnetsOf, type Subnet } from '../shared/vpnRoutes';
+import { CLIPBOARD_IMAGE_MAX_BYTES, createClipboardImageAssembler, splitClipboardImage } from '../shared/clipboardImage';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import { join, basename, resolve, dirname, extname } from 'path';
@@ -625,6 +630,88 @@ function sendClipboardToViewers(text: string) {
   }
 }
 
+// ---- Clipboard images (snips), both directions ----
+// See shared/clipboardImage.ts. An image is only considered when the clipboard
+// holds no text: apps like Excel put text AND a picture of the cells there, and
+// the text is what people mean to paste.
+let lastClipboardImageSig = '';
+let lastClipboardImageCheckAt = 0;
+const imageCapableViewers = new Set<string>();
+const hostClipboardImages = createClipboardImageAssembler();
+
+function clipboardImageSignature(): { sig: string; image: Electron.NativeImage } | null {
+  try {
+    if (clipboard.readText()) return null;
+    if (!clipboard.availableFormats().some((format) => format.startsWith('image/'))) return null;
+    const image = clipboard.readImage();
+    if (image.isEmpty()) return null;
+    const size = image.getSize();
+    // The raw pixels are hashed (cheap); PNG encoding happens only on a change.
+    const sig = `${size.width}x${size.height}:${crypto.createHash('sha1').update(image.toBitmap()).digest('hex')}`;
+    return { sig, image };
+  } catch {
+    return null;   // clipboard briefly locked by another app
+  }
+}
+
+/** null: no image. { sig }: the image already known. { sig, pngBase64 }: a new one. */
+function readClipboardImageIfChanged(knownSig: string): { sig: string; pngBase64?: string } | null {
+  const current = clipboardImageSignature();
+  if (!current) return null;
+  if (current.sig === knownSig) return { sig: current.sig };
+  const png = current.image.toPNG();
+  if (!png.length || png.length > CLIPBOARD_IMAGE_MAX_BYTES) {
+    log.info(`[Clipboard] Image not synced: ${Math.round(png.length / 1024)} KB is over the ${Math.round(CLIPBOARD_IMAGE_MAX_BYTES / 1024 / 1024)} MB limit.`);
+    return { sig: current.sig };
+  }
+  return { sig: current.sig, pngBase64: png.toString('base64') };
+}
+
+/** Put a received PNG on the clipboard; returns its signature ('' on failure). */
+function writeClipboardImage(pngBase64: unknown): string {
+  try {
+    if (typeof pngBase64 !== 'string' || !pngBase64) return '';
+    const image = nativeImage.createFromBuffer(Buffer.from(pngBase64, 'base64'));
+    if (image.isEmpty()) return '';
+    clipboard.writeImage(image);
+    // The clipboard no longer holds the last synced text, so that text must
+    // count as new if it is copied again.
+    lastClipboardText = '';
+    const sig = clipboardImageSignature()?.sig || '';
+    lastClipboardImageSig = sig;
+    return sig;
+  } catch (err: any) {
+    log.warn(`[Clipboard] Could not place the received image: ${err?.message || err}`);
+    return '';
+  }
+}
+
+// Host → viewers that said they understand images (older viewers would only
+// receive megabytes they ignore).
+function pollHostClipboardImage() {
+  if (imageCapableViewers.size === 0) return;
+  const now = Date.now();
+  if (now - lastClipboardImageCheckAt < 1000) return;
+  lastClipboardImageCheckAt = now;
+  const current = readClipboardImageIfChanged(lastClipboardImageSig);
+  if (!current || current.sig === lastClipboardImageSig) return;
+  lastClipboardImageSig = current.sig;
+  if (!current.pngBase64) return;
+  const chunks = splitClipboardImage(current.pngBase64, `host-${now}-${Math.random().toString(36).slice(2, 8)}`, 'host');
+  if (chunks.length === 0) return;
+  let sentTo = 0;
+  for (const peer of hostViewerPeers.values()) {
+    if (!imageCapableViewers.has(String(peer.viewerId)) || !peer.dataChannel?.isOpen?.()) continue;
+    try {
+      for (const chunk of chunks) peer.dataChannel.sendMessage(JSON.stringify(chunk));
+      sentTo++;
+    } catch (err: any) {
+      log.warn(`[Clipboard] Failed to send the image to viewer ${peer.viewerId}: ${err?.message || err}`);
+    }
+  }
+  if (sentTo) log.info(`[Clipboard] Image copied on this computer sent to ${sentTo} viewer(s) (${Math.round(current.pngBase64.length * 3 / 4 / 1024)} KB).`);
+}
+
 // Viewer → host: the desktop viewer's automatic sync sends `clipboard-sync`
 // (and `clipboard-chunk` above 32 KB); Ctrl+V on the desktop viewer and the
 // web viewer send the older `clipboard`. Until Sep 2026 the host only handled
@@ -1164,8 +1251,12 @@ function hostDockHtml(sessionName: string, sessionId: string, viewerNames: strin
       if (modalRobotBtn) modalRobotBtn.textContent = hidden ? 'Show Robot' : 'Hide Robot';
       try { if (robotAnim) { if (hidden) robotAnim.pause(); else robotAnim.play(); } } catch (err) { /* player gone */ }
     };
-    let robotHidden = false;
-    try { robotHidden = localStorage.getItem(ROBOT_HIDDEN_KEY) === '1'; } catch (err) { /* storage unavailable */ }
+    // Hidden unless someone chose "Show Robot": a cartoon in the corner of the
+    // remote screen got in the way of the work being done there. The session
+    // panel itself stays, so the person at this PC still sees who is connected
+    // and can end the session.
+    let robotHidden = true;
+    try { robotHidden = localStorage.getItem(ROBOT_HIDDEN_KEY) !== '0'; } catch (err) { /* storage unavailable */ }
     applyRobotHidden(robotHidden);
     if (modalRobotBtn) modalRobotBtn.addEventListener('click', () => {
       robotHidden = !robotHidden;
@@ -1592,7 +1683,9 @@ function startHostStatusServer() {
       if (req.method === 'GET' && String(req.url || '').startsWith('/host-status')) {
         headers['Content-Type'] = 'application/json';
         res.writeHead(200, headers);
-        res.end(JSON.stringify({ controlled: webLockControlled, viewerName: webLockViewerName }));
+        // deviceId lets a browser on THIS machine see that a session it is
+        // about to open points back at the same computer (see the web viewer).
+        res.end(JSON.stringify({ controlled: webLockControlled, viewerName: webLockViewerName, deviceId: ownDeviceId() }));
         return;
       }
       res.writeHead(404, headers);
@@ -1910,8 +2003,15 @@ const ALLOWED_BEFORE_CONTROL = new Set([
   'request-keyframe',
   'stream-quality',
   'stream-activity',
+  // The browser's own account of what it is doing with the stream (log only).
+  'viewer-stats',
+  // How often the picture refreshes is a viewing choice. Choosing WHICH screen
+  // is sent (stream-display) stays behind control.
+  'stream-fps',
   // Chat is conversation, not control — it must work in view-only sessions.
   'chat',
+  // Only says "I can receive clipboard images"; it changes nothing on the host.
+  'clipboard-capabilities',
   // Neither is showing your face: a view-only helper should still be able to
   // talk to the person whose machine they are looking at.
   'cam:start',
@@ -1933,6 +2033,16 @@ const CONTROL_DENIED_NOTICE_MS = 1000;
 const lastControlDeniedAt = new Map<string, number>();
 
 
+// The same aliases and tier names as normalizeHostStreamQuality, but null for
+// anything unknown. A viewer's bandwidth request must never be read as "top
+// quality" just because this build does not know the word it used.
+function parseRequestedStreamQuality(value: any): string | null {
+  const quality = String(value || '').toLowerCase();
+  if (!quality) return null;
+  const normalized = normalizeHostStreamQuality(quality);
+  return normalized === 'ultra' && !['ultra', 'auto', 'high', 'quality'].includes(quality) ? null : normalized;
+}
+
 function normalizeHostStreamQuality(value: any) {
   const quality = String(value || '').toLowerCase();
   const aliases: Record<string, string> = {
@@ -1944,7 +2054,7 @@ function normalizeHostStreamQuality(value: any) {
     speed: 'smooth',
   };
   const normalized = aliases[quality] || quality;
-  return ['smooth', 'balanced', 'sharp', 'ultra'].includes(normalized) ? normalized : 'ultra';
+  return isQualityTier(normalized) ? normalized : 'ultra';
 }
 
 // Streaming Accumulators (Annex-B Aggregator)
@@ -2004,10 +2114,50 @@ let prebufferFlushRetryTimer: NodeJS.Timeout | null = null;
 // only the following P-frames leaves Chromium unable to decode anything until
 // the next GOP (or the viewer watchdog restarts the encoder).
 let latestBootstrapAccessUnit: Buffer | null = null;
+// When a viewer was last connected to this host (or its peer was torn down).
+let lastHostSessionActivityAt = 0;
+const UPDATE_SESSION_QUIET_MS = Math.max(0, Number(process.env.REMOTE365_UPDATE_SESSION_QUIET_MS) || 90_000);
 let activeAdaptiveQuality = '';
+// Bitrate of the running encoder, for limits that should scale with the tier.
+let activeStreamBitrateKbps = 4500;
 let lastAdaptiveQualityChange = 0;
 // When the viewer pins a quality from the menu, the bandwidth auto-tuner stands down.
 let userQualityLock: string | null = null;
+// Frame rate picked by the viewer in its Display menu (null = Auto: the quality
+// tier decides). Lives for the session, like the quality pin above.
+let viewerFpsPin: number | null = null;
+// What the encoder in use can hold. The automatic ceilings (30 on CPU and Intel
+// Quick Sync, 60 on a discrete GPU) are the rates that stay steady; a viewer
+// that asks for more by name gets the higher ceiling and takes what the
+// machine manages.
+function streamFpsCeiling(pinned: boolean): number {
+  if (process.env.REMOTE365_STREAM_MAX_FPS) return Number(process.env.REMOTE365_STREAM_MAX_FPS);
+  if (detectedEncoder === 'libx264') return 30;
+  if (detectedEncoder === 'h264_qsv') return pinned ? 60 : 30;
+  return pinned ? 120 : 60;
+}
+// Tells every viewer what the stream is doing now, so its Display menu shows
+// the real frame rate and the real list of screens instead of guesses.
+function announceStreamState() {
+  let payload = '';
+  try {
+    const primaryId = screen.getPrimaryDisplay().id;
+    const displays = screen.getAllDisplays().map((d: any, index: number) => ({
+      id: d.id,
+      label: `Screen ${index + 1}`,
+      width: Math.round(d.bounds.width * d.scaleFactor),
+      height: Math.round(d.bounds.height * d.scaleFactor),
+      primary: d.id === primaryId,
+    }));
+    const displayId = displays.some((d: any) => d.id === selectedDisplayId) ? selectedDisplayId : primaryId;
+    payload = JSON.stringify({ type: 'stream-state', fps: activeStreamFps, fpsPinned: viewerFpsPin, fpsMax: streamFpsCeiling(true), displays, displayId });
+  } catch { return; }
+  for (const peer of hostViewerPeers.values()) {
+    if (peer.dataChannel?.isOpen?.()) {
+      try { peer.dataChannel.sendMessage(payload); } catch { /* closing */ }
+    }
+  }
+}
 
 // Hardware encoder detection cache
 let detectedEncoder: string = 'libx264';
@@ -2163,7 +2313,21 @@ ipcMain.handle('system:getDeterministicKey', () => {
 });
 
 // --- Auto-Updater Handlers ---
-const UPDATE_FEED_URL = process.env.CONNECT_X_UPDATE_URL || `${buildHttpOrigin(DEFAULT_SERVER_HOST)}/downloads/desktop/`;
+// A build made for a test channel ships resources/update-feed.txt holding the
+// feed it should follow instead (one https URL). Release builds do not ship the
+// file, so they are unaffected. It lets a handful of test machines take fixes
+// pushed from the server without publishing them to everyone on the main feed.
+function readUpdateFeedOverride(): string {
+  try {
+    const file = join(process.resourcesPath, 'update-feed.txt');
+    if (!existsSync(file)) return '';
+    const url = readFileSync(file, 'utf8').trim();
+    return /^https:\/\/[^\s]+\/$/.test(url) ? url : '';
+  } catch {
+    return '';
+  }
+}
+const UPDATE_FEED_URL = process.env.CONNECT_X_UPDATE_URL || readUpdateFeedOverride() || `${buildHttpOrigin(DEFAULT_SERVER_HOST)}/downloads/desktop/`;
 let autoInstallUpdates = true;
 let silentUpdateReady = false;
 let isDownloadingUpdate = false;
@@ -3078,6 +3242,15 @@ function isUpdateInstallLooping(target: string | undefined | null): boolean {
 function isUpdateInstallBlockedBySession() {
   if (hostViewerPeers.size > 0 || peerConnection) return true;
   if (viewerShellWindow && !viewerShellWindow.isDestroyed()) return true;
+  // A viewer whose connection just dropped is, far more often than not, about
+  // to come back: its app waits out a short grace period and reconnects on its
+  // own. The 5 s this used to allow was shorter than that. Field log, Oct 3
+  // 2026: the link stalled, the peer was cleaned up, and nine seconds later
+  // this host quit to install 1.2.142 — the viewer's reconnect, three seconds
+  // after that, found the machine offline for two minutes. So a session is
+  // "over" only once nobody has been connected for a while; the 120 s
+  // catch-up poll installs the update then.
+  if (Date.now() - lastHostSessionActivityAt < UPDATE_SESSION_QUIET_MS) return true;
   return false;
 }
 
@@ -3496,6 +3669,7 @@ ipcMain.handle('host:start', async (_: any, accessKey: any, settings: any = {}) 
   activeAdaptiveQuality = hostStreamSettings.quality;
   lastAdaptiveQualityChange = 0;
   userQualityLock = null;
+  viewerFpsPin = null;
 
   // Coalesce overlapping host starts (React development StrictMode can invoke
   // the startup effect twice) so the expensive hardware probe runs only once.
@@ -3871,6 +4045,8 @@ ipcMain.handle('host:set-capture-screen', (_: any, displayId: any) => {
   return true;
 });
 ipcMain.handle('clipboard:readText', () => clipboard.readText());
+ipcMain.handle('clipboard:readImage', (_event: any, knownSig: any) => readClipboardImageIfChanged(String(knownSig || '')));
+ipcMain.handle('clipboard:writeImage', (_event: any, pngBase64: any) => writeClipboardImage(pngBase64));
 ipcMain.handle('clipboard:writeText', (_event: any, text: any) => {
   const value = String(text ?? '');
   lastClipboardText = value;
@@ -4318,9 +4494,46 @@ ipcMain.on('viewer-shell:close', () => {
   if (viewerShellWindow && !viewerShellWindow.isDestroyed()) viewerShellWindow.close();
 });
 
+// A machine must not open a remote session to itself: the viewer shows the
+// screen that contains the viewer, which contains the viewer... an endless
+// tunnel of nested screens that also drives the encoder flat out, and every
+// click lands on the picture of itself. Refused here, the one place every
+// "connect" path in the app goes through (Quick Connect, the Devices list,
+// recent sessions, support links).
+function ownDeviceId(): string {
+  return String(currentHostSessionId || activeHostAccessKey || '').replace(/\D/g, '');
+}
+function isOwnDevice(sessionId: unknown): boolean {
+  const target = String(sessionId || '').replace(/\D/g, '');
+  return target.length > 0 && target === ownDeviceId();
+}
+let lastSelfConnectNoticeAt = 0;
+function refuseSelfConnect(sessionId: unknown): boolean {
+  if (!isOwnDevice(sessionId)) return false;
+  log.info(`[Viewer] Refused a session to this computer's own ID (${ownDeviceId()}).`);
+  const now = Date.now();
+  if (now - lastSelfConnectNoticeAt > 3000) {
+    lastSelfConnectNoticeAt = now;
+    // The window that asked may have stepped aside for the session it expected
+    // to open. Bring it back and attach the notice to it, so the message is in
+    // front of the person rather than behind whatever is on screen.
+    showMainWindowFromDock();
+    const options = {
+      type: 'info' as const,
+      title: 'Remote365',
+      message: 'You are already on this computer.',
+      detail: 'That is this computer\'s own ID. A computer cannot open a remote session to itself. Enter the ID of the computer you want to reach.',
+    };
+    const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options)).catch(() => {});
+  }
+  return true;
+}
+
 ipcMain.handle('viewer:open-window', (_event: any, sessionId: any, serverIP: any, token: any, deviceName: any, deviceType: any) => {
   const cleanSessionId = String(sessionId || '').trim();
   if (!cleanSessionId) return false;
+  if (refuseSelfConnect(cleanSessionId)) return false;
   const isMobile = deviceType?.toLowerCase() === 'android' || deviceType?.toLowerCase() === 'ios';
   if (viewerTabs.has(cleanSessionId)) {
     activateViewerTab(cleanSessionId);
@@ -4491,6 +4704,7 @@ function notifySessionWaitWindowsParticipantJoined() {
 }
 
 ipcMain.handle('viewer:connect', async (_event: any, sessionId: any, serverIP: any, token: any, viewerClientId: any, viewerDeviceId?: any) => {
+  if (refuseSelfConnect(sessionId)) return false;
   log.info(`[Viewer] Connecting to session: ${sessionId} at ${serverIP}`);
   const existing = viewerSignalingSockets.get(sessionId);
   if (existing) {
@@ -4516,7 +4730,9 @@ ipcMain.handle('viewer:connect-lan', async (_event: any, options: { sessionId: s
   return { ok: true };
 });
 
-ipcMain.on('viewer:send-signaling', (_event: any, msg: any) => {
+ipcMain.on('viewer:send-signaling', (_event: any, rawMsg: any) => {
+  const msg = withoutVpnRoutes(rawMsg, 'viewer, outgoing');
+  if (!msg) return;
   const sessionId = msg.sessionId || msg.targetId;
   if (!sessionId) return;
   const ws = viewerSignalingSockets.get(sessionId);
@@ -4874,7 +5090,19 @@ function cleanupHostViewerPeer(viewerId: string | null | undefined, reason = 'en
   peer.audioRtpConfig = null;
   syncLegacyPeerAliases(getPrimaryHostPeer());
 
+  lastHostSessionActivityAt = Date.now();
+  imageCapableViewers.delete(String(viewerId));
   if (hostViewerPeers.size === 0) {
+    // What a viewer picked belongs to that session, not the next one. A quality
+    // pin left behind kept this host at 720p / 15 fps for every later session
+    // while each new viewer's menu said "Auto" (field log, Oct 5 2026).
+    viewerFpsPin = null;
+    if (userQualityLock) {
+      log.info(`[Host] Quality: releasing the viewer's pin (${userQualityLock}) at session end.`);
+      userQualityLock = null;
+      activeAdaptiveQuality = hostStreamSettings.quality;
+    }
+    restoreLeanDesktop(`session-${reason}`, () => hostViewerPeers.size > 0 || isRemoteSessionActive());
     scheduleStreamWorkerIdleKill();
     setTimeout(updateMainWindowThrottling, 5000);
     setWebLockState(false);
@@ -5144,7 +5372,13 @@ function buildEncoderArgs(encoder: string, bitrate: string, fps: string, gopSeco
   // pacer, with every following frame queued behind it. Capped: 195 KB / 133 ms,
   // and the keyframe's quality is unchanged (PSNR min 44.0 vs 44.5 dB).
   const vbvCapKbit = Number(process.env.REMOTE365_VBV_KBITS) || 2250;
-  const bufferSize = `${Math.min(vbvCapKbit, Math.max(500, Math.round(bitrateKbps * 0.5)))}k`;
+  // Below 2 Mbps the 500 kbit floor is no longer "half a second": at the 300k
+  // tier it would let one keyframe take 1.7 s of the whole link. Three quarters
+  // of a second there, which also keeps the keyframe itself small.
+  const vbvKbit = bitrateKbps < 2000
+    ? Math.max(200, Math.round(bitrateKbps * 0.75))
+    : Math.max(500, Math.round(bitrateKbps * 0.5));
+  const bufferSize = `${Math.min(vbvCapKbit, vbvKbit)}k`;
   // ~0.5s GOP. The old ~167ms GOP (5-6 keyframes/sec) wasted most of a CBR
   // budget re-sending full frames, which crushed delta-frame detail and made the
   // encoder VBV oscillate — the main cause of stutter and "soft" video on
@@ -5324,7 +5558,7 @@ function buildEncoderArgs(encoder: string, bitrate: string, fps: string, gopSeco
 }
 
 /** Probe one encoder with a tiny synthetic test clip. 2s timeout. */
-function probeEncoder(ffmpegPath: string, encoder: string): Promise<boolean> {
+function probeEncoder(ffmpegPath: string, encoder: string, timeoutMs = 2000): Promise<boolean> {
   return new Promise((resolve) => {
     let done = false;
     const finish = (ok: boolean) => { if (!done) { done = true; resolve(ok); } };
@@ -5335,7 +5569,7 @@ function probeEncoder(ffmpegPath: string, encoder: string): Promise<boolean> {
       ]);
       p.on('close', (code: any) => finish(code === 0));
       p.on('error', () => finish(false));
-      setTimeout(() => { try { p.kill(); } catch { } finish(false); }, 2000);
+      setTimeout(() => { try { p.kill(); } catch { } finish(false); }, timeoutMs);
     } catch { finish(false); }
   });
 }
@@ -5366,6 +5600,35 @@ async function detectBestEncoder(): Promise<void> {
   detectedEncoder = 'libx264';
   encoderDetected = true;
   log.info('[Host] Using libx264 (no GPU encoder found).');
+  scheduleEncoderReprobe();
+}
+
+// A probe has 2 s per encoder. Right after an update restart (or a cold boot)
+// the machine can be busy enough for a working GPU encoder to miss that, and
+// the app then encoded on the CPU until its next restart: a PC with Quick Sync
+// spent hours on libx264 after the 2.0.5 update (field log, Oct 5 2026). So a
+// "no GPU encoder" result is checked again a few times while nobody is
+// connected, with more time per encoder.
+let encoderReprobesLeft = 4;
+function scheduleEncoderReprobe() {
+  if (encoderReprobesLeft <= 0 || process.env.REMOTE365_ENABLE_HW_ENCODER === '0') return;
+  encoderReprobesLeft--;
+  setTimeout(async () => {
+    if (detectedEncoder !== 'libx264') return;
+    // Never swap encoders under a live session; try again later instead.
+    if (hostViewerPeers.size > 0) { encoderReprobesLeft++; scheduleEncoderReprobe(); return; }
+    const ffmpegPath = getFFmpegPath();
+    for (const enc of ['h264_nvenc', 'h264_amf', 'h264_qsv']) {
+      if (await probeEncoder(ffmpegPath, enc, 8000)) {
+        if (hostViewerPeers.size > 0) { encoderReprobesLeft++; break; }
+        detectedEncoder = enc;
+        log.info(`[Host] Hardware encoder selected on a later check: ${enc}`);
+        mainWindow?.webContents.send('host:status', `Encoder: ${enc}`);
+        return;
+      }
+    }
+    scheduleEncoderReprobe();
+  }, 90_000);
 }
 
 // --- AV1 capability discovery (P3 groundwork) -------------------------------
@@ -5520,6 +5783,16 @@ function startStreaming() {
   // not make the picture blurry; only real congestion/loss should step the
   // stream down. These tiers keep 1080p available for normal PK<->KSA routes.
   const qualityPresets: Record<string, { bitrate: string; maxWidth: string; fps?: string }> = {
+    // Thin-link tiers (a host on a few hundred kbps of uplink, or a link that
+    // is shared with something else). Below 'smooth' there is no way to keep
+    // native 1080p: the bits are not there, so resolution and cadence both
+    // give. A slow, slightly soft desktop that keeps moving beats a sharp one
+    // that freezes — before these existed the lowest request was 2800k, and a
+    // host that could not carry it queued seconds of video and then dropped
+    // the connection (field log, Oct 3 2026).
+    minimal: { bitrate: '300k', maxWidth: '960', fps: '8' },
+    saver: { bitrate: '600k', maxWidth: '1280', fps: '10' },
+    lite: { bitrate: '1200k', maxWidth: '1280', fps: '15' },
     // Preserve native 1080p text even when the link is congested. Reducing
     // motion cadence and bitrate before spatial resolution keeps terminals,
     // menus, and small UI labels readable after a short loss event.
@@ -5544,7 +5817,14 @@ function startStreaming() {
   };
   const preset = qualityPresets[qualityKey] || qualityPresets.sharp;
   const isCpuEncoder = detectedEncoder === 'libx264';
-  const fps = process.env.REMOTE365_STREAM_FPS || hostStreamSettings.fps || preset.fps || '30';
+  const isLowTier = (QUALITY_RANK as Record<string, number>)[qualityKey] < QUALITY_RANK.smooth;
+  // The host's own fps setting is a ceiling for the low tiers, not a target:
+  // 30 fps at 300 kbps is ~1 KB per frame.
+  const settingFps = viewerFpsPin ? String(viewerFpsPin) : (hostStreamSettings.fps || preset.fps || '30');
+  const fps = process.env.REMOTE365_STREAM_FPS
+    // 'lite' has the bits for a rate the viewer asked for by name, up to 30.
+    || (viewerFpsPin && qualityKey === 'lite' ? String(Math.min(viewerFpsPin, 30))
+      : isLowTier ? String(Math.min(parseInt(settingFps, 10) || 30, parseInt(preset.fps || '15', 10))) : settingFps);
   // Software encoding on a weak CPU cannot sustain the 9-12 Mbps tiers in real
   // time — the encoder falls behind, input frames drop (low fps) and CBR
   // starvation blurs the picture. Cap the CPU path at the balanced tier.
@@ -5561,11 +5841,12 @@ function startStreaming() {
   // which is exactly the "refresh rate is not stable" report. 30 fps on the same
   // machine is rock steady (150 writes per 5 s, 0 late ticks).
   const isQsvEncoder = detectedEncoder === 'h264_qsv';
-  const maxFps = Number(process.env.REMOTE365_STREAM_MAX_FPS || (isCpuEncoder || isQsvEncoder ? 30 : 60));
-  const targetFps = Math.max(15, Math.min(maxFps, parseInt(fps, 10) || 30));
+  const maxFps = streamFpsCeiling(Boolean(viewerFpsPin));
+  const targetFps = Math.max(isLowTier || viewerFpsPin ? 5 : 15, Math.min(maxFps, parseInt(fps, 10) || 30));
   const effectiveFps = String(targetFps);
   const frameInterval = 1000 / targetFps;
   activeStreamFps = targetFps;
+  announceStreamState();
 
   const probeStartedAt = Date.now();
   initPollInterval = setInterval(() => {
@@ -5637,8 +5918,13 @@ function startStreaming() {
     // Wider-than-1080p captures need more bits to stay sharp: same CBR spread
     // over 2-4× the pixels is visibly softer. Only for hardware encoders and
     // only when no explicit env override pins the bitrate.
+    // ...and only for the tiers that actually keep those pixels. This used to
+    // apply to every tier, so on a 1440p/4K host a downshift to 'smooth' or
+    // 'balanced' (both scaled to 1920 wide) still encoded at 12 Mbps: the
+    // viewer asked for less and the host sent more.
     const effBitrate = (!isCpuEncoder && !process.env.REMOTE365_STREAM_BITRATE
-      && physWidth > 2200 && parseInt(bitrate, 10) < 12000) ? '12000k' : bitrate;
+      && physWidth > 2200 && Number(maxWidth) > 1920 && parseInt(bitrate, 10) < 12000) ? '12000k' : bitrate;
+    activeStreamBitrateKbps = parseInt(effBitrate, 10) || 4500;
 
     log.info(`[Host] Frame acquired. Locking bounds at: ${physWidth}x${physHeight} (Scale: ${selectedDisplay.scaleFactor}). target=${effectiveFps}fps bitrate=${effBitrate} maxWidth=${maxWidth} nativeCapture=${useNativeCapture}`);
 
@@ -5704,7 +5990,9 @@ function startStreaming() {
 
     // 'smooth' is the tier the viewer asks for when the link is losing packets:
     // keep keyframes closer together there so an unrepaired loss heals sooner.
-    const encoderArgs = getEncoderArgs(detectedEncoder, effBitrate, effectiveFps, qualityKey === 'smooth' ? 1 : 2, useOnDemandKeyframes);
+    // The low tiers go the other way: a keyframe is most of a second of their
+    // budget, so the periodic one (only used without keyframes on demand) is rare.
+    const encoderArgs = getEncoderArgs(detectedEncoder, effBitrate, effectiveFps, isLowTier ? 4 : qualityKey === 'smooth' ? 1 : 2, useOnDemandKeyframes);
     const args = [...captureArgs, ...encoderArgs];
     log.info(`[Host] FFmpeg launch: ${ffmpegPath} ${args.join(' ')}`);
 
@@ -5954,7 +6242,40 @@ function startStreaming() {
 // connectivity checks hit our real-IP candidates, and ICE forms the pair from
 // that. Non-mDNS candidates still get a guard so one malformed candidate can't
 // abort the handler mid-session.
+// Subnets of this machine's VPN adapters (ZeroTier, Tailscale, ...). Sessions
+// must run over the internet (or a real LAN), never through an overlay tunnel:
+// see shared/vpnRoutes.ts. Re-read at most every 10 s — adapters come and go.
+let vpnSubnetCache: { at: number; subnets: Subnet[] } = { at: 0, subnets: [] };
+function currentVpnSubnets(): Subnet[] {
+  if (process.env.REMOTE365_ALLOW_VPN_ROUTES === '1') return [];
+  const now = Date.now();
+  if (now - vpnSubnetCache.at > 10_000) {
+    try { vpnSubnetCache = { at: now, subnets: vpnSubnetsOf(os.networkInterfaces() as any) }; }
+    catch { vpnSubnetCache = { at: now, subnets: [] }; }
+  }
+  return vpnSubnetCache.subnets;
+}
+const candidateText = (candidate: any): string => typeof candidate === 'string' ? candidate : String(candidate?.candidate ?? '');
+/** A signaling message with its VPN candidates removed, or null to drop it. */
+function withoutVpnRoutes(msg: any, direction: string): any | null {
+  const subnets = currentVpnSubnets();
+  if (subnets.length === 0 || !msg) return msg;
+  if (msg.type === 'ice-candidate' && isVpnCandidate(candidateText(msg.candidate), subnets)) {
+    log.info(`[Route] Dropped a VPN-adapter candidate (${direction}); the session stays on the internet path.`);
+    return null;
+  }
+  if ((msg.type === 'offer' || msg.type === 'answer') && typeof msg.sdp === 'string') {
+    const sdp = stripVpnCandidates(msg.sdp, subnets);
+    return sdp === msg.sdp ? msg : { ...msg, sdp };
+  }
+  return msg;
+}
+
 function addRemoteCandidateSafe(peer: HostViewerPeer, candidate: string, mid: string) {
+  if (isVpnCandidate(candidate, currentVpnSubnets())) {
+    log.info(`[Route] Ignoring a VPN-adapter candidate from ${peer.viewerId}; the session stays on the internet path.`);
+    return;
+  }
   if (/\.local\s/i.test(candidate)) {
     log.info(`[Host] Skipping unresolvable mDNS candidate for ${peer.viewerId} (direct path relies on prflx discovery).`);
     return;
@@ -6150,7 +6471,11 @@ function sendFrameToAllViewers(frame: Buffer, targetViewerId?: string, bypassPre
       // Keep at most ~80ms queued at 6.5Mbps (and much less at higher tiers).
       // The previous 128KB default permitted ~160ms of stale video before
       // dropping, which directly turns into sluggish click-to-photon feedback.
-      const maxBufferedBytes = Number(process.env.REMOTE365_TRACK_BUFFER_LIMIT || 64 * 1024);
+      // 64 KB is that budget only at the upper tiers; at 600 kbps it is most of
+      // a second of video the viewer would be shown late. Scale it with the
+      // tier (~350 ms), but never below a small keyframe.
+      const maxBufferedBytes = Number(process.env.REMOTE365_TRACK_BUFFER_LIMIT)
+        || Math.min(64 * 1024, Math.max(16 * 1024, Math.round(activeStreamBitrateKbps * 1000 / 8 * 0.35)));
       // Drop-to-IDR is OPT-IN and OFF by default. Rationale: skipping deltas
       // after a drop avoids decoder corruption, but IDRs only arrive on the
       // periodic GOP (~0.5s) because forcing one on demand isn't possible with
@@ -6657,11 +6982,15 @@ async function initiateHostWebRTC(viewerId: string) {
     if (hostPeer) hostPeer.offerSentAt = Date.now();
     log.info(`[Host] Sending SDP Offer to ${viewerPeerId} (len: ${sdp.length})...`);
     // log.info(`[Host] Offer SDP:\n${sdp}`);
-    sendSignalToViewer(viewerPeerId, { type: 'offer', sdp, targetId: viewerPeerId });
+    sendSignalToViewer(viewerPeerId, { type: 'offer', sdp: stripVpnCandidates(sdp, currentVpnSubnets()), targetId: viewerPeerId });
   });
 
   localPeerConnection.onLocalCandidate((candidate: string, mid: string) => {
     const mLineIndex = (mid === '0' || mid === 'video') ? 0 : 1;
+    if (isVpnCandidate(candidate, currentVpnSubnets())) {
+      log.info(`[Route] Not offering this machine's VPN-adapter candidate to ${viewerPeerId}.`);
+      return;
+    }
     log.info(`[Host] Local ICE candidate for ${viewerPeerId}: ${describeIceCandidate(candidate)} mid=${mid}`);
     sendSignalToViewer(viewerPeerId, {
       type: 'ice-candidate', candidate, sdpMid: mid, sdpMLineIndex: mLineIndex, targetId: viewerPeerId
@@ -6821,6 +7150,13 @@ async function initiateHostWebRTC(viewerId: string) {
       try { localDataChannel.sendMessage(JSON.stringify({ type: 'recording-state', on: true, byName })); } catch { /* closing */ }
     }
     localDataChannel.sendMessage(JSON.stringify({ type: 'input-capabilities', compactV1: true }));
+    // Which quality tiers this host can encode. A viewer only asks for the
+    // tiers below 'smooth' once it has seen them here; an older host would
+    // read an unknown name as its top tier.
+    localDataChannel.sendMessage(JSON.stringify({ type: 'stream-capabilities', tiers: QUALITY_ORDER, clipboardImage: true, fpsControl: true, displayControl: true }));
+    announceStreamState();
+    applyLeanDesktop('control-channel-open');
+    lastHostSessionActivityAt = Date.now();
     // This viewer's per-file transfer cap (their plan, stamped by the server
     // on the join). The web viewer shows it and refuses an oversized upload
     // before sending a byte; the v1 receive path below enforces it regardless.
@@ -6841,6 +7177,8 @@ async function initiateHostWebRTC(viewerId: string) {
     // 2. Start Clipboard Sync (500ms)
     if (hostPeer?.clipboardInterval) clearInterval(hostPeer.clipboardInterval);
     lastClipboardText = clipboard.readText();
+    // Baseline for images too: a snip taken before the session is not pushed.
+    lastClipboardImageSig = clipboardImageSignature()?.sig || '';
     log.info(`[Host] Initialized clipboard sync. Current text length: ${lastClipboardText?.length || 0}`);
 
     const localClipboardInterval = setInterval(() => {
@@ -6852,6 +7190,7 @@ async function initiateHostWebRTC(viewerId: string) {
           log.info(`[Host] Local clipboard changed. Syncing to viewer... (${text.length} chars)`);
           sendClipboardToViewers(text);
         }
+        pollHostClipboardImage();
       } catch (err: any) {
         log.error(`[Host] Clipboard poll failed: ${err.message}`);
       }
@@ -7461,7 +7800,10 @@ function handleControlMessage(msg: any, viewerId?: string) {
               log.info('[Host] Quality: user selected Auto — resuming adaptive.');
               break;
             }
-            const pinned = normalizeHostStreamQuality(event.mode);
+            // "Optimal Speed" is the viewer asking for responsiveness over
+            // sharpness. Pinned at 'smooth' (2.8 Mbps) it was heavier than what
+            // Auto settles on for a thin link.
+            const pinned = String(event.mode).toLowerCase() === 'speed' ? 'lite' : normalizeHostStreamQuality(event.mode);
             userQualityLock = pinned;
             if (pinned !== activeAdaptiveQuality) {
               activeAdaptiveQuality = pinned;
@@ -7471,12 +7813,28 @@ function handleControlMessage(msg: any, viewerId?: string) {
             }
             break;
           }
-          // Bandwidth-driven adaptation — never fight an explicit user lock.
-          if (userQualityLock) break;
-          const requested = normalizeHostStreamQuality(event.mode);
+          // Bandwidth-driven adaptation under an explicit choice. The choice is
+          // the level to hold, not a fixed pin: a pinned stream on a link that
+          // cannot carry it queues seconds of video and then freezes, which is
+          // worse than the softer picture the viewer did not ask for. So the
+          // tuner may take the stream below the choice, and anything it asks
+          // for at or above the choice returns to the choice. A high choice
+          // ("Optimal quality") also overrides the tuner's own long-distance
+          // cap: its two top requests both mean "the link is fine".
+          let requested = parseRequestedStreamQuality(event.mode);
+          if (!requested) break;
+          if (userQualityLock) {
+            const rank = QUALITY_RANK as Record<string, number>;
+            const lockRank = rank[userQualityLock] ?? rank.ultra;
+            // exact: the viewer chose this tier for a lossy link and means it
+            // literally ('sharp' is 2560 wide there, not "go to full size").
+            if (rank[requested] >= lockRank || (event.exact !== true && lockRank >= rank.sharp && rank[requested] >= rank.sharp)) {
+              requested = userQualityLock as typeof requested;
+            }
+          }
           if (requested !== activeAdaptiveQuality) {
-            const rank: Record<string, number> = { smooth: 0, balanced: 1, sharp: 2, ultra: 3 };
-            const isDownshift = (rank[requested] ?? 1) < (rank[activeAdaptiveQuality] ?? 1);
+            const rank: Record<string, number> = QUALITY_RANK;
+            const isDownshift = (rank[requested] ?? rank.balanced) < (rank[activeAdaptiveQuality] ?? rank.balanced);
             // React fast to congestion (downshift) so latency is shed quickly, but
             // rate-limit quality increases so a restart storm can't itself stutter.
             const minGap = isDownshift ? 1500 : 6000;
@@ -7487,6 +7845,34 @@ function handleControlMessage(msg: any, viewerId?: string) {
               if ((hostViewerPeers.size > 0 || videoTrack) && (ffmpegProcess || isStreamWorkerEnabled())) startStreaming();
             }
           }
+        }
+        break;
+      case 'stream-fps':
+        {
+          // The viewer's Display menu: a frame rate by name, or 'auto' to hand
+          // the choice back to the quality tier.
+          const wanted = String(event.fps).toLowerCase() === 'auto' ? null : Math.round(Number(event.fps));
+          if (wanted !== null && !(wanted >= 5 && wanted <= 120)) break;
+          if (wanted === viewerFpsPin) { announceStreamState(); break; }
+          viewerFpsPin = wanted;
+          log.info(`[Host] Frame rate: viewer selected ${wanted === null ? 'Auto' : `${wanted} fps`} (encoder ${detectedEncoder || 'unknown'}, ceiling ${streamFpsCeiling(wanted !== null)} fps).`);
+          // Locked machine: the secure-desktop stream is not restarted (see
+          // stream-quality above); the choice applies at the next restart.
+          if (!hostSessionLocked && !activePeer?.mediaPaused
+            && (hostViewerPeers.size > 0 || videoTrack) && (ffmpegProcess || isStreamWorkerEnabled())) startStreaming();
+          else announceStreamState();
+        }
+        break;
+      case 'stream-display':
+        {
+          // The viewer's Multi monitor menu: which of this machine's screens to send.
+          const target = screen.getAllDisplays().find((d: any) => String(d.id) === String(event.id));
+          if (!target || hostSessionLocked) { announceStreamState(); break; }
+          if (target.id === selectedDisplayId) { announceStreamState(); break; }
+          log.info(`[Host] Capture screen: viewer selected display ${target.id} (${target.bounds.width}x${target.bounds.height}).`);
+          selectedDisplayId = target.id;
+          if (!activePeer?.mediaPaused && (hostViewerPeers.size > 0 || videoTrack)) startStreaming();
+          else announceStreamState();
         }
         break;
       case 'chat':
@@ -7510,6 +7896,8 @@ function handleControlMessage(msg: any, viewerId?: string) {
           clipboard.writeText(event.text);
         }
         injectKeyCombo([0x11, 0x56]);
+        // The count, never the text: pasted content is often a password.
+        log.info(`[Clipboard] Paste from the viewer: ${typeof event.text === 'string' ? `${event.text.length} characters` : 'no text'} placed on the clipboard and Ctrl+V pressed.`);
         break;
       case 'clipboard-select-all':
         injectKeyCombo([0x11, 0x41]);
@@ -7527,6 +7915,21 @@ function handleControlMessage(msg: any, viewerId?: string) {
       case 'clipboard-chunk':
         handleViewerClipboardChunk(event);
         break;
+      case 'viewer-stats':
+        // A web viewer has no log of its own; this is its side of the story.
+        if (typeof event.line === 'string') log.info(`[WebViewer] ${event.line.replace(/[\r\n]+/g, ' ').slice(0, 700)}`);
+        break;
+      case 'clipboard-capabilities':
+        if (event.image === true && viewerId) imageCapableViewers.add(String(viewerId));
+        break;
+      case 'clipboard-image-chunk': {
+        const done = hostClipboardImages.add(event, Date.now());
+        if (done) {
+          const sig = writeClipboardImage(done.pngBase64);
+          if (sig) log.info(`[Clipboard] Image from the viewer placed on this computer's clipboard (${Math.round(done.pngBase64.length * 3 / 4 / 1024)} KB).`);
+        }
+        break;
+      }
       case 'release-keys':
         // The viewer window lost focus (Alt+Tab away, another app clicked):
         // let go of every modifier we injected so the host isn't left with
@@ -8008,7 +8411,7 @@ function handleHostSignalingMessage(data: any, reply: (payload: any) => void) {
         }
         log.info(`[Host] Applying remote answer from ${answerViewerId} (len: ${data.sdp.length})...`);
         log.info(`[Host] Full Answer SDP:\n${data.sdp}`);
-        peer.peerConnection?.setRemoteDescription(data.sdp, 'answer');
+        peer.peerConnection?.setRemoteDescription(stripVpnCandidates(data.sdp, currentVpnSubnets()), 'answer');
         peer.hasRemoteDescription = true;
         syncLegacyPeerAliases(peer);
 
@@ -8554,7 +8957,23 @@ async function startHostFromSavedIntent() {
     return;
   }
 
-  const serverIP = normalizeServerHost(intent.serverHost || process.env.CONNECT_X_SERVER_IP || DEFAULT_SERVER_HOST);
+  // The saved intent remembers the server the device last hosted on. After a
+  // build for the OTHER Remote365 environment is installed over this one
+  // (preprod <-> production), that is the wrong server: the app came up
+  // "Online And Ready" on the old environment while its account, device list
+  // and viewers were on the new one, until someone restarted it a second time.
+  // A build always belongs to its own environment, so between the two known
+  // hosts the build wins. A self-hosted server name is left alone.
+  const REMOTE365_HOSTS = ['remote365.ai', 'pp.remote365.ai'];
+  const savedHost = normalizeServerHost(intent.serverHost || '');
+  const staleEnvironment = !process.env.CONNECT_X_SERVER_IP
+    && REMOTE365_HOSTS.includes(savedHost)
+    && REMOTE365_HOSTS.includes(normalizeServerHost(DEFAULT_SERVER_HOST))
+    && savedHost !== normalizeServerHost(DEFAULT_SERVER_HOST);
+  if (staleEnvironment) {
+    log.info(`[Autostart] Saved host intent points at ${savedHost}; this build belongs to ${DEFAULT_SERVER_HOST}. Using ${DEFAULT_SERVER_HOST}.`);
+  }
+  const serverIP = normalizeServerHost((staleEnvironment ? '' : intent.serverHost) || process.env.CONNECT_X_SERVER_IP || DEFAULT_SERVER_HOST);
   isHostGuestMode = Boolean(intent.guestMode);
   isManualHostStop = false;
   hostReconnectAttempts = 0;
@@ -8603,7 +9022,47 @@ process.on('unhandledRejection', (reason: any, promise: any) => {
   log.error('[Host] UNHANDLED REJECTION:', reason);
 });
 
+// Electron windows have no right-click menu of their own, so selected text —
+// a chat message from the remote user, an ID, an error — could be highlighted
+// but not copied with the mouse. Give every window the standard text menu, and
+// only where it applies: something is selected, or the click is in a text
+// field. Right-clicks on the remote picture (nothing selected, not editable)
+// are untouched and still go to the remote computer.
+app.on('web-contents-created', (_event, contents) => {
+  contents.on('context-menu', (_e, params) => {
+    const hasSelection = Boolean(params.selectionText && params.selectionText.trim());
+    if (!hasSelection && !params.isEditable) return;
+    const items: Electron.MenuItemConstructorOptions[] = [];
+    if (params.isEditable) items.push({ role: 'cut', enabled: params.editFlags.canCut });
+    items.push({ role: 'copy', enabled: hasSelection && params.editFlags.canCopy });
+    if (params.isEditable) items.push({ role: 'paste', enabled: params.editFlags.canPaste });
+    items.push({ type: 'separator' }, { role: 'selectAll', enabled: params.editFlags.canSelectAll });
+    try {
+      const owner = BrowserWindow.fromWebContents(contents) || undefined;
+      Menu.buildFromTemplate(items).popup({ window: owner });
+      // Lengths only: what was selected is nobody's business but the user's.
+      log.info(`[Menu] Text menu shown (${hasSelection ? `${params.selectionText.length} characters selected` : 'nothing selected'}, ${params.isEditable ? 'text field' : 'read-only text'}).`);
+    } catch (err: any) {
+      log.warn(`[Host] Could not show the text menu: ${err?.message || err}`);
+    }
+  });
+});
+
 app.whenReady().then(() => {
+  // If the last run died while a viewer was connected, the desktop is still
+  // stripped down. Put the wallpaper and animations back before anything else.
+  void recoverLeanDesktop('app-start');
+  // A retained log file per remote session (logs/sessions), named after both
+  // device IDs, so a reported problem can still be analysed days later.
+  installSessionLog(() => {
+    const sessions: ActiveSession[] = [];
+    for (const id of viewerSignalingSockets.keys()) sessions.push({ key: `viewer:${id}`, role: 'viewer', remote: String(id) });
+    for (const id of hostViewerPeers.keys()) {
+      const remote = hostViewerDeviceIds.get(id) || hostViewerNames.get(id) || id;
+      sessions.push({ key: `host:${remote}`, role: 'host', remote });
+    }
+    return sessions;
+  }, () => currentHostSessionId);
   log.info('[Host] App is ready. Initializing subsystems...');
   loadDeviceAutoUpdatePreference();
   // Reset (or arm) the update-install loop guard for the version we booted as.
@@ -9390,6 +9849,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  // Best effort: if the process is gone before this finishes, the saved state
+  // is still on disk and the next start restores it.
+  void recoverLeanDesktop('app-quit');
   // electron-updater starts NSIS only after this process exits. Explicitly tear
   // down every child/pipe that can retain a handle beneath $INSTDIR so the old
   // application directory is removable on the first update attempt.
@@ -9504,13 +9966,17 @@ function connectViewerSignaling(sessionId: string, serverIP: string, token: stri
 
   ws.on('message', (data: any) => {
     try {
-      const msg = JSON.parse(data.toString());
+      const rawMsg = JSON.parse(data.toString());
       // Handle ping/pong at the main-process level so the signaling server
       // doesn't terminate the socket for missed heartbeats.
-      if (msg.type === 'ping') {
+      if (rawMsg.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }));
         return;
       }
+      // The host's offer and candidates, minus anything on a VPN overlay this
+      // machine shares with it (an older host build still sends those).
+      const msg = withoutVpnRoutes(rawMsg, 'viewer, incoming');
+      if (!msg) return;
       const tab = viewerTabs.get(sessionId);
       const win = viewerWindows.get(sessionId);
       if (tab && !tab.view.webContents.isDestroyed()) {

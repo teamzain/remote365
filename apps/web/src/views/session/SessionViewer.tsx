@@ -43,11 +43,21 @@ import {
   Download,
   AlertCircle,
   Loader2,
+  Columns2,
+  SlidersHorizontal,
+  Gauge,
+  FolderUp,
+  Wrench,
+  Headphones,
+  Sparkles,
+  ChevronUp,
 } from 'lucide-react';
 import { useSessionStore } from '../../store/sessionStore';
 import api from '../../lib/api';
 import { WebFileTransfer, describeFileLimit, type WebTransfer } from '../../lib/webFileTransfer';
 import { publishActiveSession } from '../../lib/activeSessions';
+import { CLIPBOARD_IMAGE_MAX_BYTES, createClipboardImageAssembler, splitClipboardImage } from '../../lib/clipboardImage';
+import { createLossyLinkGuard, createQualityMemory, createQualityTuner, hostSupportsLowTiers, initialTier, QUALITY_RANK, type QualityTier } from '../../lib/streamQualityTuner';
 import waitIllustrationAsset from '../../assets/wait.png';
 import {
   clearDeviceNeedsPasswordUpdate,
@@ -73,7 +83,7 @@ const CONNECTING_MESSAGES = [
 // Mirrors the host's ALLOWED_BEFORE_CONTROL (desktop main/index.ts) plus the
 // messages it handles before that gate — what a view-only viewer may still send.
 const SENDABLE_BEFORE_CONTROL = new Set([
-  'ping', 'request-keyframe', 'stream-quality', 'chat',
+  'ping', 'request-keyframe', 'stream-quality', 'stream-activity', 'stream-fps', 'chat',
   'request-control', 'viewer-disconnect', 'whiteboard-event',
   'audio-listen', 'recording-state',
 ]);
@@ -318,14 +328,25 @@ const SessionViewer: React.FC = () => {
   }, [sessionNotice]);
   // Mirrors the desktop viewer's Quality menu: 'auto' hands control back to
   // the bandwidth tuner; a fixed choice pins the host encoder.
-  const [qualityMode, setQualityMode] = useState<'auto' | 'speed' | 'quality'>('auto');
+  // A session opens on "Optimal quality" (see the defaults effect below).
+  const [qualityMode, setQualityMode] = useState<'auto' | 'speed' | 'quality'>('quality');
+  // Frame rate and screen list as the host reports them (stream-state). null
+  // until the host says anything, which an older host never does.
+  const [streamState, setStreamState] = useState<{
+    fps: number;
+    fpsPinned: number | null;
+    fpsMax: number;
+    displays: { id: number | string; label: string; width: number; height: number; primary: boolean }[];
+    displayId: number | string | null;
+  } | null>(null);
+  const sessionDefaultsSentRef = useRef({ quality: false, fps: false });
   // Destructive host actions (restart / sign out) confirm first, desktop-style.
   const [pendingAction, setPendingAction] = useState<{ action: string; title: string; message: string; confirmLabel: string } | null>(null);
   // Desktop RemoteSessionChrome parity for the quick-action pill: disconnect
   // asks for confirmation, the toolbar starts hidden behind a floating tab,
   // and a chat panel talks to the person at the host machine.
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
-  const [toolbarCollapsed, setToolbarCollapsed] = useState(true);
+  const [toolbarCollapsed, setToolbarCollapsed] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<{ from: string; text: string; at: number; mine: boolean }[]>([]);
@@ -381,6 +402,61 @@ const SessionViewer: React.FC = () => {
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
+  // Clipboard images (snips), see lib/clipboardImage.ts (a copy of the desktop
+  // module). Host -> browser: chunks are reassembled and written to the
+  // browser clipboard. A browser only allows that while the tab is focused, so
+  // an image that could not be written yet waits here for the next click.
+  const hostClipboardImagesRef = useRef(false);
+  const clipboardImageAssemblerRef = useRef(createClipboardImageAssembler());
+  const pendingClipboardImageRef = useRef<Blob | null>(null);
+  const placeClipboardImage = useCallback(async (blob: Blob) => {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      pendingClipboardImageRef.current = null;
+    } catch {
+      pendingClipboardImageRef.current = blob;   // tab not focused / no permission yet
+    }
+  }, []);
+  useEffect(() => {
+    const retry = () => { const blob = pendingClipboardImageRef.current; if (blob) void placeClipboardImage(blob); };
+    window.addEventListener('pointerdown', retry, true);
+    window.addEventListener('focus', retry);
+    return () => {
+      window.removeEventListener('pointerdown', retry, true);
+      window.removeEventListener('focus', retry);
+    };
+  }, [placeClipboardImage]);
+  // Browser -> host: the image in a paste event (Ctrl+V in the session) is
+  // sent to the host's clipboard and pasted there. Chunks and the paste key
+  // travel on the SAME channel, in order, so the host cannot paste early.
+  const sendClipboardImageAndPaste = useCallback(async (file: Blob) => {
+    const channel = dataChannelRef.current;
+    if (!channel || channel.readyState !== 'open') return;
+    try {
+      let png: Blob = file;
+      if (file.type !== 'image/png') {
+        const bitmap = await createImageBitmap(file);
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width; canvas.height = bitmap.height;
+        canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
+        const converted = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+        if (!converted) return;
+        png = converted;
+      }
+      if (png.size > CLIPBOARD_IMAGE_MAX_BYTES) return;
+      const bytes = new Uint8Array(await png.arrayBuffer());
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      const chunks = splitClipboardImage(btoa(binary), `${Date.now()}-${Math.random().toString(36).slice(2)}`, 'web');
+      for (const chunk of chunks) {
+        // Do not flood the channel: wait while several megabytes are queued.
+        while (channel.readyState === 'open' && channel.bufferedAmount > 2 * 1024 * 1024) await new Promise((r) => setTimeout(r, 20));
+        if (channel.readyState !== 'open') return;
+        channel.send(JSON.stringify(chunk));
+      }
+      if (chunks.length) channel.send(JSON.stringify({ type: 'keyCombo', keys: [0x11, 0x56] }));
+    } catch { /* unreadable image: nothing is pasted */ }
+  }, []);
   // Host-created low-latency input channels. Until now the web viewer ignored
   // them and pushed ALL input over the reliable ordered 'control' channel —
   // where a running file transfer or clipboard sync head-of-line-blocks every
@@ -647,6 +723,23 @@ const SessionViewer: React.FC = () => {
     const handleOpen = async () => {
       await iceConfigurationReady;
       if (pcRef.current !== pc) return;
+      // This browser may be running on the very computer it is about to view.
+      // That shows the screen inside itself, over and over. The desktop app on
+      // this machine (if any) says which device it is on a loopback address;
+      // no app, an older app or a blocked request simply means "not this one".
+      try {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), 1500);
+        const response = await fetch('http://127.0.0.1:39867/host-status', { cache: 'no-store', signal: controller.signal });
+        window.clearTimeout(timer);
+        const local = String((await response.json())?.deviceId || '').replace(/\D/g, '');
+        const target = String(accessKey || deviceId || '').replace(/\D/g, '');
+        if (local && local === target) {
+          setFatalError('This is the computer you are already using. A computer cannot open a remote session to itself. Open the session from a different device, or choose another computer.');
+          return;
+        }
+      } catch { /* not this machine, or cannot tell */ }
+      if (pcRef.current !== pc) return;
       console.log('[Signaling] Join session:', accessKey || deviceId);
       // Tell the host what we are. Phones skip the view-only consent flow —
       // the host matches /^mobile/ and grants control on connect, same as the
@@ -844,6 +937,9 @@ const SessionViewer: React.FC = () => {
         channel.onclose = () => console.log('[WebRTC] Control DataChannel CLOSED');
         // File chunks from the host arrive as binary frames on this channel.
         channel.binaryType = 'arraybuffer';
+        // A new connection may be to a different build of the host: wait for
+        // it to announce its tiers again before asking for the low ones.
+        hostLowTiersRef.current = false;
         channel.onmessage = (e) => {
           lastHostMessageAtRef.current = performance.now();
           if (e.data instanceof ArrayBuffer) {
@@ -853,7 +949,51 @@ const SessionViewer: React.FC = () => {
           try {
             const data = JSON.parse(e.data);
             if (data.type === 'ping') { hostHeartbeatSeenRef.current = true; return; }
+            if (data.type === 'stream-capabilities') {
+              hostLowTiersRef.current = hostSupportsLowTiers(data.tiers);
+              // The host can exchange clipboard images. Say we can too (if this
+              // browser can write images to the clipboard), or it will not send.
+              hostClipboardImagesRef.current = data.clipboardImage === true;
+              if (hostClipboardImagesRef.current && typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard?.write === 'function') {
+                try { channel.send(JSON.stringify({ type: 'clipboard-capabilities', image: true })); } catch { /* closing */ }
+              }
+              // Sent once per control channel, so this is a fresh connection
+              // and the host has just started (or restarted) at 'balanced'.
+              // Normally we start there too; back after congestion we ask for
+              // the remembered tier straight away.
+              {
+                const resume = initialTier(qualityMemoryRef.current, Date.now(), hostLowTiersRef.current);
+                lastAdaptiveModeRef.current = resume;
+                if (QUALITY_RANK[resume] < QUALITY_RANK.balanced) {
+                  try { channel.send(JSON.stringify({ type: 'stream-quality', mode: resume, reason: 'resume-after-congestion' })); } catch { /* closing */ }
+                }
+              }
+              return;
+            }
+            if (data.type === 'stream-state') {
+              setStreamState({
+                fps: Number(data.fps) || 0,
+                fpsPinned: Number(data.fpsPinned) > 0 ? Number(data.fpsPinned) : null,
+                fpsMax: Number(data.fpsMax) || 30,
+                displays: Array.isArray(data.displays) ? data.displays : [],
+                displayId: data.displayId ?? null,
+              });
+              return;
+            }
             if (fileXferRef.current?.handleJson(data)) return;
+            if (data.type === 'clipboard-image-chunk') {
+              // A snip or picture copied on the host.
+              const done = clipboardImageAssemblerRef.current.add(data, Date.now());
+              if (done) {
+                try {
+                  const binary = atob(done.pngBase64);
+                  const bytes = new Uint8Array(binary.length);
+                  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                  void placeClipboardImage(new Blob([bytes], { type: 'image/png' }));
+                } catch { /* not valid base64: ignore */ }
+              }
+              return;
+            }
             if (data.type === 'clipboard' && data.text) navigator.clipboard.writeText(data.text).catch(() => {});
             else if (data.type === 'control-granted') { setHostAnnouncedControl(true); setControlStatus('granted'); }
             else if (data.type === 'control-pending') { setHostAnnouncedControl(true); setControlStatus('pending'); }
@@ -1018,25 +1158,60 @@ const SessionViewer: React.FC = () => {
   // restarting its encoder every few seconds, and the picture stops at each
   // restart until the new keyframe arrives. Now it starts where the host
   // starts and only reports changes.
-  const lastAdaptiveModeRef = useRef<'smooth' | 'balanced' | 'sharp' | 'ultra'>('balanced');
+  const lastAdaptiveModeRef = useRef<QualityTier>('balanced');
+  // Congestion memory for this viewer page: it outlives a reconnect, which is
+  // usually caused by the congestion it remembers.
+  const qualityMemoryRef = useRef(createQualityMemory());
+  // Set once the host lists the tiers below 'smooth' (stream-capabilities).
+  const hostLowTiersRef = useRef(false);
+  const qualityModeRef = useRef(qualityMode);
+  useEffect(() => { qualityModeRef.current = qualityMode; }, [qualityMode]);
+  // A session to a computer opens on "Optimal quality" at 24 fps (the desktop
+  // viewer does the same).
+  // Sent once per session; Quality and Display change it.
   useEffect(() => {
-    if (viewerStatus !== 'streaming' || qualityMode !== 'auto') return;
+    if (viewerStatus !== 'streaming') return;
+    if (/mobile|android|ios/i.test(String(deviceType || ''))) return;
+    const channel = dataChannelRef.current;
+    if (!channel || channel.readyState !== 'open') return;
+    const sent = sessionDefaultsSentRef.current;
+    try {
+      if (!sent.quality) {
+        sent.quality = true;
+        if (qualityModeRef.current === 'quality') channel.send(JSON.stringify({ type: 'stream-quality', mode: 'quality', reason: 'user' }));
+      }
+      if (!sent.fps && streamState) {
+        sent.fps = true;
+        if (!streamState.fpsPinned) channel.send(JSON.stringify({ type: 'stream-fps', fps: 24 }));
+      }
+    } catch { /* closing */ }
+  }, [viewerStatus, streamState, deviceType]);
+  useEffect(() => {
+    // The tuner runs under every Quality choice: the host treats a choice as
+    // the level to hold, and still steps below it when the link cannot carry it.
+    if (viewerStatus !== 'streaming') return;
     let prevReceived = 0;
     let prevLost = 0;
-    let upshiftStreak = 0;
-    let downshiftStreak = 0; // two lossy samples required before dropping a tier
+    let prevNack = 0;
+    let prevPli = 0;
+    // See "Lossy links" in lib/streamQualityTuner.ts.
+    const lossyGuard = createLossyLinkGuard('sharp');
     let warmedUp = false; // first sample's counters are cumulative: never act on it
-    // Only loss that matters (>=0.5% of a sample) holds the climb back; a stray
-    // packet must not pin the session at a blurry tier.
-    let lastMeaningfulLossAt = 0;
-    // Samples run every 1.5s: about ten clean seconds per tier going up.
-    const UPSHIFT_SAMPLES = 7;
-    const rank: Record<string, number> = { smooth: 0, balanced: 1, sharp: 2, ultra: 3 };
-    const order: Array<'smooth' | 'balanced' | 'sharp' | 'ultra'> = ['smooth', 'balanced', 'sharp', 'ultra'];
+    // Same rules as the desktop viewer (lib/streamQualityTuner.ts is a copy of
+    // its module): loss AND the round trip over this session's baseline.
+    const tuner = createQualityTuner({
+      sampleMs: 1500,
+      memory: qualityMemoryRef.current,
+      start: lastAdaptiveModeRef.current,
+      lowTiers: () => hostLowTiersRef.current,
+    });
     const interval = window.setInterval(async () => {
       const pc = pcRef.current;
       const channel = dataChannelRef.current;
       if (!pc || pc.connectionState !== 'connected' || !channel || channel.readyState !== 'open') return;
+      // A hidden tab decodes nothing; its statistics say nothing about the link
+      // and must not move the quality tier.
+      if (document.visibilityState !== 'visible') return;
       try {
         const stats = await pc.getStats();
         let rttMs = 0;
@@ -1044,6 +1219,8 @@ const SessionViewer: React.FC = () => {
         let received = prevReceived;
         let lost = prevLost;
         let sawVideoRtp = false;
+        let nack = prevNack;
+        let pli = prevPli;
         stats.forEach((report: any) => {
           if (report.type === 'candidate-pair' && (report.nominated || report.selected) && typeof report.currentRoundTripTime === 'number') {
             rttMs = Math.max(rttMs, Math.round(report.currentRoundTripTime * 1000));
@@ -1052,6 +1229,8 @@ const SessionViewer: React.FC = () => {
             sawVideoRtp = true;
             received = Number(report.packetsReceived || 0);
             lost = Math.max(0, Number(report.packetsLost || 0));
+            nack = Math.max(0, Number(report.nackCount || 0));
+            pli = Math.max(0, Number(report.pliCount || 0));
             fps = Number(report.framesPerSecond || 0);
           }
         });
@@ -1059,14 +1238,22 @@ const SessionViewer: React.FC = () => {
         const dLost = Math.max(0, lost - prevLost);
         prevReceived = received;
         prevLost = lost;
-        const lossPct = (dReceived + dLost) > 0 ? Math.round((dLost / (dReceived + dLost)) * 1000) / 10 : 0;
+        const dNack = Math.max(0, nack - prevNack);
+        const dPli = Math.max(0, pli - prevPli);
+        prevNack = nack;
+        prevPli = pli;
+        const netLossPct = (dReceived + dLost) > 0 ? (dLost / (dReceived + dLost)) * 100 : 0;
+        const rawLossPct = (dReceived + dNack) > 0 ? (dNack / (dReceived + dNack)) * 100 : 0;
+        const link = lossyGuard.sample({ now: Date.now(), rttMs, netLossPct, rawLossPct, pliDelta: dPli, current: tuner.current });
+        const lossPct = link.lossPct;
 
         // Keep Chromium's playout buffer matched to live conditions: small on a
         // clean link (latency), larger under loss/high RTT (smoothness). Floor
         // 30ms on snappy links (<80ms RTT), 45ms otherwise — a sub-frame buffer
         // turns any delivery wobble into visible repaint stutter.
         const jitterFloorMs = rttMs > 0 && rttMs < 80 ? 30 : 45;
-        const jitterTargetMs = Math.round(Math.min(95, Math.max(jitterFloorMs, 18 + rttMs * 0.08 + lossPct * 12)));
+        const jitterTargetMs = link.jitterTargetMs
+          ?? Math.round(Math.min(95, Math.max(jitterFloorMs, 18 + rttMs * 0.08 + lossPct * 12)));
         const receiver = pc.getReceivers().find((r) => r.track && r.track.kind === 'video') as any;
         if (receiver) {
           try {
@@ -1075,56 +1262,31 @@ const SessionViewer: React.FC = () => {
           } catch { /* receiver may be gone mid-teardown */ }
         }
 
-        const reason = lossPct >= 5 ? 'loss-high' : lossPct >= 1.5 ? 'loss-moderate' : 'healthy';
-        // Long-haul ceiling (desktop parity): past ~180ms RTT the 'ultra' tier's
-        // bitrate just deepens queueing delay on the bottleneck link.
-        const healthyCeiling = rttMs >= 180 ? 'sharp' : 'ultra';
-        const target = lossPct >= 5 ? 'smooth' : lossPct >= 1.5 ? 'balanced' : healthyCeiling;
-        if (lossPct >= 0.5) lastMeaningfulLossAt = Date.now();
         const painted = remoteStreamRef.current
           ? (videoRef.current?.videoWidth ?? 0) > 0
           : hasReceivedKeyframeRef.current;
-        const current = lastAdaptiveModeRef.current;
-        let next = current;
         if (!painted) {
           // Never restart the encoder while the first picture is still on its
           // way: that throws away the startup keyframe the viewer is waiting for.
-          upshiftStreak = 0;
-          downshiftStreak = 0;
         } else if (!warmedUp) {
           warmedUp = true;
-        } else if (rank[target] < rank[current]) {
-          // Congestion — require TWO consecutive lossy samples before dropping:
-          // every tier change restarts the host encoder (a visible quality
-          // flip), so one 1.5s blip must not trigger it. One tier at a time;
-          // only catastrophic loss drops straight to the safe tier.
-          downshiftStreak++;
-          upshiftStreak = 0;
-          const catastrophicLoss = lossPct >= 30;
-          if (catastrophicLoss || downshiftStreak >= 2) {
-            next = catastrophicLoss ? target : order[Math.max(rank[current] - 1, rank[target])];
-            downshiftStreak = 0;
-          }
-        } else if (rank[target] > rank[current]) {
-          // Headroom: raise one tier at a time, and only after a sustained
-          // clean window, so we don't overshoot the link and re-congest. An
-          // interval with no video packets at all proves nothing about the
-          // link (the picture is stalled), so it never counts as clean.
-          downshiftStreak = 0;
-          const cleanLongEnough = lastMeaningfulLossAt === 0 || Date.now() - lastMeaningfulLossAt >= 20_000;
-          const stalled = sawVideoRtp && dReceived === 0;
-          upshiftStreak = cleanLongEnough && !stalled ? upshiftStreak + 1 : 0;
-          if (upshiftStreak >= UPSHIFT_SAMPLES) {
-            next = order[Math.min(rank[current] + 1, order.length - 1)];
-            upshiftStreak = 0;
-          }
         } else {
-          upshiftStreak = 0;
-          downshiftStreak = 0;
-        }
-        if (next !== lastAdaptiveModeRef.current) {
-          lastAdaptiveModeRef.current = next;
-          channel.send(JSON.stringify({ type: 'stream-quality', mode: next, rttMs, lossPct, fps: Math.round(fps), reason }));
+          // An interval with no video packets at all proves nothing about the
+          // link (the picture is stalled), so it never counts as clean.
+          const decision = tuner.sample({ now: Date.now(), rttMs, lossPct: link.tunerLossPct, stalled: sawVideoRtp && dReceived === 0 });
+          let nextTier: QualityTier = decision.changed ? decision.next : tuner.current;
+          // The tuner can drop two levels at once on heavy loss; the floor is
+          // enforced on its answer too.
+          if (link.floor && QUALITY_RANK[nextTier] < QUALITY_RANK[link.floor]) nextTier = link.floor;
+          if (link.forceTier) nextTier = link.forceTier;
+          if (nextTier !== tuner.current) tuner.force(nextTier, Date.now());
+          if (nextTier !== lastAdaptiveModeRef.current && (decision.changed || link.forceTier)) {
+            lastAdaptiveModeRef.current = nextTier;
+            // exact: a tier chosen for a lossy link is meant literally, even
+            // under "Optimal quality" (which otherwise reads the two top tiers
+            // as "the link is fine, go to full size").
+            channel.send(JSON.stringify({ type: 'stream-quality', mode: nextTier, rttMs, lossPct, fps: Math.round(fps), reason: link.forceTier ? 'lossy-link-struggling' : decision.reason, exact: link.lossy }));
+          }
         }
       } catch { /* getStats can fail during teardown */ }
     }, 1500);
@@ -1211,7 +1373,16 @@ const SessionViewer: React.FC = () => {
     const handlePaste = (e: ClipboardEvent) => {
       if (isSessionUiTarget(e) || e.target === mobileKeyboardRef.current) return;
       const text = e.clipboardData?.getData('text');
-      if (!text) return;
+      if (!text) {
+        // No text: a snip or copied picture. Send it to the host and paste it
+        // there (text wins when both are present, as on the desktop app).
+        const item = Array.from(e.clipboardData?.items || []).find((entry) => entry.kind === 'file' && entry.type.startsWith('image/'));
+        const file = item && hostClipboardImagesRef.current ? item.getAsFile() : null;
+        if (!file) return;
+        e.preventDefault();
+        void sendClipboardImageAndPaste(file);
+        return;
+      }
       e.preventDefault();
       onControlEvent({ type: 'paste-clipboard', text });
     };
@@ -1223,7 +1394,7 @@ const SessionViewer: React.FC = () => {
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('paste', handlePaste);
     };
-  }, [onControlEvent, deviceType]);
+  }, [onControlEvent, deviceType, sendClipboardImageAndPaste]);
 
   // Keyframe recovery / black-screen watchdog. Two failure modes to cover:
   //   1) Chunk path (WebCodecs canvas): the decoder is up but no keyframe
@@ -1263,36 +1434,163 @@ const SessionViewer: React.FC = () => {
   // the tab comes back.
   const onControlEventRef = useRef(onControlEvent);
   onControlEventRef.current = onControlEvent;
+  // When the last frame reached the screen (performance.now()); 0 = none yet.
+  const lastFramePresentedAtRef = useRef(0);
+  // A browser keeps no session log of its own, so a stall on this side used to
+  // be invisible: the host could only see that it was sending. Every 5 s the
+  // page reports what the browser is doing with the stream (received, decoded,
+  // shown, visible or not) and the host writes it into its session log.
+  useEffect(() => {
+    if (viewerStatus !== 'streaming') return;
+    let prev = { received: 0, decoded: 0, dropped: 0, keys: 0, bytes: 0, packets: 0, nack: 0, jbDelay: 0, jbCount: 0, at: performance.now() };
+    let first = true;
+    const timer = window.setInterval(async () => {
+      const pc = pcRef.current;
+      const channel = dataChannelRef.current;
+      if (!pc || !channel || channel.readyState !== 'open') return;
+      try {
+        const stats = await pc.getStats();
+        let v: any = null;
+        stats.forEach((report: any) => { if (report.type === 'inbound-rtp' && report.kind === 'video') v = report; });
+        if (!v) return;
+        const now = performance.now();
+        const secs = Math.max(0.5, (now - prev.at) / 1000);
+        const cur = { received: v.framesReceived || 0, decoded: v.framesDecoded || 0, dropped: v.framesDropped || 0, keys: v.keyFramesDecoded || 0, bytes: v.bytesReceived || 0, packets: v.packetsReceived || 0, nack: v.nackCount || 0, jbDelay: v.jitterBufferDelay || 0, jbCount: v.jitterBufferEmittedCount || 0, at: now };
+        const shownAgo = lastFramePresentedAtRef.current ? Math.round(now - lastFramePresentedAtRef.current) : -1;
+        const video = videoRef.current;
+        const line = [
+          `vis=${document.visibilityState}`,
+          `focus=${document.hasFocus() ? 1 : 0}`,
+          `recvFps=${((cur.received - prev.received) / secs).toFixed(1)}`,
+          `decFps=${((cur.decoded - prev.decoded) / secs).toFixed(1)}`,
+          `shownAgoMs=${shownAgo}`,
+          `dropped=+${cur.dropped - prev.dropped}`,
+          `keyframes=+${cur.keys - prev.keys}`,
+          `kbps=${Math.round(((cur.bytes - prev.bytes) * 8) / secs / 1000)}`,
+          `size=${v.frameWidth || 0}x${v.frameHeight || 0}`,
+          `decoder=${v.decoderImplementation || '?'}${v.powerEfficientDecoder === true ? '(hw)' : v.powerEfficientDecoder === false ? '(sw)' : ''}`,
+          `freezes=${v.freezeCount ?? '?'}`,
+          `pli=${v.pliCount ?? 0}`,
+          `packets=+${cur.packets - prev.packets}`,
+          // The counter restarts with the stream; never report a negative.
+          `resendAsked=+${Math.max(0, cur.nack - prev.nack)}`,
+          `tier=${lastAdaptiveModeRef.current}`,
+          `bufMs=${Math.round((((v.jitterBufferDelay || 0) - prev.jbDelay) / Math.max(1, (v.jitterBufferEmittedCount || 0) - prev.jbCount)) * 1000)}`,
+          `paused=${video?.paused ? 1 : 0}`,
+          `ready=${video?.readyState ?? -1}`,
+          first ? `ua=${navigator.userAgent.replace(/\s+/g, '_').slice(0, 160)}` : '',
+        ].filter(Boolean).join(' ');
+        first = false;
+        prev = cur;
+        channel.send(JSON.stringify({ type: 'viewer-stats', line }));
+      } catch { /* stats are best effort */ }
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [viewerStatus]);
   useEffect(() => {
     if (viewerStatus !== 'streaming' || !remoteStream) return;
     const video = videoRef.current as any;
     if (!video || typeof video.requestVideoFrameCallback !== 'function') return;
     let cancelled = false;
     let lastPresentedAt = performance.now();
+    let visibleSince = performance.now();
+    let quickRetries = 0;
+    let lastRecoveryAt = 0;
     let callbackId: number | null = null;
     const onPresentedFrame = () => {
       if (cancelled) return;
       lastPresentedAt = performance.now();
+      lastFramePresentedAtRef.current = lastPresentedAt;
       callbackId = video.requestVideoFrameCallback(onPresentedFrame);
     };
     callbackId = video.requestVideoFrameCallback(onPresentedFrame);
-    const onVisibility = () => {
-      if (document.visibilityState !== 'visible') return;
+    // Minimising the browser (or switching tabs) hides the picture. The host
+    // is told, as the desktop viewer tells it: it stops encoding and sending
+    // while nobody can see the screen, and on return starts a fresh stream that
+    // opens with a keyframe. Before this the host kept streaming into a tab
+    // whose decoder Chrome had parked; the tuner read that as loss and stepped
+    // the quality down, and coming back took a 5 s stall timer plus a second
+    // keyframe — a black picture for 10-20 s while input still worked.
+    //
+    // "Hidden" is the browser's word and it is not always right: Chrome also
+    // reports a window as hidden when it THINKS it is covered (other windows,
+    // a second remote-control tool, some display setups), sometimes while the
+    // user is looking straight at it. Pausing on that word alone froze the
+    // picture mid-session, 30-70 s into a session and again 0.7 s after every
+    // return (field log, Oct 5 2026). So the host is paused only when all
+    // three agree that nobody is watching: the page says hidden, no frame has
+    // reached the screen lately, and there has been no mouse or keyboard
+    // activity on the page. Any of the three coming back resumes it at once.
+    let hostPaused = false;
+    let hiddenTimer: number | null = null;
+    let lastInteractionAt = performance.now();
+    const setHostActive = (active: boolean, reason: string) => {
+      if (hostPaused === !active) return;
+      hostPaused = !active;
+      onControlEventRef.current({ type: 'stream-activity', active });
+      if (!active) return;
       lastPresentedAt = performance.now();
-      onControlEventRef.current({ type: 'request-keyframe', reason: 'tab-visible' });
+      visibleSince = lastPresentedAt;
+      quickRetries = 0;
+      onControlEventRef.current({ type: 'request-keyframe', reason });
     };
+    const considerPause = () => {
+      hiddenTimer = null;
+      if (cancelled || document.visibilityState === 'visible') return;
+      const now = performance.now();
+      const stillPainting = now - lastPresentedAt < 1500;
+      const someoneThere = now - lastInteractionAt < 30_000;
+      if (stillPainting || someoneThere) {
+        hiddenTimer = window.setTimeout(considerPause, 2000);
+        return;
+      }
+      setHostActive(false, 'tab-hidden');
+    };
+    const onVisibility = () => {
+      if (hiddenTimer != null) { window.clearTimeout(hiddenTimer); hiddenTimer = null; }
+      if (document.visibilityState === 'visible') {
+        if (hostPaused) setHostActive(true, 'tab-visible');
+        else { lastPresentedAt = performance.now(); visibleSince = lastPresentedAt; quickRetries = 0; }
+        return;
+      }
+      hiddenTimer = window.setTimeout(considerPause, 3000);
+    };
+    const onInteraction = () => {
+      lastInteractionAt = performance.now();
+      // Input on a page the browser calls hidden: someone is plainly there.
+      if (hostPaused) setHostActive(true, 'tab-visible');
+    };
+    const interactionEvents = ['pointermove', 'pointerdown', 'keydown', 'wheel'] as const;
+    interactionEvents.forEach((name) => window.addEventListener(name, onInteraction, { passive: true, capture: true }));
     document.addEventListener('visibilitychange', onVisibility);
     const probe = window.setInterval(() => {
-      if (document.visibilityState !== 'visible') return;
+      // A hidden page shows no frames at all, which is not a stall: asking
+      // for keyframes then only restarts the host's encoder for nobody (13
+      // false "stalls" in 30 s after switching to another window, field log
+      // Oct 5 2026). If the browser is wrong about "hidden" and still paints,
+      // frames keep arriving here and there is nothing to recover either.
+      if (hostPaused || document.visibilityState !== 'visible') return;
       if (video.videoWidth === 0 || video.videoHeight === 0 || video.readyState < 2) return;
-      const stalledMs = performance.now() - lastPresentedAt;
-      if (stalledMs < 5000) return;
+      const now = performance.now();
+      const stalledMs = now - lastPresentedAt;
+      // Just back from hidden: do not sit on a black picture for the full
+      // stall timer. Ask again after 1.2 s without a frame, up to three times.
+      if (now - visibleSince < 12_000 && stalledMs >= 1200 && quickRetries < 3 && now - lastRecoveryAt >= 1200) {
+        quickRetries++;
+        lastRecoveryAt = now;
+        onControlEventRef.current({ type: 'request-keyframe', urgent: true, reason: 'tab-visible-retry', stalledMs: Math.round(stalledMs) });
+        return;
+      }
+      if (stalledMs < 5000 || now - lastRecoveryAt < 2000) return;
+      lastRecoveryAt = now;
       console.warn(`[Web] No frame presented for ${Math.round(stalledMs)}ms — requesting recovery keyframe`);
       onControlEventRef.current({ type: 'request-keyframe', urgent: true, reason: 'presentation-stalled', stalledMs: Math.round(stalledMs) });
-    }, 2000);
+    }, 500);
     return () => {
       cancelled = true;
       window.clearInterval(probe);
+      if (hiddenTimer != null) window.clearTimeout(hiddenTimer);
+      interactionEvents.forEach((name) => window.removeEventListener(name, onInteraction, { capture: true }));
       document.removeEventListener('visibilitychange', onVisibility);
       if (callbackId != null && typeof video.cancelVideoFrameCallback === 'function') video.cancelVideoFrameCallback(callbackId);
     };
@@ -1995,10 +2293,6 @@ const SessionViewer: React.FC = () => {
     if (needControlForFiles()) return;
     fileXferRef.current?.requestHostPick(deviceName);
   };
-  // The hover hints carry the plan's per-file limit once the host has said it.
-  const fileLimitNote = fileLimitBytes ? ` (up to ${describeFileLimit(fileLimitBytes)} per file)` : '';
-  const sendFilesHint = `Send files${fileLimitNote}`;
-  const getFilesHint = `Get files${fileLimitNote}`;
   const confirmHostAction = (action: string, title: string, message: string, confirmLabel: string) => () =>
     setPendingAction({ action, title, message, confirmLabel });
   const pickQuality = (mode: 'auto' | 'speed' | 'quality') => () => {
@@ -2006,7 +2300,7 @@ const SessionViewer: React.FC = () => {
     // reason:'user' pins the host encoder; the bandwidth auto-tuner stands
     // down until the viewer picks "Auto select" again. The host stays on the
     // pinned tier when Auto comes back, so the tuner resumes from that tier.
-    if (mode === 'speed') lastAdaptiveModeRef.current = 'smooth';
+    if (mode === 'speed') lastAdaptiveModeRef.current = hostLowTiersRef.current ? 'lite' : 'smooth';
     else if (mode === 'quality') lastAdaptiveModeRef.current = 'ultra';
     onControlEvent({ type: 'stream-quality', mode, reason: 'user' });
   };
@@ -2018,14 +2312,6 @@ const SessionViewer: React.FC = () => {
     window.close();
     navigate('/dashboard/devices');
   };
-  // Quick-pill hover hint (desktop parity): tooltip centered over the icon.
-  const showQuickHint = (label: string) => (event: React.MouseEvent<HTMLElement>) => {
-    const pillRect = quickPillRef.current?.getBoundingClientRect();
-    const rect = event.currentTarget.getBoundingClientRect();
-    setQuickHint({ label, left: pillRect ? rect.left - pillRect.left + rect.width / 2 : 24 });
-  };
-  const hideQuickHint = (label: string) => () =>
-    setQuickHint((current) => (current?.label === label ? null : current));
   // Keyboard shortcuts popover — system key combos sent straight to the host,
   // same set as the desktop viewer's keyboard pill.
   const hostIsMobileDevice = /mobile|android|ios/.test(String(deviceType || '').toLowerCase());
@@ -2061,51 +2347,230 @@ const SessionViewer: React.FC = () => {
     onControlEvent({ type: 'audio-listen', on: next });
   };
 
-  const toolbarMenus: { id: string; label: string; items: { label: string; icon: React.ReactNode; onClick: () => void; danger?: boolean; active?: boolean }[] }[] = [
-    {
-      id: 'actions',
-      label: 'Actions',
-      items: [
+  // ---- Session dock (same layout and colours as the desktop viewer's
+  // RemoteSessionChrome): one row of labelled buttons grouped and coloured by
+  // function, each opening its menu above the dock.
+  const DOCK_TONES = { view: '#F5A04A', transfer: '#5AA9F0', talk: '#4CC38A', control: '#B49AF0' } as const;
+  type DockTone = keyof typeof DOCK_TONES;
+  type DockItem = { label: string; hint?: string; icon: React.ReactNode; onClick: () => void; danger?: boolean; active?: boolean; toggle?: boolean; keepOpen?: boolean; disabled?: boolean; hidden?: boolean };
+  type DockSection = { title?: string; items: DockItem[] };
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) requestLandscape();
+    else document.exitFullscreen();
+  };
+  const refreshScreen = () => onControlEvent({ type: 'request-keyframe' });
+  const pickFrameRate = (fps: number | 'auto') => onControlEvent({ type: 'stream-fps', fps });
+  const pickDisplay = (id: number | string) => {
+    if (hostAnnouncedControl && controlStatus !== 'granted') {
+      setSessionNotice('Switching screens needs control of the session.');
+      return;
+    }
+    onControlEvent({ type: 'stream-display', id });
+    setOpenToolbarMenu(null);
+  };
+
+  const screenSections: DockSection[] = [{
+    items: [
+      {
+        label: controlStatus === 'pending' ? 'Requesting control…' : 'Request control',
+        icon: <MousePointer2 size={15} />,
+        onClick: () => onControlEvent({ type: 'request-control' }),
+        hidden: !(hostAnnouncedControl && controlStatus !== 'granted'),
+      },
+      { label: isFullscreen ? 'Exit full screen' : 'Full screen', icon: isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />, onClick: toggleFullscreen },
+      { label: 'Refresh screen', icon: <RefreshCw size={15} />, onClick: refreshScreen },
+    ],
+  }];
+  const scalingSection: DockSection = {
+    title: 'Scaling',
+    items: [
+      { label: 'Best fit', icon: <Monitor size={15} />, onClick: () => setZoomMode('fit'), active: zoomMode === 'fit', keepOpen: true },
+      { label: 'Actual size', icon: <Search size={15} />, onClick: () => setZoomMode('original'), active: zoomMode === 'original', keepOpen: true },
+      { label: 'Fill screen', icon: <Scaling size={15} />, onClick: () => setZoomMode('fill'), active: zoomMode === 'fill', keepOpen: true },
+    ],
+  };
+  const qualitySections: DockSection[] = [{
+    items: [
+      { label: 'Auto select', hint: 'follows the link', icon: <Sparkles size={15} />, onClick: pickQuality('auto'), active: qualityMode === 'auto', keepOpen: true },
+      { label: 'Optimal speed', hint: 'responsive', icon: <Zap size={15} />, onClick: pickQuality('speed'), active: qualityMode === 'speed', keepOpen: true },
+      { label: 'Optimal quality', hint: 'sharp', icon: <Monitor size={15} />, onClick: pickQuality('quality'), active: qualityMode === 'quality', keepOpen: true },
+    ],
+  }];
+  const fileSections: DockSection[] = [{
+    items: [
+      { label: 'Send files', hint: fileLimitBytes ? `up to ${describeFileLimit(fileLimitBytes)}` : 'to remote', icon: <UploadCloud size={15} />, onClick: sendFilesClick },
+      { label: 'Get files', hint: 'from remote', icon: <DownloadCloud size={15} />, onClick: getFilesClick },
+      { label: 'File explorer', hint: 'Win+E', icon: <Folder size={15} />, onClick: hostAction('explorer') },
+    ],
+  }];
+  const audioSections: DockSection[] = [{
+    items: [{
+      label: remoteAudioTrackCount || remoteAudioEnabled ? 'Listen to remote sound' : 'No remote sound',
+      icon: remoteAudioEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />,
+      onClick: toggleRemoteAudio,
+      active: remoteAudioEnabled,
+      toggle: true,
+      keepOpen: true,
+      disabled: !remoteAudioTrackCount && !remoteAudioEnabled,
+    }],
+  }];
+  const toolsSections: DockSection[] = hostIsMobileDevice
+    ? [{ title: 'Navigate', items: keyboardItems }]
+    : [
         {
-          label: remoteAudioEnabled ? 'Mute remote audio' : 'Listen to remote audio',
-          icon: <Zap size={15} />,
-          active: remoteAudioEnabled,
-          onClick: toggleRemoteAudio,
+          title: 'Send keys',
+          items: [
+            { label: 'Ctrl + Alt + Del', hint: 'Task Manager', icon: <Keyboard size={15} />, onClick: hostAction('task_manager') },
+            { label: 'Switch window', hint: 'Alt+Tab', icon: <ArrowLeftRight size={15} />, onClick: () => onControlEvent({ type: 'keyCombo', keys: [0x12, 0x09] }) },
+            { label: 'Show desktop', hint: 'Win+D', icon: <AppWindow size={15} />, onClick: () => onControlEvent({ type: 'shortcut', key: 'show-desktop' }) },
+            { label: 'Quick settings', hint: 'Win+A', icon: <Sliders size={15} />, onClick: () => onControlEvent({ type: 'shortcut', key: 'control-center' }) },
+          ],
         },
-        ...(!isMobileViewport && hostAnnouncedControl && controlStatus !== 'granted'
-          ? [{
-              label: controlStatus === 'pending' ? 'Requesting control…' : 'Request control',
-              icon: <MousePointer2 size={15} />,
-              onClick: () => onControlEvent({ type: 'request-control' }),
-            }]
-          : []),
-        { label: 'Refresh stream', icon: <RefreshCw size={15} />, onClick: () => onControlEvent({ type: 'request-keyframe' }) },
-        { label: 'Ctrl + Alt + Del (Task Manager)', icon: <Keyboard size={15} />, onClick: hostAction('task_manager') },
-        { label: 'Minimize Remote365 on host', icon: <AppWindow size={15} />, onClick: hostAction('minimize_host_window') },
-        { label: 'Open browser', icon: <Globe size={15} />, onClick: hostAction('browser') },
-        { label: 'File explorer', icon: <Folder size={15} />, onClick: hostAction('explorer') },
-        { label: 'Lock screen', icon: <Lock size={15} />, onClick: hostAction('lock') },
-        { label: 'Sign out remote user', icon: <LogOut size={15} />, onClick: confirmHostAction('sign_out', 'Sign out remote computer', 'The current Windows user on the remote computer will be signed out and their desktop session will end.', 'Sign out'), danger: true },
-        { label: 'Safe reboot (15s grace)', icon: <RotateCcw size={15} />, onClick: confirmHostAction('safe_reboot', 'Safe reboot', 'The remote computer will restart after a 15-second grace period so open apps can react first.', 'Reboot') },
-        { label: 'Restart device', icon: <Power size={15} />, onClick: confirmHostAction('reboot', 'Remote reboot', 'The remote computer is going to reboot immediately. Click Cancel to prevent it.', 'Restart'), danger: true },
-      ],
+        {
+          title: 'Open on remote',
+          items: [
+            { label: 'Web browser', icon: <Globe size={15} />, onClick: hostAction('browser') },
+            { label: 'Minimize Remote365 on remote', icon: <AppWindow size={15} />, onClick: hostAction('minimize_host_window') },
+          ],
+        },
+        {
+          title: 'Power and sign-in',
+          items: [
+            { label: 'Lock now', hint: 'Win+L', icon: <Lock size={15} />, onClick: hostAction('lock') },
+            { label: 'Sign out on remote', icon: <LogOut size={15} />, onClick: confirmHostAction('sign_out', 'Sign out remote computer', 'The current Windows user on the remote computer will be signed out and their desktop session will end.', 'Sign out'), danger: true },
+            { label: 'Safe reboot', hint: '15 s grace', icon: <RotateCcw size={15} />, onClick: confirmHostAction('safe_reboot', 'Safe reboot', 'The remote computer will restart after a 15-second grace period so open apps can react first.', 'Reboot') },
+            { label: 'Restart now', icon: <Power size={15} />, onClick: confirmHostAction('reboot', 'Remote reboot', 'The remote computer is going to reboot immediately. Click Cancel to prevent it.', 'Restart'), danger: true },
+          ],
+        },
+      ];
+
+  const renderDockRows = (sections: DockSection[], tone: DockTone, divided = false) =>
+    sections.map((section, index) => {
+      const rows = section.items.filter((item) => !item.hidden);
+      if (!rows.length) return null;
+      return (
+        <div key={section.title || `section-${index}`} className={index > 0 || divided ? 'mt-1 border-t border-[#2B2C31] pt-1' : ''}>
+          {section.title && <p className="m-0 px-2.5 pb-1 pt-1.5 text-[11px] font-medium leading-4 text-white/40">{section.title}</p>}
+          {rows.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              disabled={item.disabled}
+              onClick={() => { item.onClick(); if (!item.keepOpen) setOpenToolbarMenu(null); }}
+              className={`flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] font-medium leading-4 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                item.danger ? 'text-[#FF8080] hover:bg-[#EF3B3B]/15' : 'text-white/85 hover:bg-white/[0.07] hover:text-white'
+              }`}
+            >
+              <span className="flex flex-shrink-0 items-center" style={{ color: item.danger ? undefined : DOCK_TONES[tone] }}>{item.icon}</span>
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              {item.hint && <span className="flex-shrink-0 text-[10.5px] font-normal text-white/35">{item.hint}</span>}
+              {item.toggle ? (
+                <span className={`relative inline-flex h-[16px] w-[28px] flex-shrink-0 items-center rounded-full transition-colors ${item.active ? 'bg-[#F58A1F]' : 'bg-[#3A3B42]'}`}>
+                  <span className={`absolute h-[12px] w-[12px] rounded-full bg-white transition-transform ${item.active ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+                </span>
+              ) : item.active && <Check size={14} className="flex-shrink-0 text-[#F58A1F]" />}
+            </button>
+          ))}
+        </div>
+      );
+    });
+
+  const sentFps = streamState?.fps || 0;
+  const frameRateBlock = (
+    <div className="mt-1 border-t border-[#2B2C31] px-2.5 pb-2 pt-2">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[11px] font-medium leading-4 text-white/40">Frame rate</span>
+        {streamState && <span className="text-[11px] leading-4 text-white/55 tabular-nums">Sending {sentFps} fps</span>}
+      </div>
+      <div className="mt-2 grid grid-cols-5 gap-1">
+        {(['auto', 10, 15, 24, 30, 45, 60, 75, 90, 120] as (number | 'auto')[]).map((rate) => {
+          const selected = rate === 'auto' ? !streamState?.fpsPinned : streamState?.fpsPinned === rate;
+          const tooFast = typeof rate === 'number' && Boolean(streamState) && rate > (streamState?.fpsMax || 0);
+          return (
+            <button
+              key={rate}
+              type="button"
+              disabled={!streamState || tooFast}
+              title={tooFast ? `The remote computer's video encoder tops out at ${streamState?.fpsMax} fps` : undefined}
+              onClick={() => pickFrameRate(rate)}
+              className={`h-7 rounded-md border text-[12px] font-medium tabular-nums transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
+                selected && streamState
+                  ? 'border-[#F58A1F] bg-[#2A1C0E] text-white'
+                  : 'border-[#33343A] text-white/75 hover:border-[#4A4B52] hover:bg-white/[0.06] hover:text-white'
+              }`}
+            >
+              {rate === 'auto' ? 'Auto' : rate}
+            </button>
+          );
+        })}
+      </div>
+      <p className="m-0 mt-2 text-[11px] leading-[15px] text-white/40">
+        {!streamState
+          ? 'Update Remote365 on the remote computer to choose a frame rate from here.'
+          : streamState.fpsPinned && streamState.fpsPinned > sentFps
+            ? `The link is thin right now, so the remote computer is sending ${sentFps} fps. It returns to ${streamState.fpsPinned} when the link recovers.`
+            : 'Auto follows the quality level. Higher rates feel smoother and use more bandwidth.'}
+      </p>
+    </div>
+  );
+  const monitorsBlock = !streamState ? (
+    <p className="m-0 px-2.5 py-2 text-[12px] leading-[17px] text-white/55">
+      Update Remote365 on the remote computer to switch between its screens from here.
+    </p>
+  ) : (
+    <>
+      <p className="m-0 px-2.5 pb-1 pt-1.5 text-[11px] font-medium leading-4 text-white/40">
+        {streamState.displays.length > 1 ? 'Show this screen' : 'This computer has one screen'}
+      </p>
+      {streamState.displays.map((display) => (
+        <button
+          key={String(display.id)}
+          type="button"
+          onClick={() => pickDisplay(display.id)}
+          className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] font-medium leading-4 text-white/85 transition-colors hover:bg-white/[0.07] hover:text-white"
+        >
+          <span className="flex flex-shrink-0 items-center" style={{ color: DOCK_TONES.view }}><Monitor size={15} /></span>
+          <span className="min-w-0 flex-1 truncate">{display.label}{display.primary ? ' (main)' : ''}</span>
+          <span className="flex-shrink-0 text-[10.5px] font-normal text-white/35 tabular-nums">{display.width} x {display.height}</span>
+          {String(display.id) === String(streamState.displayId) && <Check size={14} className="flex-shrink-0 text-[#F58A1F]" />}
+        </button>
+      ))}
+    </>
+  );
+
+  const dockButtons: { id: string; label: string; tone: DockTone; icon: React.ReactNode; width: string; body: React.ReactNode; hidden?: boolean; gap?: boolean }[] = [
+    { id: 'screen', label: 'Screen', tone: 'view', icon: <Monitor size={20} strokeWidth={1.8} />, width: 'w-[230px]', body: renderDockRows(screenSections, 'view') },
+    { id: 'monitors', label: 'Multi monitor', tone: 'view', icon: <Columns2 size={20} strokeWidth={1.8} />, width: 'w-[250px]', hidden: hostIsMobileDevice, body: monitorsBlock },
+    {
+      id: 'display', label: 'Display', tone: 'view', icon: <SlidersHorizontal size={20} strokeWidth={1.8} />, width: 'w-[250px]',
+      body: <>{renderDockRows([scalingSection], 'view')}{!hostIsMobileDevice && frameRateBlock}</>,
     },
     {
-      id: 'view',
-      label: 'View',
-      items: [
-        { label: 'Best fit', icon: <Monitor size={15} />, onClick: () => setZoomMode('fit'), active: zoomMode === 'fit' },
-        { label: 'Scaled (fill window)', icon: <Scaling size={15} />, onClick: () => setZoomMode('fill'), active: zoomMode === 'fill' },
-        { label: 'Actual size', icon: <Search size={15} />, onClick: () => setZoomMode('original'), active: zoomMode === 'original' },
-        { label: 'Quality: Auto select', icon: <Check size={15} />, onClick: pickQuality('auto'), active: qualityMode === 'auto' },
-        { label: 'Quality: Optimal speed', icon: <Zap size={15} />, onClick: pickQuality('speed'), active: qualityMode === 'speed' },
-        { label: 'Quality: Optimal quality', icon: <Monitor size={15} />, onClick: pickQuality('quality'), active: qualityMode === 'quality' },
-        { label: isFullscreen ? 'Exit fullscreen' : 'Fullscreen', icon: <Smartphone size={15} className="rotate-90" />, onClick: () => {
-          if (!document.fullscreenElement) requestLandscape();
-          else document.exitFullscreen();
-        } },
-      ],
+      id: 'quality', label: 'Quality', tone: 'view', icon: <Gauge size={20} strokeWidth={1.8} />, width: 'w-[240px]',
+      body: (
+        <>
+          {renderDockRows(qualitySections, 'view')}
+          <p className="m-0 mt-1 border-t border-[#2B2C31] px-2.5 pb-1 pt-2 text-[11px] leading-4 text-white/45 tabular-nums">
+            Link now: {activeSession?.latency || 0} ms
+          </p>
+        </>
+      ),
     },
+    { id: 'files', label: 'File transfer', tone: 'transfer', icon: <FolderUp size={20} strokeWidth={1.8} />, width: 'w-[240px]', gap: true, hidden: hostIsPhone, body: renderDockRows(fileSections, 'transfer') },
+    { id: 'audio', label: 'Audio', tone: 'talk', icon: remoteAudioEnabled ? <Headphones size={20} strokeWidth={1.8} /> : <VolumeX size={20} strokeWidth={1.8} />, width: 'w-[240px]', body: renderDockRows(audioSections, 'talk') },
+    { id: 'tools', label: 'Tools', tone: 'control', icon: <Wrench size={20} strokeWidth={1.8} />, width: 'w-[260px]', gap: true, body: <div className="max-h-[min(440px,60vh)] overflow-y-auto">{renderDockRows(toolsSections, 'control')}</div> },
+  ];
+  const dockButtonClass = (open: boolean) =>
+    `relative flex h-[38px] items-center gap-1.5 rounded-[10px] border px-[9px] text-[13px] font-medium leading-none transition-colors active:scale-[0.97] ${
+      open ? 'border-[#F58A1F] bg-[#2A1C0E] text-white' : 'border-transparent text-white/75 hover:bg-white/[0.08] hover:text-white'
+    }`;
+  const dockDivider = <span className="mx-1.5 h-6 w-px flex-none bg-[#2B2C31]" />;
+  const dockPanel = 'rounded-xl border border-[#33343A] bg-[#1B1C20] text-white shadow-[0_16px_40px_rgba(0,0,0,0.55)]';
+
+  // The phone bar's bottom sheets still list plain items.
+  const toolbarMenus: { id: string; label: string; items: DockItem[] }[] = [
+    { id: 'actions', label: 'Actions', items: [...audioSections[0].items, ...screenSections[0].items, ...toolsSections.flatMap((section) => section.items)].filter((item) => !item.hidden) },
+    { id: 'view', label: 'View', items: [...scalingSection.items, ...qualitySections[0].items.map((item) => ({ ...item, label: `Quality: ${item.label}` }))] },
   ];
 
   return (
@@ -2170,7 +2635,7 @@ const SessionViewer: React.FC = () => {
             exit — Esc must not be the only way back. Shifts down while the
             transfer toast occupies the corner. */}
         {(isFullscreen || remoteStream || hasReceivedKeyframeRef.current) && (
-          <div className={`absolute right-4 z-[100] flex items-center gap-2 top-4`}>
+          <div className={`absolute right-1.5 z-[100] flex items-center gap-2 top-1.5`}>
             {isFullscreen && (
               <button
                 type="button"
@@ -2183,17 +2648,17 @@ const SessionViewer: React.FC = () => {
             )}
             <button
               type="button"
-              title="End session"
+              title="Close session"
               onClick={() => {
                 // The confirm dialog renders outside the fullscreen element,
                 // so it would be invisible until fullscreen exits.
                 if (document.fullscreenElement) document.exitFullscreen?.().catch(() => undefined);
                 setShowDisconnectConfirm(true);
               }}
-              className="inline-flex h-10 items-center gap-2 rounded-full bg-[#FF383C] px-4 text-[13px] font-semibold text-white shadow-2xl transition-colors hover:bg-[#E62E32] active:scale-95"
+              aria-label="Close session"
+              className="flex h-[26px] w-[26px] items-center justify-center rounded-md bg-[#EF3B3B] text-white shadow-[0_2px_8px_rgba(0,0,0,0.45)] transition-colors hover:bg-[#D92F2F] active:scale-95"
             >
-              <MonitorOff size={16} strokeWidth={2} />
-              <span className="hidden sm:inline">Disconnect</span>
+              <X size={16} strokeWidth={2.6} />
             </button>
           </div>
         )}
@@ -2322,253 +2787,131 @@ const SessionViewer: React.FC = () => {
         </div>
       )}
 
+      {/* Session dock (desktop browsers). Phones keep the white icon bar above. */}
       <div
-        className={`session-bottom-bar hidden flex-wrap items-center justify-between gap-3 px-2 py-2 transition-transform duration-300 ease-out sm:px-6 sm:py-3 ${
-          // Desktop-browser bar only. Phones (coarse pointer) use the white
-          // icon bar in every orientation — sm:flex would resurface this one
-          // on landscape phones (≥640px wide) and stack two footers.
-          isMobileViewport ? '' : 'sm:flex'
-        } ${
-          toolbarCollapsed
-            ? 'pointer-events-none absolute inset-x-0 bottom-0 z-[80] translate-y-[calc(100%+18px)]'
-            : 'relative z-[80] translate-y-0'
-        }`}
-        // The mobile-landscape stylesheet makes this bar horizontally
-        // scrollable, which would clip the chat panel and keyboard popover —
-        // lift the clipping while one of them is open.
-        style={chatOpen || openToolbarMenu === 'keyboard' ? { overflow: 'visible' } : undefined}
+        data-session-ui
+        className={`relative z-[80] flex-none justify-center px-3 pb-3 pt-2 ${isMobileViewport || toolbarCollapsed ? 'hidden' : 'flex'}`}
       >
-        {/* Left: device label + action menus */}
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="mr-2 hidden items-center gap-2.5 sm:flex min-w-0">
-            <span className="h-2 w-2 flex-shrink-0 rounded-full bg-[#34C759]" />
-            <div className="min-w-0">
-              <p className="m-0 truncate text-[13px] font-medium leading-4 text-white">{deviceName}</p>
-              <p className="m-0 text-[11px] leading-4 text-white/45">{accessKey || deviceId} · {activeSession?.latency || 0}ms</p>
-            </div>
+        <div className="absolute left-6 top-1/2 hidden min-w-0 -translate-y-1/2 items-center gap-2.5 2xl:flex">
+          <span className="h-2 w-2 flex-shrink-0 rounded-full bg-[#34C759]" />
+          <div className="min-w-0">
+            <p className="m-0 max-w-[220px] truncate text-[13px] font-medium leading-4 text-white">{deviceName}</p>
+            <p className="m-0 text-[11px] leading-4 text-white/45">{accessKey || deviceId}, {activeSession?.latency || 0} ms</p>
           </div>
-          {toolbarMenus.map((menu) => (
-            <div key={menu.id} className="relative">
-              <button
-                type="button"
-                onClick={() => setOpenToolbarMenu((current) => (current === menu.id ? null : menu.id))}
-                className={`flex h-10 items-center gap-2 rounded px-4 text-[14px] font-medium leading-5 transition-colors ${
-                  openToolbarMenu === menu.id ? 'bg-white/10 text-white' : 'text-white/90 hover:bg-white/5 hover:text-white'
-                }`}
-              >
-                {menu.label}
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className={`transition-transform ${openToolbarMenu === menu.id ? 'rotate-180' : ''}`}>
-                  <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-              {openToolbarMenu === menu.id && (
-                <div className="absolute bottom-full left-0 z-[90] mb-2 flex w-[200px] flex-col items-stretch rounded bg-white py-1.5 shadow-2xl">
-                  {menu.items.map((item) => (
-                    <button
-                      key={item.label}
-                      type="button"
-                      onClick={() => { item.onClick(); setOpenToolbarMenu(null); }}
-                      className={`flex h-9 items-center gap-2.5 px-3.5 text-left text-[13px] font-medium transition-colors hover:bg-[#F3F4F6] ${
-                        item.danger ? 'text-[#FF383C]' : 'text-[#111315]'
-                      }`}
-                    >
-                      <span className={item.danger ? 'text-[#FF383C]' : 'text-[#111315]/60'}>{item.icon}</span>
-                      <span className="flex-1">{item.label}</span>
-                      {item.active && <span className="h-1.5 w-1.5 rounded-full bg-[#FF8A00]" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
         </div>
 
-        {/* Right: white quick-action pill (desktop RemoteSessionChrome parity) */}
-        <div ref={quickPillRef} className="relative flex h-14 flex-none items-center gap-2.5 rounded-[53px] bg-white px-4 py-2">
-          {quickHint && (
-            <div
-              className="pointer-events-none absolute bottom-[calc(100%+10px)] z-[160] -translate-x-1/2 whitespace-nowrap rounded-md bg-[#FFB347] px-4 py-2 text-[14px] font-medium leading-5 text-[#111315] shadow-xl"
-              style={{ left: quickHint.left }}
-            >
-              {quickHint.label}
-            </div>
-          )}
-          {!hostIsPhone && (
-            <>
-              <button
-                type="button"
-                aria-label="Send files"
-                onClick={sendFilesClick}
-                onMouseEnter={showQuickHint(sendFilesHint)}
-                onMouseLeave={hideQuickHint(sendFilesHint)}
-                className="flex h-10 w-10 items-center justify-center rounded-full text-[#FF8A00] transition-colors hover:bg-[#FFF1E0] active:scale-95"
-              >
-                <UploadCloud size={20} strokeWidth={1.75} />
-              </button>
-              <button
-                type="button"
-                aria-label="Get files"
-                onClick={getFilesClick}
-                onMouseEnter={showQuickHint(getFilesHint)}
-                onMouseLeave={hideQuickHint(getFilesHint)}
-                className="flex h-10 w-10 items-center justify-center rounded-full text-[#FF8A00] transition-colors hover:bg-[#FFF1E0] active:scale-95"
-              >
-                <DownloadCloud size={20} strokeWidth={1.75} />
-              </button>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={() => onControlEvent({ type: 'request-keyframe' })}
-            onMouseEnter={showQuickHint('Refresh stream')}
-            onMouseLeave={hideQuickHint('Refresh stream')}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-[#111315]/70 transition-colors hover:bg-[#F3F4F6] active:scale-95"
-          >
-            <RefreshCw size={18} strokeWidth={1.8} />
-          </button>
-
-          {/* Keyboard shortcuts popover. The wrapper is unpositioned on purpose:
-              the popover anchors to the pill's right edge so it stays on screen
-              on narrow viewports. Hidden on phones — the mobile row has its own
-              keyboard button for typing. */}
-          <div className="hidden sm:block">
-            <button
-              type="button"
-              onClick={() => setOpenToolbarMenu((current) => (current === 'keyboard' ? null : 'keyboard'))}
-              onMouseEnter={showQuickHint('Send keyboard shortcut')}
-              onMouseLeave={hideQuickHint('Send keyboard shortcut')}
-              className={`flex h-10 w-10 items-center justify-center rounded-full text-[#111315]/70 transition-colors hover:bg-[#F3F4F6] active:scale-95 ${
-                openToolbarMenu === 'keyboard' ? 'bg-[#FFE7E7]' : ''
-              }`}
-            >
-              <Keyboard size={19} strokeWidth={1.6} />
-            </button>
-            {openToolbarMenu === 'keyboard' && (
-              <div data-session-ui className="absolute bottom-[calc(100%+14px)] right-0 z-[90] w-[230px] overflow-hidden rounded-xl border border-black/5 bg-white py-1.5 shadow-2xl">
-                {keyboardItems.map((item) => (
+        <div ref={quickPillRef} className="relative flex h-[50px] items-center gap-0.5 rounded-2xl border border-[#2B2C31] bg-[#16171A] px-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.45)]">
+          {dockButtons.filter((button) => !button.hidden).map((button, index) => {
+            const menuId = `d-${button.id}`;
+            const open = openToolbarMenu === menuId;
+            return (
+              <React.Fragment key={button.id}>
+                {button.gap && index > 0 && dockDivider}
+                <div className="relative">
                   <button
-                    key={item.label}
                     type="button"
-                    onClick={() => { item.onClick(); setOpenToolbarMenu(null); }}
-                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[13px] font-medium text-[#111315] transition-colors hover:bg-[#F3F4F6]"
+                    aria-expanded={open}
+                    onClick={() => { setChatOpen(false); setOpenToolbarMenu((current) => (current === menuId ? null : menuId)); }}
+                    className={dockButtonClass(open)}
                   >
-                    <span className="flex-shrink-0 text-[#111315]/60">{item.icon}</span>
-                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                    {item.hint && <span className="flex-shrink-0 font-mono text-[10px] text-[#111315]/40">{item.hint}</span>}
+                    <span className="flex items-center" style={{ color: DOCK_TONES[button.tone] }}>{button.icon}</span>
+                    <span className="whitespace-nowrap pr-0.5">{button.label}</span>
                   </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Chat with the person at the host machine. Unpositioned wrapper —
-              the panel anchors to the pill's right edge (see keyboard note). */}
-          <div>
-            <button
-              type="button"
-              onClick={() => setChatOpen((open) => { const next = !open; if (next) setChatUnread(0); return next; })}
-              onMouseEnter={showQuickHint('Chat with remote user')}
-              onMouseLeave={hideQuickHint('Chat with remote user')}
-              className={`relative flex h-10 w-10 items-center justify-center rounded-full text-[#111315]/70 transition-colors hover:bg-[#F3F4F6] active:scale-95 ${
-                chatOpen ? 'bg-[#FFE7E7]' : ''
-              }`}
-            >
-              <MessageSquare size={19} strokeWidth={1.6} />
-              {chatUnread > 0 && (
-                <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#FF383C] px-1 text-[9px] font-bold leading-none text-white">
-                  {chatUnread > 9 ? '9+' : chatUnread}
-                </span>
-              )}
-            </button>
-            {chatOpen && (
-              <div data-session-ui className="absolute bottom-[calc(100%+14px)] right-0 z-[90] flex h-[460px] max-h-[65vh] w-[380px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-xl border border-black/10 bg-white shadow-2xl">
-                <div className="flex h-10 flex-none items-center justify-between border-b border-black/5 px-3">
-                  <span className="truncate text-[13px] font-semibold text-[#111315]">Chat — {deviceName}</span>
-                  <button type="button" onClick={() => setChatOpen(false)} className="flex h-6 w-6 flex-none items-center justify-center text-[#111315] transition hover:opacity-70">
-                    <X size={16} />
-                  </button>
-                </div>
-                <div ref={chatListRef} className="flex flex-1 flex-col gap-1.5 overflow-y-auto bg-[#F9FAFB] p-3">
-                  {chatMessages.length === 0 && (
-                    <p className="m-0 text-center text-[11px] leading-4 text-[#111315]/40">
-                      Messages appear on {deviceName} next to the Remote365 dock.
-                    </p>
-                  )}
-                  {chatMessages.map((message, index) => (
-                    <div
-                      key={`${message.at}-${index}`}
-                      className={`max-w-[82%] rounded-lg px-3 py-2 text-[13px] leading-[18px] text-[#111315] ${
-                        message.mine ? 'self-end bg-[#FFE9D2]' : 'self-start border border-black/5 bg-white'
-                      }`}
-                    >
-                      {!message.mine && <span className="block text-[10px] font-medium text-[#111315]/50">{message.from}</span>}
-                      <span className="whitespace-pre-wrap break-words">{message.text}</span>
+                  {open && (
+                    <div className="absolute bottom-[calc(100%+10px)] left-1/2 z-[90] -translate-x-1/2">
+                      <div className={`${dockPanel} ${button.width} p-1.5`}>{button.body}</div>
                     </div>
-                  ))}
+                  )}
                 </div>
-                <div className="flex h-14 flex-none items-center gap-2 border-t border-black/5 bg-white px-2">
-                  <input
-                    value={chatDraft}
-                    onChange={(event) => setChatDraft(event.target.value)}
-                    onKeyDown={(event) => { if (event.key === 'Enter') sendChat(); }}
-                    placeholder="Type a message…"
-                    maxLength={500}
-                    className="h-9 min-w-0 flex-1 rounded-lg border border-[rgba(26,29,33,0.25)] bg-white px-3 text-[13px] text-[#111315] outline-none placeholder:text-[rgba(17,19,21,0.35)] focus:border-[#FF8A00]"
-                  />
-                  <button
-                    type="button"
-                    onClick={sendChat}
-                    className="flex h-9 flex-none items-center justify-center rounded-lg bg-[#FF8A00] px-4 text-[13px] font-semibold text-white transition hover:brightness-105"
-                  >
-                    Send
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+                {/* Chat sits before Audio: it is its own panel, not a menu. */}
+                {(button.id === 'files' || (hostIsPhone && button.id === 'quality')) && (
+                  <>
+                    {dockDivider}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        aria-expanded={chatOpen}
+                        onClick={() => { setOpenToolbarMenu(null); setChatOpen((value) => { const next = !value; if (next) setChatUnread(0); return next; }); }}
+                        className={dockButtonClass(chatOpen)}
+                      >
+                        <span className="flex items-center" style={{ color: DOCK_TONES.talk }}><MessageSquare size={20} strokeWidth={1.8} /></span>
+                        <span className="whitespace-nowrap pr-0.5">Chat</span>
+                        {chatUnread > 0 && (
+                          <span className="absolute -right-1 -top-1 flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-[#EF3B3B] px-[3px] text-[9px] font-bold leading-none text-white">
+                            {chatUnread > 9 ? '9+' : chatUnread}
+                          </span>
+                        )}
+                      </button>
+                      {chatOpen && (
+                        <div className="absolute bottom-[calc(100%+10px)] left-1/2 z-[90] -translate-x-1/2">
+                          <div className={`${dockPanel} flex h-[420px] max-h-[65vh] w-[340px] max-w-[calc(100vw-24px)] flex-col overflow-hidden`}>
+                            <div className="flex h-10 flex-none items-center justify-between border-b border-[#2B2C31] px-3">
+                              <span className="truncate text-[12.5px] font-semibold text-white">Chat with {deviceName}</span>
+                              <button type="button" aria-label="Close chat" onClick={() => setChatOpen(false)} className="flex h-6 w-6 flex-none items-center justify-center rounded text-white/60 transition hover:bg-white/10 hover:text-white">
+                                <X size={15} />
+                              </button>
+                            </div>
+                            <div ref={chatListRef} className="flex flex-1 select-text flex-col gap-1.5 overflow-y-auto p-3">
+                              {chatMessages.length === 0 && (
+                                <p className="m-0 text-center text-[11px] leading-4 text-white/40">
+                                  Messages appear on {deviceName} next to the Remote365 dock.
+                                </p>
+                              )}
+                              {chatMessages.map((message, messageIndex) => (
+                                <div
+                                  key={`${message.at}-${messageIndex}`}
+                                  className={`max-w-[82%] rounded-lg px-3 py-2 text-[12.5px] leading-[18px] ${message.mine ? 'self-end bg-[#4A2E0F] text-white' : 'self-start bg-[#26272C] text-white/90'}`}
+                                >
+                                  {!message.mine && <span className="block text-[10px] font-medium" style={{ color: DOCK_TONES.talk }}>{message.from}</span>}
+                                  <span className="whitespace-pre-wrap break-words">{message.text}</span>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="flex h-[52px] flex-none items-center gap-2 border-t border-[#2B2C31] px-2">
+                              <input
+                                value={chatDraft}
+                                onChange={(event) => setChatDraft(event.target.value)}
+                                onKeyDown={(event) => { if (event.key === 'Enter') sendChat(); }}
+                                placeholder="Type a message"
+                                maxLength={500}
+                                className="h-9 min-w-0 flex-1 rounded-lg border border-[#33343A] bg-[#131417] px-3 text-[12.5px] text-white outline-none placeholder:text-white/30 focus:border-[#F58A1F]"
+                              />
+                              <button
+                                type="button"
+                                onClick={sendChat}
+                                className="flex h-9 flex-none items-center justify-center rounded-lg bg-[#F58A1F] px-4 text-[12.5px] font-semibold text-[#16171A] transition hover:brightness-110"
+                              >
+                                Send
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </React.Fragment>
+            );
+          })}
 
-          <button
-            type="button"
-            onClick={toggleRemoteAudio}
-            disabled={!remoteAudioTrackCount && !remoteAudioEnabled}
-            title={remoteAudioEnabled
-              ? 'Mute audio from the host machine (only for you)'
-              : remoteAudioTrackCount
-                ? 'Play audio from the host machine'
-                : 'The host stream has no audio track'}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-[#111315]/70 transition-colors hover:bg-[#F3F4F6] active:scale-95 disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent"
-          >
-            {remoteAudioEnabled ? <Volume2 size={18} strokeWidth={2} /> : <VolumeX size={18} strokeWidth={2} />}
-          </button>
-          <div className="mx-1 h-6 w-px bg-[rgba(26,29,33,0.1)]" />
-          <button
-            type="button"
-            onClick={() => {
-              if (!document.fullscreenElement) requestLandscape();
-              else document.exitFullscreen();
-            }}
-            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-[#111315]/70 transition-colors hover:bg-[#F3F4F6] active:scale-95"
-          >
-            {isFullscreen ? <Minimize2 size={18} strokeWidth={2} /> : <Maximize2 size={18} strokeWidth={2} />}
-          </button>
+          {dockDivider}
           <button
             type="button"
             onClick={() => setShowDisconnectConfirm(true)}
             title="End session"
-            className="flex h-10 flex-none items-center justify-center whitespace-nowrap rounded-[34px] bg-[#FF383C] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#E62E32] active:scale-95"
+            className="ml-0.5 flex h-[29px] flex-none items-center gap-1.5 whitespace-nowrap rounded-lg bg-[#EF3B3B] px-3 text-[12px] font-semibold leading-none text-white transition-colors hover:bg-[#D92F2F] active:scale-[0.97]"
           >
-            {/* Icon-only below sm — the labeled pill would overflow a phone-width bar. */}
-            <MonitorOff size={19} strokeWidth={2} className="sm:hidden" />
-            <span className="hidden sm:inline">Disconnect</span>
+            <Power size={13} strokeWidth={2.4} />
+            Disconnect
           </button>
           <button
             type="button"
             onClick={() => { setOpenToolbarMenu(null); setChatOpen(false); setQuickHint(null); setToolbarCollapsed(true); }}
-            title="Hide toolbar"
-            className="flex h-[22px] w-[22px] flex-none items-center justify-center text-[#111315] transition-transform hover:scale-105 active:scale-95"
+            title="Hide the control bar"
+            aria-label="Hide the control bar"
+            className="ml-1.5 flex h-[30px] w-[26px] flex-none items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08] hover:text-white"
           >
-            <ChevronDown size={22} />
+            <ChevronDown size={18} />
           </button>
         </div>
       </div>
@@ -2585,10 +2928,13 @@ const SessionViewer: React.FC = () => {
         <button
           type="button"
           onClick={() => setToolbarCollapsed(false)}
-          title="Show toolbar"
-          className="absolute bottom-3 right-0 z-[120] flex h-11 w-12 items-center justify-center rounded-l-2xl rounded-r-none bg-white pr-1 text-[#111315] shadow-2xl transition hover:bg-[#F6F7F8] active:scale-95"
+          title="Show the control bar"
+          aria-label="Show the control bar"
+          className={isMobileViewport
+            ? 'absolute bottom-3 right-0 z-[120] flex h-11 w-12 items-center justify-center rounded-l-2xl rounded-r-none bg-white pr-1 text-[#111315] shadow-2xl transition hover:bg-[#F6F7F8] active:scale-95'
+            : 'absolute bottom-2 right-0 z-[120] flex h-9 w-9 items-center justify-center rounded-l-xl border border-r-0 border-[#2B2C31] bg-[#16171A] text-white/75 shadow-2xl transition hover:w-10 hover:text-white'}
         >
-          <ChevronDown size={22} className="rotate-180" />
+          <ChevronUp size={isMobileViewport ? 22 : 18} />
           {chatUnread > 0 && (
             <span className="absolute left-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#FF383C] px-1 text-[9px] font-bold leading-none text-white">
               {chatUnread > 9 ? '9+' : chatUnread}
