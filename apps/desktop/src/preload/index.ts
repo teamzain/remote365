@@ -77,7 +77,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   clipboard: {
     writeText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
-    readText: () => ipcRenderer.invoke('clipboard:readText')
+    readText: () => ipcRenderer.invoke('clipboard:readText'),
+    // Clipboard images (snips). readImage returns { sig } when the image is the
+    // one already known, { sig, pngBase64 } when it changed, null when there is none.
+    readImage: (knownSig: string) => ipcRenderer.invoke('clipboard:readImage', knownSig),
+    writeImage: (pngBase64: string) => ipcRenderer.invoke('clipboard:writeImage', pngBase64)
   },
   // Viewer: system keys (Win, Alt+Tab, Alt+F4, Ctrl+Esc, PrintScreen...) that
   // the native low-level hook swallowed locally, handed to the active session

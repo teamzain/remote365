@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { encodeCompactInput } from '../shared/inputProtocol';
+import { createClipboardImageAssembler, splitClipboardImage } from '../shared/clipboardImage';
+import { createLossyLinkGuard, createQualityMemory, createQualityTuner, hostSupportsLowTiers, initialTier, QUALITY_RANK, type QualityMemory, type QualityTier, type QualityTuner } from '../shared/streamQualityTuner';
 import logo from '../logo.png';
 import { StatusFooter } from './components/shell/StatusFooter';
 import VideoPlayer from './components/VideoPlayer';
@@ -902,7 +904,12 @@ export default function App() {
         let receivedEvent = false;
         const apply = (active: boolean) => {
             if (disposed) return;
-            if (viewerMediaActiveRef.current !== active) viewerMediaEpochRef.current++;
+            if (viewerMediaActiveRef.current !== active) {
+                viewerMediaEpochRef.current++;
+                api.log?.(active
+                    ? '[Viewer] Stream resumed: viewer window is visible again; asking the host for a fresh picture.'
+                    : '[Viewer] Stream paused: viewer window minimised or hidden; the host stops sending video until it is shown again.');
+            }
             viewerMediaActiveRef.current = active;
             setViewerMediaActive(active);
             syncViewerMedia();
@@ -924,6 +931,12 @@ export default function App() {
     const reconnectingViewerRef = useRef(false);
     const adaptiveStatsIntervalRef = useRef<number | null>(null);
     const lastAdaptiveModeRef = useRef<string>('balanced');
+    // Congestion memory outlives a reconnect of the SAME session (the reconnect
+    // is usually caused by the congestion it remembers); a new session starts clean.
+    const qualityMemoryRef = useRef<{ sessionId: string; memory: QualityMemory }>({ sessionId: '', memory: createQualityMemory() });
+    const qualityTunerRef = useRef<QualityTuner | null>(null);
+    // Set once the host lists the tiers below 'smooth' (stream-capabilities).
+    const hostLowTiersRef = useRef(false);
     const lastAdaptiveStatsLogRef = useRef<number>(0);
     const lastIceRouteRef = useRef<string>('');
     const lastIceRouteTopologyRef = useRef<string>('');
@@ -1164,8 +1177,10 @@ export default function App() {
         // for the rest of the call. We diff against the previous sample instead.
         let prevReceived = 0;
         let prevLost = 0;
-        let upshiftStreak = 0; // consecutive healthy samples required before raising quality
-        let downshiftStreak = 0; // consecutive lossy samples required before dropping quality
+        let prevNack = 0;
+        let prevPli = 0;
+        // See "Lossy links" in shared/streamQualityTuner.ts.
+        const lossyGuard = createLossyLinkGuard('sharp');
         let warmedUp = false; // first sample uses cumulative totals — never act on it
         // Chromium does not populate inbound-rtp.framesPerSecond in this Electron build, so
         // every log line read "fps=0" even while video was clearly playing — which made the
@@ -1176,21 +1191,46 @@ export default function App() {
         let prevFramesDropped = 0;
         let prevJbDelay = 0;
         let prevJbEmitted = 0;
+        // For the 5 s stats line: what the session actually cost and felt like.
+        // All of these are differences between two log lines, not lifetime totals.
+        let logBytes = 0;
+        let logBytesAt = 0;
+        let logDecodeTime = 0;
+        let logFramesDecoded = 0;
+        let logFreezeCount = 0;
+        let logFreezeSeconds = 0;
+        let logLost = 0;
+        let logReceived = 0;
+        // Everything on the wire for this session, both directions (video,
+        // audio, input, clipboard, file transfer), from the transport itself.
+        let logWireSent = 0;
+        let logWireReceived = 0;
         const statsStartedAt = Date.now();
         let lastLossRecoveryAt = 0;
         let lastLossObservedAt = 0;
-        // Separate clock for the upshift gate. lastLossObservedAt moves on ANY
-        // lost packet (decoder recovery needs that sensitivity), but gating the
-        // quality climb on it meant one stray packet per 20s — ~0.005% loss on a
-        // relayed path — kept sessions pinned at 'balanced' (a downscale on any
-        // >1920-wide display) for the whole call. Only meaningful loss samples
-        // (>=0.5% in a 500ms window) should block the climb.
-        let lastMeaningfulLossAt = 0;
         let decoderRecoveryPending = false;
         let rerouteAttempted = false; // auto route repair fires at most once per session
         let relayAdvantageStreak = 0;
-        const rank: Record<string, number> = { smooth: 0, balanced: 1, sharp: 2, ultra: 3 };
-        const order = ['smooth', 'balanced', 'sharp', 'ultra'];
+        const memoryKey = sessionIdForSignal || '';
+        if (qualityMemoryRef.current.sessionId !== memoryKey) {
+            qualityMemoryRef.current = { sessionId: memoryKey, memory: createQualityMemory() };
+        }
+        const qualityMemory = qualityMemoryRef.current.memory;
+        // A new peer connection may be to a different build of the host: wait
+        // for it to announce its tiers again before using the low ones.
+        hostLowTiersRef.current = false;
+        const tuner = createQualityTuner({
+            sampleMs: 500,
+            memory: qualityMemory,
+            start: initialTier(qualityMemory, Date.now(), false),
+            lowTiers: () => hostLowTiersRef.current,
+        });
+        qualityTunerRef.current = tuner;
+        lastAdaptiveModeRef.current = tuner.current;
+        // The host opens every session at 'balanced'. Reconnecting after
+        // congestion we want less than that from the first frame, so say so
+        // as soon as the control channel is up.
+        let startAnnounced = tuner.current === 'balanced';
         let mediaEpoch = viewerMediaEpochRef.current;
         adaptiveStatsIntervalRef.current = window.setInterval(async () => {
             if (!viewerMediaActiveRef.current || mediaEpoch !== viewerMediaEpochRef.current) {
@@ -1202,8 +1242,6 @@ export default function App() {
                 noFrameEscalationRef.current = 0;
                 decoderRecoveryPending = false;
                 relayAdvantageStreak = 0;
-                upshiftStreak = 0;
-                downshiftStreak = 0;
                 return;
             }
             const channel = controlChannelRef.current;
@@ -1220,14 +1258,36 @@ export default function App() {
                 let frameHeight = 0;
                 let jbDelay = 0;        // cumulative seconds frames waited in the jitter buffer
                 let jbEmitted = 0;      // count of frames emitted from the jitter buffer
+                let bytesReceived = 0;  // video + audio payload, cumulative
+                let jitterMs = 0;
+                let decodeTime = 0;     // cumulative seconds spent decoding
+                let decodedTotal = 0;
+                let freezeCount = 0;
+                let freezeSeconds = 0;
+                let wireSent = 0;
+                let wireReceived = 0;
+                let nack = prevNack;
+                let pli = prevPli;
 
                 stats.forEach((report: any) => {
                     if (report.type === 'candidate-pair' && (report.nominated || report.selected) && typeof report.currentRoundTripTime === 'number') {
                         rttMs = Math.max(rttMs, Math.round(report.currentRoundTripTime * 1000));
                     }
+                    if (report.type === 'inbound-rtp') bytesReceived += Number(report.bytesReceived || 0);
+                    if (report.type === 'transport') {
+                        wireSent += Number(report.bytesSent || 0);
+                        wireReceived += Number(report.bytesReceived || 0);
+                    }
                     if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                        jitterMs = Math.round(Number(report.jitter || 0) * 1000);
+                        decodeTime = Number(report.totalDecodeTime || 0);
+                        decodedTotal = Number(report.framesDecoded || 0);
+                        freezeCount = Number(report.freezeCount || 0);
+                        freezeSeconds = Number(report.totalFreezesDuration || 0);
                         received = Number(report.packetsReceived || 0);
                         lost = Math.max(0, Number(report.packetsLost || 0));
+                        nack = Math.max(0, Number(report.nackCount || 0));
+                        pli = Math.max(0, Number(report.pliCount || 0));
                         fps = Number(report.framesPerSecond || report.framesDecodedPerSecond || 0);
                         // Fall back to differentiating framesDecoded when the browser omits
                         // framesPerSecond (it does here), so the number is real either way.
@@ -1296,7 +1356,16 @@ export default function App() {
                 prevReceived = received;
                 prevLost = lost;
                 prevFramesDropped = framesDropped;
-                const lossPct = (dReceived + dLost) > 0 ? Math.round((dLost / (dReceived + dLost)) * 1000) / 10 : 0;
+                // packetsLost is net of resends, so a link that drops one packet in
+                // ten can read as 0% here; the guard works from the resend requests.
+                const dNack = Math.max(0, nack - prevNack);
+                const dPli = Math.max(0, pli - prevPli);
+                prevNack = nack;
+                prevPli = pli;
+                const netLossPct = (dReceived + dLost) > 0 ? (dLost / (dReceived + dLost)) * 100 : 0;
+                const rawLossPct = (dReceived + dNack) > 0 ? (dNack / (dReceived + dNack)) * 100 : 0;
+                const link = lossyGuard.sample({ now: Date.now(), rttMs, netLossPct, rawLossPct, pliDelta: dPli, current: tuner.current });
+                const lossPct = link.lossPct;
 
                 // A decoder can keep reporting frames/FPS after a fragmented
                 // H.264 reference frame is lost while the picture itself becomes
@@ -1310,7 +1379,6 @@ export default function App() {
                     dLost > 0 &&
                     (inStartupWindow || lossPct >= 2 || dFramesDropped > 0);
                 if (dLost > 0) lastLossObservedAt = Date.now();
-                if (lossPct >= 0.5) lastMeaningfulLossAt = Date.now();
                 if (referenceMayBeCorrupt) decoderRecoveryPending = true;
                 const pathStableForRecovery =
                     decoderRecoveryPending &&
@@ -1354,7 +1422,10 @@ export default function App() {
                 const inputActive = Date.now() - lastRealtimeInputAtRef.current < 1_250;
                 const jitterFloorMs = inputActive ? (rttMs > 0 && rttMs < 80 ? 18 : 25) : (rttMs > 0 && rttMs < 80 ? 30 : 45);
                 const latencyBaseMs = inputActive ? 6 + rttMs * 0.04 : 18 + rttMs * 0.08;
-                const jitterTargetMs = Math.round(Math.min(95, Math.max(jitterFloorMs, latencyBaseMs + lossPct * 12)));
+                // A lossy link gets a buffer long enough for a resend to arrive,
+                // whatever the input activity: a frame shown late is worse.
+                const jitterTargetMs = link.jitterTargetMs
+                    ?? Math.round(Math.min(95, Math.max(jitterFloorMs, latencyBaseMs + lossPct * 12)));
                 if (videoReceiverRef.current) {
                     try {
                         if ('jitterBufferTarget' in videoReceiverRef.current) videoReceiverRef.current.jitterBufferTarget = jitterTargetMs;
@@ -1375,91 +1446,46 @@ export default function App() {
                 const intervalJbMs = dJbEmitted > 0 ? Math.round((dJbDelay / dJbEmitted) * 1000) : 0;
                 const e2eEstMs = Math.round(rttMs / 2 + intervalJbMs);
 
-                // High RTT and low decoded FPS are common on static mobile screens:
-                // WebRTC may simply have no changed frames to decode. Only reduce
-                // capture quality for packet loss, otherwise the phone looks blurry
-                // even when the connection is healthy.
-                const reason = lossPct >= 5
-                    ? 'loss-high'
-                    : lossPct >= 1.5
-                        ? 'loss-moderate'
-                        : 'healthy';
-                // Long-haul ceiling. 'ultra' asks the host for 12Mbps — and 16Mbps once the
-                // capture is wider than 2200px. Over a ~450ms path that is simply more than
-                // the link carries: measured sessions sat at 0% loss and then spiked to 8.9%,
-                // which is the signature of oversending, and every one of those spikes forced
-                // a quality downshift. A steady 9Mbps ('sharp') looks BETTER than 16Mbps that
-                // is losing 9% of its packets, because loss corrupts far more than a modestly
-                // lower bitrate does. RTT alone never lowers quality below this ceiling — it
-                // only stops us reaching for the top tier on a link that cannot hold it.
-                const longHaul = rttMs >= 180;
-                const healthyCeiling = longHaul ? 'sharp' : 'ultra';
-                const target = lossPct >= 5
-                    ? 'smooth'
-                    : lossPct >= 1.5
-                        ? 'balanced'
-                        : healthyCeiling;
+                if (!startAnnounced) {
+                    startAnnounced = true;
+                    channel.send(JSON.stringify({ type: 'stream-quality', mode: tuner.current, rttMs, lossPct, fps: Math.round(fps), reason: 'resume-after-congestion' }));
+                    if (isElectron) (window as any).electronAPI?.log?.(`[Viewer] Adaptive quality request mode=${tuner.current} reason=resume-after-congestion`);
+                }
 
-                const current = lastAdaptiveModeRef.current || 'balanced';
-                let next = current;
+                // Loss AND delay drive the tier (see shared/streamQualityTuner.ts).
+                // Delay is the round trip over this session's own baseline, so a
+                // steady long-haul path is still "healthy"; a round trip that has
+                // climbed by seconds is a queue filling up, whatever the loss says.
+                const current = tuner.current;
+                let reason: string = 'healthy';
+                let target: string = current;
+                let delayExcessMs = 0;
+                let baselineRttMs = 0;
                 if (!firstFramePresentedRef.current) {
                     // Never restart the encoder while Chromium is still waiting
-                    // for the startup keyframe. An early RTT-based downshift used
-                    // to discard SPS/PPS/IDR and extend first presentation by
+                    // for the startup keyframe. An early downshift used to
+                    // discard SPS/PPS/IDR and extend first presentation by
                     // several seconds on long-haul sessions.
-                    upshiftStreak = 0;
-                    downshiftStreak = 0;
                 } else if (!warmedUp) {
                     // First sample's counters are cumulative since connect (handshake
                     // losses included) — acting on it caused a spurious quality drop
                     // right at session start. Just record the baseline.
                     warmedUp = true;
-                } else if (rank[target] < rank[current]) {
-                    // A single 500ms loss sample is commonly an IDR microburst,
-                    // not sustained congestion. Confirm loss on the next sample
-                    // before restarting the host encoder; only catastrophic loss
-                    // should react immediately.
-                    downshiftStreak++;
-                    upshiftStreak = 0;
-                    const catastrophicLoss = lossPct >= 30;
-                    if (catastrophicLoss || downshiftStreak >= 2) {
-                        // Step down one tier at a time, mirroring the upshift below.
-                        // Persistent congestion degrades motion before resolution.
-                        // Catastrophic loss still drops directly to the safe tier.
-                        next = catastrophicLoss
-                            ? target
-                            : order[Math.max(rank[current] - 1, rank[target])];
-                        downshiftStreak = 0;
-                    }
-                } else if (rank[target] > rank[current]) {
-                    // Spare headroom — raise quality only after a sustained clean
-                    // window, and step up one tier at a time.
-                    downshiftStreak = 0;
-                    // Gate on MEANINGFUL loss only (see lastMeaningfulLossAt
-                    // above) — trace single-packet loss must not freeze the
-                    // ladder at a blurry tier forever.
-                    const cleanLongEnough =
-                        lastMeaningfulLossAt === 0 ||
-                        Date.now() - lastMeaningfulLossAt >= 20_000;
-                    if (!cleanLongEnough) {
-                        upshiftStreak = 0;
-                    } else {
-                        upshiftStreak++;
-                    }
-                    // Stats run at 500ms: require ten clean seconds per tier.
-                    if (upshiftStreak >= 20) {
-                        next = order[Math.min(rank[current] + 1, order.length - 1)];
-                        upshiftStreak = 0;
-                    }
                 } else {
-                    upshiftStreak = 0;
-                    downshiftStreak = 0;
-                }
-
-                if (next !== lastAdaptiveModeRef.current) {
-                    lastAdaptiveModeRef.current = next;
-                    channel.send(JSON.stringify({ type: 'stream-quality', mode: next, rttMs, lossPct, fps: Math.round(fps), reason }));
-                    if (isElectron) (window as any).electronAPI?.log?.(`[Viewer] Adaptive quality request mode=${next} reason=${reason} rtt=${rttMs}ms loss=${lossPct}% fps=${Math.round(fps)}`);
+                    const decision = tuner.sample({ now: Date.now(), rttMs, lossPct: link.tunerLossPct, stalled: dReceived === 0 });
+                    reason = link.forceTier ? 'lossy-link-struggling' : decision.reason;
+                    target = decision.target;
+                    delayExcessMs = decision.delayExcessMs;
+                    baselineRttMs = decision.baselineRttMs;
+                    let nextTier: QualityTier = decision.changed ? decision.next : tuner.current;
+                    if (link.floor && QUALITY_RANK[nextTier] < QUALITY_RANK[link.floor]) nextTier = link.floor;
+                    if (link.forceTier) nextTier = link.forceTier;
+                    if (nextTier !== tuner.current) tuner.force(nextTier, Date.now());
+                    if (nextTier !== lastAdaptiveModeRef.current && (decision.changed || link.forceTier)) {
+                        lastAdaptiveModeRef.current = nextTier;
+                        channel.send(JSON.stringify({ type: 'stream-quality', mode: nextTier, rttMs, lossPct, fps: Math.round(fps), reason, exact: link.lossy }));
+                        if (isElectron) (window as any).electronAPI?.log?.(`[Viewer] Adaptive quality request mode=${nextTier} reason=${reason} rtt=${rttMs}ms (+${delayExcessMs}ms over ${baselineRttMs}ms) loss=${lossPct}% fps=${Math.round(fps)}`);
+                    }
                 }
 
                 // --- Automatic route repair -------------------------------------------
@@ -1536,8 +1562,25 @@ export default function App() {
 
                 const logNow = Date.now();
                 if (logNow - lastAdaptiveStatsLogRef.current > 5000) {
+                    // Bandwidth actually received, decode cost per frame, and picture
+                    // freezes since the previous stats line.
+                    const elapsedSec = logBytesAt ? Math.max(0.001, (logNow - logBytesAt) / 1000) : 0;
+                    const rxKbps = elapsedSec ? Math.max(0, Math.round(((bytesReceived - logBytes) * 8) / 1000 / elapsedSec)) : 0;
+                    const dDecoded = Math.max(0, decodedTotal - logFramesDecoded);
+                    const decodeMs = dDecoded > 0 ? Math.round(((decodeTime - logDecodeTime) / dDecoded) * 1000 * 10) / 10 : 0;
+                    const freezes = Math.max(0, freezeCount - logFreezeCount);
+                    const frozenMs = Math.max(0, Math.round((freezeSeconds - logFreezeSeconds) * 1000));
+                    const upKbps = elapsedSec ? Math.max(0, Math.round(((wireSent - logWireSent) * 8) / 1000 / elapsedSec)) : 0;
+                    const downKbps = elapsedSec ? Math.max(0, Math.round(((wireReceived - logWireReceived) * 8) / 1000 / elapsedSec)) : 0;
+                    logWireSent = wireSent; logWireReceived = wireReceived;
+                    const lostPackets = Math.max(0, lost - logLost);
+                    const packets = Math.max(0, received - logReceived);
+                    logBytes = bytesReceived; logBytesAt = logNow;
+                    logDecodeTime = decodeTime; logFramesDecoded = decodedTotal;
+                    logFreezeCount = freezeCount; logFreezeSeconds = freezeSeconds;
+                    logLost = lost; logReceived = received;
                     lastAdaptiveStatsLogRef.current = logNow;
-                    if (isElectron) (window as any).electronAPI?.log?.(`[Viewer] Stream stats rtt=${rttMs}ms loss=${lossPct}% fps=${Math.round(fps)} resolution=${frameWidth || '?'}x${frameHeight || '?'} interactive=${inputActive ? 1 : 0} jitterTarget=${jitterTargetMs}ms playoutBuf=${intervalJbMs}ms e2e~${e2eEstMs}ms target=${target} current=${current} reason=${reason} ice="${iceRoute || lastIceRouteRef.current || 'unknown'}"`);
+                    if (isElectron) (window as any).electronAPI?.log?.(`[Viewer] Stream stats rtt=${rttMs}ms loss=${lossPct}% fps=${Math.round(fps)} rx=${rxKbps}kbps down=${downKbps}kbps up=${upKbps}kbps jitter=${jitterMs}ms decode=${decodeMs}ms freezes=${freezes} frozen=${frozenMs}ms packets=${packets} lost=${lostPackets} resolution=${frameWidth || '?'}x${frameHeight || '?'} interactive=${inputActive ? 1 : 0} jitterTarget=${jitterTargetMs}ms playoutBuf=${intervalJbMs}ms e2e~${e2eEstMs}ms delay=+${delayExcessMs}ms/base${baselineRttMs}ms target=${target} current=${tuner.current} reason=${reason} ice="${iceRoute || lastIceRouteRef.current || 'unknown'}"`);
                 }
 
                 // Network control samples at 500ms, but the toolbar does not
@@ -1565,9 +1608,12 @@ export default function App() {
     const boostConnection = () => {
         const channel = controlChannelRef.current;
         if (!channel || channel.readyState !== 'open') return;
-        lastAdaptiveModeRef.current = 'smooth';
-        channel.send(JSON.stringify({ type: 'stream-quality', mode: 'smooth', rttMs: connectionHealth.rttMs, lossPct: connectionHealth.lossPct, fps: connectionHealth.fps, reason: 'manual-boost' }));
-        if (isElectron) (window as any).electronAPI?.log?.('[Viewer] Manual connection boost requested — forcing smooth tier.');
+        // 'lite' (1.2 Mbps) when the host has it; 'smooth' is the lowest an older host knows.
+        const boostTier: QualityTier = hostLowTiersRef.current ? 'lite' : 'smooth';
+        qualityTunerRef.current?.force(boostTier, Date.now());
+        lastAdaptiveModeRef.current = boostTier;
+        channel.send(JSON.stringify({ type: 'stream-quality', mode: boostTier, rttMs: connectionHealth.rttMs, lossPct: connectionHealth.lossPct, fps: connectionHealth.fps, reason: 'manual-boost' }));
+        if (isElectron) (window as any).electronAPI?.log?.(`[Viewer] Manual connection boost requested — forcing ${boostTier} tier.`);
     };
 
     const handleLogout = async () => {
@@ -1612,6 +1658,11 @@ export default function App() {
         setPendingMeetingId(cleanMeetingId);
     };
     const lastClipboardRef = useRef<string>('');
+    // Clipboard images (snips): the signature of the image last seen or written
+    // here, so a picture is sent once and one we just received is not sent back.
+    const lastClipboardImageSigRef = useRef<string>('');
+    const hostClipboardImagesRef = useRef(false);
+    const clipboardImageAssemblerRef = useRef(createClipboardImageAssembler());
     const clipboardChunksRef = useRef<Map<string, { chunks: string[]; received: number; total: number; origin: string }>>(new Map());
     const CLIPBOARD_CHUNK_SIZE = 32 * 1024;
 
@@ -4240,11 +4291,40 @@ export default function App() {
                         // baseline, so whatever was already on the clipboard before the
                         // session — a password, say — is never pushed to the host.
                         let clipboardArmed = false;
+                        let clipboardImageArmed = false;
+                        let clipboardTick = 0;
+                        hostClipboardImagesRef.current = false;
                         const clipboardInterval = setInterval(async () => {
                             if (channel.readyState !== 'open' || !viewerMediaActiveRef.current) return;
                             if (!isClipboardSyncEnabled()) {
                                 clipboardArmed = false;
+                                clipboardImageArmed = false;
                                 return;
+                            }
+                            // Images every other tick (1.3 s): a snip taken here goes to
+                            // the host's clipboard. Same baseline rule as text, and only
+                            // once the host has said it understands images and has
+                            // granted control (it would refuse the chunks otherwise).
+                            clipboardTick++;
+                            const imageApi = (window as any).electronAPI?.clipboard;
+                            if (clipboardTick % 2 === 0 && hostClipboardImagesRef.current && imageApi?.readImage) {
+                                try {
+                                    const image = await imageApi.readImage(lastClipboardImageSigRef.current);
+                                    if (!clipboardImageArmed) {
+                                        lastClipboardImageSigRef.current = image?.sig || '';
+                                        clipboardImageArmed = true;
+                                    } else if (image && image.sig !== lastClipboardImageSigRef.current) {
+                                        lastClipboardImageSigRef.current = image.sig;
+                                        const mayControl = !hostAnnouncedControlRef.current || controlStatusRef.current === 'granted';
+                                        if (image.pngBase64 && mayControl && channel.readyState === 'open') {
+                                            const chunks = splitClipboardImage(image.pngBase64, `${Date.now()}-${Math.random().toString(36).slice(2)}`, 'desktop');
+                                            for (const chunk of chunks) channel.send(JSON.stringify(chunk));
+                                            if (chunks.length) (window as any).electronAPI?.log?.(`[Viewer] Clipboard image sent to the host (${Math.round(image.pngBase64.length * 3 / 4 / 1024)} KB).`);
+                                        }
+                                    }
+                                } catch {
+                                    // Clipboard can be temporarily locked by another app.
+                                }
                             }
                             try {
                                 const text = await readClipboardText();
@@ -4369,6 +4449,30 @@ export default function App() {
                                 const data = JSON.parse(e.data);
                                 // Feature modules claim their own message families first.
                                 if (dispatchControlJson(data)) return;
+                                if (data.type === 'stream-capabilities') {
+                                    hostLowTiersRef.current = hostSupportsLowTiers(data.tiers);
+                                    // The host can exchange clipboard images: tell it we can too,
+                                    // or it will not send its own.
+                                    hostClipboardImagesRef.current = data.clipboardImage === true;
+                                    if (hostClipboardImagesRef.current && isElectron && channel.readyState === 'open') {
+                                        channel.send(JSON.stringify({ type: 'clipboard-capabilities', image: true }));
+                                    }
+                                    // Reconnecting after congestion: now that the host has
+                                    // shown it has the low tiers, resume at the remembered one
+                                    // instead of the 'smooth' an older host would be limited to.
+                                    const tuner = qualityTunerRef.current;
+                                    const memory = qualityMemoryRef.current.memory;
+                                    if (tuner && hostLowTiersRef.current) {
+                                        const resume = initialTier(memory, Date.now(), true);
+                                        if (QUALITY_RANK[resume] < QUALITY_RANK[tuner.current]) {
+                                            tuner.force(resume, Date.now());
+                                            lastAdaptiveModeRef.current = resume;
+                                            onControlEvent({ type: 'stream-quality', mode: resume, reason: 'resume-after-congestion' });
+                                            if (isElectron) (window as any).electronAPI?.log?.(`[Viewer] Adaptive quality request mode=${resume} reason=resume-after-congestion`);
+                                        }
+                                    }
+                                    return;
+                                }
                                 if (data.type === 'input-capabilities') {
                                     compactInputSupportedRef.current = data.compactV1 === true;
                                     if (isElectron) {
@@ -4408,6 +4512,20 @@ export default function App() {
                                 } else if (data.type === 'clipboard-chunk') {
                                     // Long text from a desktop host arrives chunked (origin 'host').
                                     if (isClipboardSyncEnabled()) handleClipboardChunk(data).catch(() => {});
+                                } else if (data.type === 'clipboard-image-chunk') {
+                                    // A snip or picture copied on the host.
+                                    const imageApi = (window as any).electronAPI?.clipboard;
+                                    if (isClipboardSyncEnabled() && imageApi?.writeImage) {
+                                        const done = clipboardImageAssemblerRef.current.add(data, Date.now());
+                                        if (done && done.origin !== 'desktop') {
+                                            Promise.resolve(imageApi.writeImage(done.pngBase64)).then((sig: string) => {
+                                                if (!sig) return;
+                                                lastClipboardImageSigRef.current = sig;
+                                                lastClipboardRef.current = '';
+                                                (window as any).electronAPI?.log?.(`[Viewer] Clipboard image from the host placed on this computer's clipboard (${Math.round(done.pngBase64.length * 3 / 4 / 1024)} KB).`);
+                                            }).catch(() => {});
+                                        }
+                                    }
                                 } else if (data.type === 'file-sent') {
                                     // This is a confirmation of a file WE sent to the remote host
                                     setFileTransferStatus({ direction: 'send', name: data.name, progress: 100, state: 'complete', message: `${data.name} was saved on the remote computer.`, path: data.path });
