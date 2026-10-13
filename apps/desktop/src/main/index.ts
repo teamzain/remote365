@@ -2126,6 +2126,8 @@ let userQualityLock: string | null = null;
 // Frame rate picked by the viewer in its Display menu (null = Auto: the quality
 // tier decides). Lives for the session, like the quality pin above.
 let viewerFpsPin: number | null = null;
+// When startStreaming last ran (see the request-keyframe handler).
+let lastStreamStartAt = 0;
 // What the encoder in use can hold. The automatic ceilings (30 on CPU and Intel
 // Quick Sync, 60 on a discrete GPU) are the rates that stay steady; a viewer
 // that asks for more by name gets the higher ceiling and takes what the
@@ -5846,6 +5848,7 @@ function startStreaming() {
   const effectiveFps = String(targetFps);
   const frameInterval = 1000 / targetFps;
   activeStreamFps = targetFps;
+  lastStreamStartAt = Date.now();
   announceStreamState();
 
   const probeStartedAt = Date.now();
@@ -8083,6 +8086,12 @@ function handleControlMessage(msg: any, viewerId?: string) {
           // Startup probes are advisory. The 100ms static keepalive now reaches
           // the next natural GOP quickly, so these must not restart the encoder.
           log.info('[Host] Non-urgent keyframe request will use the next GOP.');
+          break;
+        }
+        if (Date.now() - lastStreamStartAt < 6_000) {
+          // The encoder was (re)started moments ago and its first keyframe is
+          // still on the way; restarting again only throws that keyframe away.
+          log.info('[Host] Urgent keyframe request ignored: the stream started less than 6 s ago.');
           break;
         }
         if (Date.now() - lastUrgentKeyframeRestartAt >= 15_000) {

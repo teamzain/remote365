@@ -1521,6 +1521,17 @@ const SessionViewer: React.FC = () => {
     // three agree that nobody is watching: the page says hidden, no frame has
     // reached the screen lately, and there has been no mouse or keyboard
     // activity on the page. Any of the three coming back resumes it at once.
+    //
+    // And the pause itself is expensive to undo. Coming back from a paused
+    // host means a fresh encoder start and a full keyframe; on a slow or lossy
+    // link that took 8 to 19 seconds on every return to the tab, 39 times in
+    // one morning (field log, Oct 13 2026). A browser tab in the background
+    // keeps decoding, so if the host keeps sending, the picture is there the
+    // instant the tab is shown again. So a hidden tab is left streaming for
+    // HIDDEN_GRACE_MS and the host is paused only for a tab that has really
+    // been left behind.
+    const HIDDEN_GRACE_MS = 10 * 60_000;
+    let hiddenSince = 0;
     let hostPaused = false;
     let hiddenTimer: number | null = null;
     let lastInteractionAt = performance.now();
@@ -1540,8 +1551,9 @@ const SessionViewer: React.FC = () => {
       const now = performance.now();
       const stillPainting = now - lastPresentedAt < 1500;
       const someoneThere = now - lastInteractionAt < 30_000;
-      if (stillPainting || someoneThere) {
-        hiddenTimer = window.setTimeout(considerPause, 2000);
+      const justLeft = now - hiddenSince < HIDDEN_GRACE_MS;
+      if (stillPainting || someoneThere || justLeft) {
+        hiddenTimer = window.setTimeout(considerPause, justLeft ? 15_000 : 2000);
         return;
       }
       setHostActive(false, 'tab-hidden');
@@ -1553,6 +1565,7 @@ const SessionViewer: React.FC = () => {
         else { lastPresentedAt = performance.now(); visibleSince = lastPresentedAt; quickRetries = 0; }
         return;
       }
+      hiddenSince = performance.now();
       hiddenTimer = window.setTimeout(considerPause, 3000);
     };
     const onInteraction = () => {
@@ -1573,12 +1586,17 @@ const SessionViewer: React.FC = () => {
       if (video.videoWidth === 0 || video.videoHeight === 0 || video.readyState < 2) return;
       const now = performance.now();
       const stalledMs = now - lastPresentedAt;
-      // Just back from hidden: do not sit on a black picture for the full
-      // stall timer. Ask again after 1.2 s without a frame, up to three times.
-      if (now - visibleSince < 12_000 && stalledMs >= 1200 && quickRetries < 3 && now - lastRecoveryAt >= 1200) {
+      // Just back from hidden: do not sit on a stale picture for the full
+      // stall timer, but do not trample the host either. After a real pause
+      // it has only just restarted its encoder; an urgent request 1.2 s in
+      // made it restart a second time and throw away the keyframe already on
+      // its way (seen on 32 of 39 returns, field log Oct 13 2026). So: wait
+      // 2.5 s, ask plainly for a keyframe, and leave restarts to the stall
+      // rule below.
+      if (now - visibleSince < 12_000 && stalledMs >= 2500 && quickRetries < 3 && now - lastRecoveryAt >= 2500) {
         quickRetries++;
         lastRecoveryAt = now;
-        onControlEventRef.current({ type: 'request-keyframe', urgent: true, reason: 'tab-visible-retry', stalledMs: Math.round(stalledMs) });
+        onControlEventRef.current({ type: 'request-keyframe', reason: 'tab-visible-retry', stalledMs: Math.round(stalledMs) });
         return;
       }
       if (stalledMs < 5000 || now - lastRecoveryAt < 2000) return;
