@@ -13,11 +13,18 @@ import GetStartedCta from '@/components/landing/GetStartedCta'
 import DeviceIdFlap from '@/components/landing/DeviceIdFlap'
 import RegionGlobe from '@/components/landing/RegionGlobe'
 import ConnectionDiagram from '@/components/landing/ConnectionDiagram'
+import HomePricing from '@/components/landing/HomePricing'
 import { ScrollReveal } from '@/components/landing/ScrollReveal'
 import JsonLd from '@/components/site/JsonLd'
 import { graph, organization, softwareApplication, website } from '@/lib/jsonld'
+import { getPublicPlans } from '@/lib/plans'
 import { DEFAULT_TITLE, pageMetadata } from '@/lib/seo'
 import { USE_CASES } from '@/content/useCases'
+
+// Static, regenerated at most every five minutes so the pricing cards follow
+// the live plan catalogue (a build has no billing API and shows the built-in
+// catalogue until the first regeneration).
+export const revalidate = 300
 
 export const metadata = pageMetadata({
   title: DEFAULT_TITLE,
@@ -27,10 +34,11 @@ export const metadata = pageMetadata({
   path: '/',
 })
 
-export default function HomePage() {
+export default async function HomePage() {
+  const plans = await getPublicPlans()
   return (
     <SiteContent heroUnderNav>
-      <JsonLd data={graph(organization(), website(), softwareApplication())} />
+      <JsonLd data={graph(organization(), website(), softwareApplication(plans))} />
       <main>
         <HeroVideo />
 
@@ -103,6 +111,10 @@ export default function HomePage() {
             linkTo="/product"
             visual={<ConnectionDiagram />}
           />
+        </ScrollReveal>
+
+        <ScrollReveal delay={0.15}>
+          <HomePricing plans={plans} />
         </ScrollReveal>
 
         <ScrollReveal delay={0.15}>

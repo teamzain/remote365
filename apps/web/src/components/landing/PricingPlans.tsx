@@ -1,6 +1,11 @@
 import React from 'react'
 import SiteLink from '@/components/site/SiteLink'
+import PixelCard from '@/components/landing/PixelCard'
 import type { ApiPlan } from '@/lib/plans'
+
+// Pixel colours: slate on every card, the brand orange on the popular one.
+const SLATE_PIXELS = ['#f8fafc', '#f1f5f9', '#cbd5e1']
+const ORANGE_PIXELS = ['#ffedd5', '#fdba74', '#ff8a00']
 
 // charm:tick — primary orange
 const TickIcon: React.FC = () => (
@@ -39,54 +44,82 @@ const TickList: React.FC<{ label: string; items: string[] }> = ({ label, items }
   </div>
 )
 
-const PlanCard: React.FC<{ plan: ApiPlan }> = ({ plan }) => {
+type NameTag = 'h2' | 'h3'
+
+// Each plan sits on a React Bits PixelCard: pixels sweep across it on hover
+// (and once as it scrolls into view, one card after another), faded toward
+// the middle and kept faint so the prices stay easy to read.
+const PlanCard: React.FC<{ plan: ApiPlan; index: number; nameTag: NameTag }> = ({ plan, index, nameTag: Name }) => {
   const isCustom = plan.price === 'Custom'
 
   return (
-    <article className={`pp-card${plan.popular ? ' pp-card-popular' : ''}`}>
-      <div className="pp-head">
-        <h2 className="pp-name">{plan.name}</h2>
-        <div>
-          <p className="pp-starts">Starts at</p>
-          <div className="pp-price-row">
-            {isCustom ? (
-              <span className="pp-price">Custom</span>
-            ) : (
-              <>
-                <span className="pp-price">${plan.price}</span>
-                <span className="pp-price-suffix">
-                  {plan.price === 0 ? plan.priceLabel : 'Per month'}
-                </span>
-              </>
-            )}
+    <PixelCard
+      className={`pp-pixel${plan.popular ? ' pp-pixel-popular' : ''}`}
+      colors={plan.popular ? ORANGE_PIXELS : SLATE_PIXELS}
+      glowColor={plan.popular ? '#ff8a00' : '#cbd5e1'}
+      shape="square"
+      origin="center"
+      gap={5}
+      pixelSize={2}
+      speed={35}
+      revealDuration={600}
+      spotlight={0.5}
+      glow={0.5}
+      opacity={0.35}
+      fade={0.7}
+      trigger="hover"
+      radius={24}
+      clickPulse
+      intro
+      introDelay={index * 120}
+      theme="dark"
+    >
+      <article className={`pp-card${plan.popular ? ' pp-card-popular' : ''}`}>
+        <div className="pp-head">
+          <Name className="pp-name">{plan.name}</Name>
+          <div>
+            <p className="pp-starts">Starts at</p>
+            <div className="pp-price-row">
+              {isCustom ? (
+                <span className="pp-price">Custom</span>
+              ) : (
+                <>
+                  <span className="pp-price">${plan.price}</span>
+                  <span className="pp-price-suffix">
+                    {plan.price === 0 ? plan.priceLabel : 'Per month'}
+                  </span>
+                </>
+              )}
+            </div>
           </div>
+          <p className="pp-desc">{plan.description}</p>
         </div>
-        <p className="pp-desc">{plan.description}</p>
-      </div>
 
-      <SiteLink
-        href={isCustom ? '/contact' : '/register'}
-        className={plan.popular ? 'pp-cta pp-cta-primary beam' : 'pp-cta pp-cta-outline'}
-        style={plan.popular ? { ['--beam-radius' as string]: '4px' } : undefined}
-      >
-        {isCustom ? 'Contact Sales' : 'Get Started'}
-      </SiteLink>
+        <SiteLink
+          href={isCustom ? '/contact' : '/register'}
+          className={plan.popular ? 'pp-cta pp-cta-primary beam' : 'pp-cta pp-cta-outline'}
+          style={plan.popular ? { ['--beam-radius' as string]: '4px' } : undefined}
+        >
+          {isCustom ? 'Contact Sales' : 'Get Started'}
+        </SiteLink>
 
-      <div className="pp-divider" />
+        <div className="pp-divider" />
 
-      <TickList label="Users & Devices" items={usersDevicesItems(plan)} />
-      <TickList label="Features" items={featureItems(plan)} />
-    </article>
+        <TickList label="Users & Devices" items={usersDevicesItems(plan)} />
+        <TickList label="Features" items={featureItems(plan)} />
+      </article>
+    </PixelCard>
   )
 }
 
-// Plan cards for /pricing. The page loads the catalogue on the server
-// (lib/plans.ts), so prices are part of the HTML.
-const PricingPlans: React.FC<{ plans: ApiPlan[] }> = ({ plans }) => {
+// Plan cards for /pricing and the home page. The pages load the catalogue on
+// the server (lib/plans.ts), so prices are part of the HTML. Plan names are
+// h2 under the pricing page's h1, h3 under a home-page section's h2.
+const PricingPlans: React.FC<{ plans: ApiPlan[]; nameTag?: NameTag }> = ({ plans, nameTag = 'h2' }) => {
   return (
     <section style={{ padding: '32px clamp(16px, 4vw, 40px) 80px' }}>
       <div className="pp-grid">
-        {plans.map(plan => <PlanCard key={plan.id} plan={plan} />)}
+        {plans.map((plan, index) => <PlanCard key={plan.id} plan={plan} index={index} nameTag={nameTag} />)}
       </div>
 
       <style>{`
@@ -99,20 +132,27 @@ const PricingPlans: React.FC<{ plans: ApiPlan[] }> = ({ plans }) => {
           margin: 0 auto;
           padding: 16px 4px 32px;
         }
+        /* The pixel card is the card's surface and edge; the plan fills it. */
+        .pixel-card.pp-pixel {
+          display: flex;
+          place-items: normal;
+          width: auto;
+          height: auto;
+          min-width: 0;
+        }
+        .pixel-card.pp-pixel-popular {
+          --pixel-card-edge: rgba(255, 138, 0, 0.55);
+          --pixel-card-edge-active: rgba(255, 138, 0, 0.85);
+          --pixel-card-shadow: 0 0 0 1px rgba(255, 138, 0, 0.18), 0 24px 70px rgba(255, 138, 0, 0.14);
+        }
         .pp-card {
           display: flex;
+          flex: 1 1 auto;
           flex-direction: column;
           gap: 24px;
           min-width: 0;
-          padding: 24px clamp(18px, 2vw, 34px);
+          padding: 28px clamp(18px, 2vw, 34px);
           box-sizing: border-box;
-          background: #FFFFFF;
-          border: 1px solid rgba(26, 29, 33, 0.3);
-          border-radius: 12px;
-        }
-        .pp-card-popular {
-          border: none;
-          box-shadow: 0 12px 40px rgba(17, 19, 21, 0.12);
         }
         .pp-head {
           display: flex;
