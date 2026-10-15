@@ -10,14 +10,15 @@ import FeatureTabs, { type FeatureTab } from '@/components/landing/FeatureTabs'
 import RemoteDesktopScene from '@/components/landing/RemoteDesktopScene'
 import ChatMock from '@/components/landing/ChatMock'
 import { ScrollReveal } from '@/components/landing/ScrollReveal'
+import JsonLd from '@/components/site/JsonLd'
+import { breadcrumbs, graph, organization, softwareApplication, webPage } from '@/lib/jsonld'
 import { pageMetadata } from '@/lib/seo'
 
-export const metadata = pageMetadata({
-  title: 'Product: remote access, support, meetings and chat',
-  description:
-    'What Remote365 does: unattended access to your own devices by ID, support sessions started with a code, video meetings, team chat and file transfer, with role-based access and two-factor authentication.',
-  path: '/product',
-})
+const TITLE = 'Product: remote access, support, meetings and chat'
+const DESCRIPTION =
+  'What Remote365 does: unattended access to your own devices by ID, support sessions started with a code, video meetings, team chat and file transfer, with role-based access and two-factor authentication.'
+
+export const metadata = pageMetadata({ title: TITLE, description: DESCRIPTION, path: '/product' })
 
 // Every point is something the product does today (see the Docs page and
 // the plan limits in packages/shared).
@@ -112,6 +113,14 @@ const FEATURES: FeatureTab[] = [
 export default function ProductPage() {
   return (
     <SiteContent>
+      <JsonLd
+        data={graph(
+          organization(),
+          softwareApplication(),
+          webPage({ path: '/product', name: TITLE, description: DESCRIPTION }),
+          breadcrumbs([{ name: 'Home', path: '/' }, { name: 'Product', path: '/product' }]),
+        )}
+      />
       <main>
         <ScrollReveal delay={0.1}>
           <ProductHero

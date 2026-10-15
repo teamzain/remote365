@@ -8,8 +8,23 @@ export const ORGANIZATION = {
   legalName: 'TechVision365 Inc.',
   email: 'support@remote365.ai',
   logo: '/logo.png',
-  // Real profile URLs go here once they exist; never placeholders.
-  sameAs: [] as string[],
+  // Real profile URLs only; never placeholders.
+  sameAs: [
+    'https://www.linkedin.com/company/remote365ai',
+    'https://www.facebook.com/remote365ai',
+    'https://www.instagram.com/remote365.ai/',
+  ],
+}
+
+/** The developer who built Remote365; credited in the footer and as the
+ *  creator in the SoftwareApplication JSON-LD. */
+export const CREATOR = {
+  name: 'Zain Ul Abidden',
+  jobTitle: 'Software Developer',
+  description:
+    'Developer of Remote365, who built the platform brick by brick: the Windows and Android apps, the web app and the servers behind them.',
+  linkedin: 'https://www.linkedin.com/in/zain-ul-abidden-85219b285',
+  instagram: 'https://www.instagram.com/__zayn.ulabidden__/',
 }
 
 export const PLATFORMS_SUMMARY =

@@ -1,14 +1,16 @@
 import React from 'react'
 import SiteLink from '@/components/site/SiteLink'
 import { REGIONS } from '@/content/regions'
+import { CREATOR } from '@/content/site'
 
 // Site footer, laid out after Aceternity UI's "Simple Footer With Four
 // Grids" block (ui.aceternity.com/blocks/footers): brand and copyright on
 // the left, four link columns on the right, the name in huge faded letters
 // underneath. Written from scratch for the dark site (the block's own code is
 // part of Aceternity UI Pro). Only pages that exist are linked; the block's
-// Socials column became Regions until real social profiles exist (they would
-// also go into the Organization JSON-LD as sameAs).
+// Socials column became Regions (the social profiles are in the Organization
+// JSON-LD as sameAs). The developer credit under the copyright is the visible
+// counterpart of the creator in the SoftwareApplication JSON-LD.
 //
 // The <style> below is global and this footer is on every page, so its
 // classes carry the full site-footer- prefix: as .ft-* they shared names with
@@ -60,6 +62,13 @@ const Footer: React.FC = () => (
             <span>Remote365</span>
           </SiteLink>
           <p className="site-footer-copy">© {new Date().getFullYear()} TechVision365 Inc. All rights reserved.</p>
+          <p className="site-footer-credit">
+            Built brick by brick by {CREATOR.name}
+            <span className="site-footer-credit-links">
+              <a href={CREATOR.linkedin} target="_blank" rel="author noopener" className="site-footer-link">LinkedIn</a>
+              <a href={CREATOR.instagram} target="_blank" rel="author noopener" className="site-footer-link">Instagram</a>
+            </span>
+          </p>
         </div>
 
         <nav className="site-footer-cols" aria-label="Footer">
@@ -129,6 +138,18 @@ const Footer: React.FC = () => (
         line-height: 1.5;
         color: rgba(255, 255, 255, 0.55);
       }
+      .site-footer-credit {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 6px 14px;
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.5;
+        color: rgba(255, 255, 255, 0.45);
+      }
+      .site-footer-credit-links { display: inline-flex; gap: 14px; }
+      .site-footer-credit .site-footer-link { font-size: 13px; }
       .site-footer-cols {
         display: grid;
         grid-template-columns: repeat(4, auto);
