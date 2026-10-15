@@ -1,7 +1,7 @@
 // schema.org structured data (JSON-LD). One @graph per page; entities refer
 // to each other by @id. Facts only: no ratings or reviews, and sameAs only
 // lists real profiles (content/site.ts).
-import { ORGANIZATION, PLATFORMS_SUMMARY, FEATURES, CONTENT_UPDATED } from '@/content/site'
+import { ORGANIZATION, CREATOR, PLATFORMS_SUMMARY, FEATURES, CONTENT_UPDATED } from '@/content/site'
 import type { ApiPlan } from '@/lib/plans'
 import type { Faq } from '@/content/faq'
 import { SITE_URL, SITE_NAME } from '@/lib/seo'
@@ -11,6 +11,7 @@ type Thing = Record<string, unknown>
 const ORG_ID = `${SITE_URL}/#organization`
 const SITE_ID = `${SITE_URL}/#website`
 const APP_ID = `${SITE_URL}/#software`
+const CREATOR_ID = `${SITE_URL}/#creator`
 
 const abs = (path: string) => (path.startsWith('http') ? path : `${SITE_URL}${path === '/' ? '' : path}`)
 
@@ -31,6 +32,20 @@ export function organization(): Thing {
       availableLanguage: ['English'],
     },
     ...(ORGANIZATION.sameAs.length ? { sameAs: ORGANIZATION.sameAs } : {}),
+  }
+}
+
+/** The developer who built the platform (named in the site footer). */
+export function creator(): Thing {
+  return {
+    '@type': 'Person',
+    '@id': CREATOR_ID,
+    name: CREATOR.name,
+    jobTitle: CREATOR.jobTitle,
+    description: CREATOR.description,
+    url: CREATOR.linkedin,
+    sameAs: [CREATOR.linkedin, CREATOR.instagram],
+    knowsAbout: ['Remote desktop software', 'WebRTC', 'Electron', 'Android development', 'Next.js'],
   }
 }
 
@@ -82,6 +97,8 @@ export function softwareApplication(plans?: ApiPlan[]): Thing {
     softwareRequirements: PLATFORMS_SUMMARY,
     downloadUrl: abs('/downloads'),
     publisher: { '@id': ORG_ID },
+    creator: creator(),
+    author: { '@id': CREATOR_ID },
     ...(offers.length ? { offers } : {}),
   }
 }

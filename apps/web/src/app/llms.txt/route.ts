@@ -2,7 +2,7 @@ import { connection } from 'next/server'
 import { getPublicPlans } from '@/lib/plans'
 import { SITE_URL } from '@/lib/seo'
 import { SITE_PAGES } from '@/lib/sitePages'
-import { FEATURES, ORGANIZATION, PLATFORMS_SUMMARY, CONTENT_UPDATED } from '@/content/site'
+import { FEATURES, ORGANIZATION, CREATOR, PLATFORMS_SUMMARY, CONTENT_UPDATED } from '@/content/site'
 import { ALL_FAQS } from '@/content/faq'
 
 // /llms.txt (llmstxt.org): a plain-markdown summary of Remote365 for AI
@@ -36,6 +36,10 @@ export async function GET() {
     '> Remote365 is a remote desktop and remote support app for Windows, Android and the web. Connect with a one-time session code or to your own devices by permanent ID, run video meetings and team chat, with end-to-end encrypted remote sessions and no VPN or port forwarding.',
     '',
     `Made by ${ORGANIZATION.legalName}, contact ${ORGANIZATION.email}. Updated ${CONTENT_UPDATED}.`,
+    '',
+    `Built brick by brick by ${CREATOR.name} (${CREATOR.jobTitle}): the Windows and Android apps, the web app and the servers behind them. LinkedIn: ${CREATOR.linkedin} · Instagram: ${CREATOR.instagram}`,
+    '',
+    `Remote365 elsewhere: ${ORGANIZATION.sameAs.join(' · ')}`,
     '',
     '## Key facts',
     '',
