@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import SiteLink from '@/components/site/SiteLink'
 import { useSignedIn } from '@/lib/useSignedIn'
 import SignInScreen from './SignInScreen'
+import GooeyNav from './GooeyNav'
 
 const NAV_LINKS = [
   { label: 'Product',  path: '/product'   },
@@ -28,6 +29,9 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
   const [scrolled, setScrolled] = useState(false)
   const [scrollHidden, setScrollHidden] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  // The item just clicked, so the pill sets off at once instead of when the
+  // next page arrives; it only counts while still on the page it was clicked on.
+  const [pending, setPending] = useState<{ index: number; from: string } | null>(null)
   const glass = variant === 'glass'
   const links = glass ? [{ label: 'Home', path: '/' }, ...NAV_LINKS] : NAV_LINKS
   // Glass (the website): out of the way while reading down the page, back
@@ -77,6 +81,10 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
 
   const isActive = (path: string) =>
     pathname === path || pathname.startsWith(path + '/')
+  // -1 on pages that aren't in the menu (FAQ, use cases …): no pill.
+  const activeIndex = pending && pending.from === pathname
+    ? pending.index
+    : links.findIndex(item => isActive(item.path))
 
   return (
     <>
@@ -121,20 +129,26 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
             )}
           </div>
 
-          {/* Centred glass pill menu */}
+          {/* Centred menu: the active pill flows to the next page as droplets */}
           {glass && (
-            <nav className="navbar-links navbar-pill">
-              {links.map(item => (
-                <SiteLink
-                  key={item.label}
-                  href={item.path}
-                  className="navbar-link"
-                  style={{ color: isActive(item.path) ? '#FF8A00' : fg }}
-                >
-                  {item.label}
-                </SiteLink>
-              ))}
-            </nav>
+            <div className="navbar-gooey">
+              <GooeyNav
+                items={links.map(item => ({ label: item.label, href: item.path }))}
+                activeIndex={activeIndex}
+                onChange={index => setPending({ index, from: pathname })}
+                theme="dark"
+                size="md"
+                frame={false}
+                particleCount={15}
+                spread={56}
+                animationTime={600}
+                timeVariance={300}
+                gooeyness={0.5}
+                wobble={0.5}
+                hoverEffect
+                aria-label="Main"
+              />
+            </div>
           )}
 
           {/* Actions */}
@@ -317,7 +331,7 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
           padding: 14px 24px;
         }
         .navbar-inner-glass .navbar-left { gap: 0; grid-column: 1; }
-        .navbar-inner-glass .navbar-pill { grid-column: 2; }
+        .navbar-inner-glass .navbar-gooey { grid-column: 2; display: flex; }
         .navbar-inner-glass .navbar-actions { grid-column: 3; justify-self: end; }
         .navbar-inner-glass .navbar-hamburger {
           grid-column: 3;
@@ -328,22 +342,6 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
           font-size: 17px;
           letter-spacing: -0.04em;
         }
-        .navbar-pill {
-          gap: 2px;
-          padding: 5px 6px;
-          border-radius: 9999px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          background: rgba(255, 255, 255, 0.05);
-          backdrop-filter: blur(10px);
-          -webkit-backdrop-filter: blur(10px);
-          transition: background 0.3s ease, border-color 0.3s ease;
-        }
-        .navbar-pill .navbar-link {
-          padding: 8px 14px;
-          border-radius: 9999px;
-          transition: color 0.3s ease, background 0.3s ease;
-        }
-        .navbar-pill .navbar-link:hover { background: rgba(255, 255, 255, 0.08); }
         .navbar-btn-pill {
           padding: 9px 18px;
           border-radius: 9999px;
@@ -517,16 +515,10 @@ const Navbar: React.FC<NavbarProps> = ({ heroBg = '#FFFFFF', heroDark = false, v
           backdrop-filter: none;
           -webkit-backdrop-filter: none;
         }
-        /* The capsule is the glass now; the link group drops its own pill. */
-        .navbar-glass .navbar-pill {
-          border-color: transparent;
-          background: transparent;
-          backdrop-filter: none;
-          -webkit-backdrop-filter: none;
-        }
         /* Glass, below the width where the links fit: logo left, actions and
            the menu button right (the grid would otherwise centre the actions). */
         @media (max-width: 1024px) {
+          .navbar-inner-glass .navbar-gooey { display: none; }
           .navbar-inner-glass { display: flex; align-items: center; }
           .navbar-inner-glass .navbar-actions { margin-left: auto; }
           .navbar-inner-glass .navbar-hamburger { display: flex; margin-left: 12px; }

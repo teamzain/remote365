@@ -56,6 +56,18 @@ function plansUrl(): string | null {
   return null
 }
 
+/** "a 15-day free trial, then Solo at $15, Pro at $40 and Business at $100 per
+ *  month", from the live catalogue, so the words never disagree with the cards. */
+export function priceSummary(plans: ApiPlan[]): string {
+  const trial = plans.find(p => p.price === 0)
+  const paid = plans.filter(p => typeof p.price === 'number' && p.price > 0)
+  const list = paid.map(p => `${p.name} at $${p.price}`)
+  const joined = list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list[0] ?? ''
+  const days = trial?.priceLabel.match(/(\d+)\s*days?/i)?.[1]
+  const trialText = trial ? `${days ? `a ${days}-day` : 'a'} free trial, then ` : ''
+  return `${trialText}${joined} per month`
+}
+
 /** Publicly listed plans (custom-priced ones are sold through sales, not shown). */
 export async function getPublicPlans(): Promise<ApiPlan[]> {
   const url = plansUrl()

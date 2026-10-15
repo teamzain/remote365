@@ -5,22 +5,10 @@ import PricingPlans from '@/components/landing/PricingPlans'
 import PlanComparison from '@/components/landing/PlanComparison'
 import FaqList from '@/components/landing/FaqList'
 import { PRICING_FAQS } from '@/content/faq'
-import { getPublicPlans, type ApiPlan } from '@/lib/plans'
+import { getPublicPlans, priceSummary } from '@/lib/plans'
 import JsonLd from '@/components/site/JsonLd'
 import { breadcrumbs, faqPage, graph, organization, softwareApplication, webPage } from '@/lib/jsonld'
 import { pageMetadata } from '@/lib/seo'
-
-// "a 15-day free trial, then Solo at $15, Pro at $40 and Business at $100 per
-// month" — from the live catalogue, so it never disagrees with the cards.
-function priceSummary(plans: ApiPlan[]): string {
-  const trial = plans.find(p => p.price === 0)
-  const paid = plans.filter(p => typeof p.price === 'number' && p.price > 0)
-  const list = paid.map(p => `${p.name} at $${p.price}`)
-  const joined = list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list[0] ?? ''
-  const days = trial?.priceLabel.match(/(\d+)\s*days?/i)?.[1]
-  const trialText = trial ? `${days ? `a ${days}-day` : 'a'} free trial, then ` : ''
-  return `${trialText}${joined} per month`
-}
 
 export async function generateMetadata(): Promise<Metadata> {
   await connection()

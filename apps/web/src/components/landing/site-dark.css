@@ -224,16 +224,9 @@
 }
 
 /* ── Pricing ────────────────────────────────────────────────────── */
-.site-dark .pp-card {
-  background: var(--ld-glass);
-  border: 1px solid var(--ld-line);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-.site-dark .pp-card.pp-card-popular {
-  border: 1px solid rgba(255, 138, 0, 0.55);
-  box-shadow: 0 0 0 1px rgba(255, 138, 0, 0.18), 0 24px 70px rgba(255, 138, 0, 0.14);
-}
+/* The cards' surface, edge and the popular plan's orange outline come from
+   PixelCard (PricingPlans); the plan on top stays transparent, since a glass
+   fill or blur there would cover the pixels. */
 .site-dark .pp-name,
 .site-dark .pp-starts,
 .site-dark .pp-price,
