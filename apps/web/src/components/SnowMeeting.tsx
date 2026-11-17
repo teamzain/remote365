@@ -3,7 +3,7 @@ import {
   Mic, MicOff, Video, VideoOff, Users,
   Settings, Share, MessageSquare,
   MoreVertical, X, Copy, Mail, CheckCircle2, RefreshCw, MousePointer2, Send,
-  ScreenShare, ScreenShareOff, Volume2, User, Info, Pause, Play, Check, Maximize2
+  ScreenShare, ScreenShareOff, Volume2, User, Info, Pause, Play, Check, Maximize2, UserPlus
 } from 'lucide-react';
 import logoAsset from '../assets/logo.png';
 
@@ -116,6 +116,13 @@ const formatMeetingCode = (value: string) => {
   return clean || String(value || '').trim();
 };
 
+type MeetingPolicy = { allowScreenShare: boolean; allowJoinWithoutApproval: boolean };
+const DEFAULT_MEETING_POLICY: MeetingPolicy = { allowScreenShare: false, allowJoinWithoutApproval: false };
+const normalizeMeetingPolicy = (raw: any): MeetingPolicy => ({
+  allowScreenShare: Boolean(raw?.allowScreenShare),
+  allowJoinWithoutApproval: Boolean(raw?.allowJoinWithoutApproval),
+});
+
 export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, hostAccessKey, devicePassword, serverIP = DEFAULT_SERVER_HOST, guestName = 'Guest' }) => {
   const { user } = useAuthStore();
   const meetingUser = user || { id: undefined, name: guestName, avatar: null };
@@ -175,9 +182,16 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
   // Participant side: waiting for the host to approve our share request.
   const [awaitingShareApproval, setAwaitingShareApproval] = useState(false);
   // Host-set meeting permissions, mirrored to every participant.
-  const [meetingPolicy, setMeetingPolicy] = useState<{ allowScreenShare: boolean }>({ allowScreenShare: false });
+  // Host-set participant permissions (see signaling MeetingPolicy).
+  const [meetingPolicy, setMeetingPolicy] = useState<MeetingPolicy>(DEFAULT_MEETING_POLICY);
   // Small in-meeting banner for request outcomes (e.g. "request denied").
   const [noticeToast, setNoticeToast] = useState<string | null>(null);
+  // New chat messages while the chat is closed: a count on the chat button and a
+  // toast at the top. The panel used to pop open on every message, covering the
+  // meeting (the whole screen on a phone).
+  const [chatUnread, setChatUnread] = useState(0);
+  const [chatToast, setChatToast] = useState<{ name: string; text: string } | null>(null);
+  const chatOpenRef = useRef(false);
   const [shareSystemAudio, setShareSystemAudio] = useState(() => localStorage.getItem('remote365_meeting_share_system_audio') === 'true');
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -227,6 +241,22 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
     const timer = setTimeout(() => setShowRecordingToast(false), 6000);
     return () => clearTimeout(timer);
   }, [showRecordingToast]);
+
+  // Opening the chat reads everything; the ref lets the socket handler see it.
+  useEffect(() => {
+    const open = showChatPanel || mobileSheet === 'chat';
+    chatOpenRef.current = open;
+    if (open) {
+      setChatUnread(0);
+      setChatToast(null);
+    }
+  }, [showChatPanel, mobileSheet]);
+
+  useEffect(() => {
+    if (!chatToast) return;
+    const timer = setTimeout(() => setChatToast(null), 5000);
+    return () => clearTimeout(timer);
+  }, [chatToast]);
 
   // Auto-dismiss request-outcome notices.
   useEffect(() => {
@@ -577,7 +607,7 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
           setMeetingError(null);
           setHasEnteredMeeting(true);
           setIsHost(Boolean(data.isHost));
-          if (data.policy) setMeetingPolicy({ allowScreenShare: Boolean(data.policy.allowScreenShare) });
+          if (data.policy) setMeetingPolicy(normalizeMeetingPolicy(data.policy));
           if (data.recording?.byName) {
             setRecordingBy(data.recording.byName);
             setRecordingNotice(`${data.recording.byName} is recording this meeting.`);
@@ -615,7 +645,10 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
           if (data.message) {
             setChatMessages(prev => prev.some(m => m.id === data.message.id) ? prev : [...prev, data.message]);
             if (data.message.senderConnectionId !== 'local') {
-              setShowChatPanel(true);
+              if (!chatOpenRef.current) {
+                setChatUnread((n) => n + 1);
+                setChatToast({ name: data.message.senderName || 'Someone', text: String(data.message.text || '') });
+              }
               // Their message means they've stopped typing.
               const cid = data.message.senderConnectionId;
               const existing = typingClearTimersRef.current.get(cid);
@@ -692,7 +725,7 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
 
         case 'meeting-policy':
           // Host changed meeting permissions (e.g. free screen sharing).
-          setMeetingPolicy({ allowScreenShare: Boolean(data.policy?.allowScreenShare) });
+          setMeetingPolicy(normalizeMeetingPolicy(data.policy));
           break;
 
         case 'meeting-error':
@@ -1068,7 +1101,11 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
       return;
     }
     if (isHost || meetingPolicy.allowScreenShare) {
-      setShowScreenShareModal(true);
+      // Only the desktop app can list screens for our own picker. In a browser,
+      // go straight to the browser's picker (this click is the user gesture it
+      // needs) rather than first showing a picker with nothing in it.
+      if ((window as any).electronAPI?.getScreenSources) setShowScreenShareModal(true);
+      else void startScreenShare();
       return;
     }
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -1078,8 +1115,11 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
   };
 
   // Host: change a meeting permission and broadcast it to everyone.
-  const updateMeetingPolicy = (next: { allowScreenShare: boolean }) => {
+  const updateMeetingPolicy = (change: Partial<MeetingPolicy>) => {
+    const next = { ...meetingPolicy, ...change };
     setMeetingPolicy(next);
+    // The server admits everyone already waiting once joining is free.
+    if (next.allowJoinWithoutApproval) setPendingGuests([]);
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'meeting-policy', meetingId: roomId, policy: next }));
     }
@@ -1435,8 +1475,13 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
           <button type="button" aria-label="Share screen" onClick={() => (isScreenSharing ? stopScreenShare() : startScreenShare())} className={`flex h-10 w-10 items-center justify-center active:scale-95 ${isScreenSharing ? 'text-[#FF8A00]' : 'text-[#111315]'}`}>
             <ScreenShare size={20} />
           </button>
-          <button type="button" aria-label="Meeting chat" onClick={() => setMobileSheet((s) => (s === 'chat' ? null : 'chat'))} className="flex h-10 w-10 items-center justify-center text-[#111315] active:scale-95">
+          <button type="button" aria-label={chatUnread > 0 ? `Meeting chat (${chatUnread} new)` : 'Meeting chat'} onClick={() => setMobileSheet((s) => (s === 'chat' ? null : 'chat'))} className="relative flex h-10 w-10 items-center justify-center text-[#111315] active:scale-95">
             <MessageSquare size={20} />
+            {chatUnread > 0 && (
+              <span className="absolute right-0.5 top-0.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[#FF383C] px-1 text-[9px] font-semibold leading-none text-white">
+                {chatUnread > 9 ? '9+' : chatUnread}
+              </span>
+            )}
           </button>
           <button type="button" aria-label="Participants" onClick={() => setMobileSheet((s) => (s === 'people' ? null : 'people'))} className="flex h-10 w-10 items-center justify-center text-[#111315] active:scale-95">
             <User size={20} />
@@ -2242,10 +2287,15 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
             </button>
             <button
               onClick={() => { setShowChatPanel((value) => !value); setShowInvitePanel(false); setShowSettingsPanel(false); }}
-              title="Meeting chat"
-              className={`transition-colors ${showChatPanel ? 'text-[#FF8A00]' : 'text-[#111315] hover:text-[#FF8A00]'}`}
+              title={chatUnread > 0 ? `Meeting chat (${chatUnread} new)` : 'Meeting chat'}
+              className={`relative transition-colors ${showChatPanel ? 'text-[#FF8A00]' : 'text-[#111315] hover:text-[#FF8A00]'}`}
             >
               <MessageSquare size={20} />
+              {chatUnread > 0 && (
+                <span className="absolute -right-2 -top-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#FF383C] px-1 text-[10px] font-semibold leading-none text-white">
+                  {chatUnread > 9 ? '9+' : chatUnread}
+                </span>
+              )}
             </button>
             <button
               onClick={() => { setShowInvitePanel((value) => !value); setShowChatPanel(false); setShowSettingsPanel(false); }}
@@ -2326,6 +2376,23 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
           )}
         </div>
       </div>
+
+      {chatToast && (
+        <button
+          type="button"
+          onClick={() => { setChatToast(null); if (window.matchMedia('(min-width: 640px)').matches) { setShowChatPanel(true); setShowInvitePanel(false); setShowSettingsPanel(false); } else { setMobileSheet('chat'); } }}
+          className="absolute left-1/2 top-4 z-[150] flex w-[360px] max-w-[calc(100vw-32px)] -translate-x-1/2 items-center gap-3 rounded-[12px] bg-white px-3 py-2.5 text-left text-[#111315] shadow-[0_12px_32px_rgba(0,0,0,0.35)] animate-in fade-in slide-in-from-top-2 duration-200"
+        >
+          <span className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-[#FF8A00]/15 text-[14px] font-semibold text-[#FF8A00]">
+            {chatToast.name.charAt(0).toUpperCase()}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-semibold leading-[18px]">{chatToast.name}</span>
+            <span className="block truncate text-[12px] leading-[17px] text-[#111315]/70">{chatToast.text || 'Sent a message'}</span>
+          </span>
+          <MessageSquare size={18} className="flex-none text-[#FF8A00]" />
+        </button>
+      )}
 
       {noticeToast && (
         <div className="absolute left-1/2 top-[92px] z-[140] flex max-w-[419px] -translate-x-1/2 items-center gap-3 rounded-[4px] bg-[#FFB347] px-3 py-1.5 shadow-lg animate-in fade-in slide-in-from-top-2 duration-200">
@@ -2609,6 +2676,24 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, ho
                     type="checkbox"
                     checked={meetingPolicy.allowScreenShare}
                     onChange={(e) => updateMeetingPolicy({ allowScreenShare: e.target.checked })}
+                    className="h-4 w-4 accent-[#FF8A00]"
+                  />
+                </label>
+              )}
+
+              {isHost && (
+                <label className="flex items-center justify-between gap-4 rounded-[8px] border border-[#1A1D21]/30 px-4 py-3">
+                  <span className="flex items-center gap-3">
+                    <UserPlus size={18} className="text-[#FF8A00]" />
+                    <span>
+                      <span className="block text-[14px] font-medium leading-5">Let people join without waiting</span>
+                      <span className="block text-[12px] leading-[17px] text-[#111315]/60">Anyone with the code or link joins straight away instead of waiting for you to let them in.</span>
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={meetingPolicy.allowJoinWithoutApproval}
+                    onChange={(e) => updateMeetingPolicy({ allowJoinWithoutApproval: e.target.checked })}
                     className="h-4 w-4 accent-[#FF8A00]"
                   />
                 </label>

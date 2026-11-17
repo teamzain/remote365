@@ -64,6 +64,10 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({ open, onClos
   if (!open) return null;
 
   const hasSources = sources.length > 0;
+  // A browser cannot list screens; it shows its own picker once we ask. Say so,
+  // instead of three empty boxes and "No screen is currently shared", which read
+  // as if sharing were broken.
+  const browserPicker = !(window as any).electronAPI?.getScreenSources;
 
   return (
     <div className="absolute bottom-[92px] right-6 z-[120] w-[522px] max-w-[calc(100vw-48px)] animate-in fade-in slide-in-from-bottom-4 duration-200">
@@ -82,7 +86,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({ open, onClos
         </div>
 
         {/* Thumbnails */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className={loading || hasSources ? 'grid grid-cols-3 gap-3' : 'hidden'}>
           {loading && !hasSources
             ? [0, 1, 2].map((i) => (
                 <div key={i} className="flex h-[100px] items-center justify-center rounded bg-[#F3F4F6] text-[#111315]/30">
@@ -112,13 +116,25 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({ open, onClos
                   </span>
                 </button>
               ))
-            : [0, 1, 2].map((i) => <div key={i} className="h-[100px] rounded bg-[#F3F4F6]" />)}
+            : null}
         </div>
+        {!loading && !hasSources && (
+          <div className="flex items-center gap-4 rounded-[8px] bg-[#F3F4F6] px-4 py-4 text-left">
+            <span className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-[#FF8A00]/15 text-[#FF8A00]">
+              <Monitor size={22} />
+            </span>
+            <span className="text-[14px] leading-5 text-[#111315]">
+              {browserPicker
+                ? 'Your browser will ask which screen, window or tab to share.'
+                : 'Your screens couldn\'t be listed here. Continue and pick one in the next window.'}
+            </span>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="flex flex-col items-center gap-5">
           <p className="text-center text-[14px] font-normal leading-5 text-[#111315]">
-            {hasSources ? 'Select a screen or window to share.' : 'No screen is currently shared.'}
+            {hasSources ? 'Select a screen or window to share.' : 'Everyone in the meeting will see what you choose.'}
           </p>
           <div className="flex items-center gap-2">
             <button

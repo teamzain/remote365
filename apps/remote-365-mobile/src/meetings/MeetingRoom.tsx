@@ -29,6 +29,7 @@ import { monaFontStyles } from '../lib/monaSans';
 import { useResponsive } from '../lib/useResponsive';
 import {
   mediaDevices,
+  MediaStream,
   RTCIceCandidate,
   RTCPeerConnection,
   RTCSessionDescription,
@@ -44,6 +45,13 @@ import {
 } from './meetingUtils';
 import { meetingFetch } from './meetingApi';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+type MeetingPolicy = { allowScreenShare: boolean; allowJoinWithoutApproval: boolean };
+const DEFAULT_MEETING_POLICY: MeetingPolicy = { allowScreenShare: false, allowJoinWithoutApproval: false };
+const normalizeMeetingPolicy = (raw: any): MeetingPolicy => ({
+  allowScreenShare: Boolean(raw?.allowScreenShare),
+  allowJoinWithoutApproval: Boolean(raw?.allowJoinWithoutApproval),
+});
 
 type Participant = {
   connectionId: string;
@@ -83,6 +91,8 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user }: Mee
   const wsRef = useRef<WebSocket | null>(null);
   const localStreamRef = useRef<any>(null);
   const screenStreamRef = useRef<any>(null);
+  // Streams we assemble ourselves for peers that send tracks without a stream id.
+  const looseRemoteStreamsRef = useRef(new Map<string, any>());
   const peersRef = useRef<Map<string, any>>(new Map());
   const pendingIceRef = useRef<Map<string, any[]>>(new Map());
   const hasJoinedRef = useRef(false);
@@ -120,7 +130,8 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user }: Mee
   const [deniedMessage, setDeniedMessage] = useState('');
   const [isHost, setIsHost] = useState(false);
   // Host-set meeting permissions, mirrored to every participant.
-  const [meetingPolicy, setMeetingPolicy] = useState<{ allowScreenShare: boolean }>({ allowScreenShare: false });
+  // Host-set participant permissions (see signaling MeetingPolicy).
+  const [meetingPolicy, setMeetingPolicy] = useState<MeetingPolicy>(DEFAULT_MEETING_POLICY);
   // Waiting room (host side): guests knocking to be let in.
   const [pendingGuests, setPendingGuests] = useState<{ id: string; name: string }[]>([]);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -376,7 +387,21 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user }: Mee
     };
 
     pc.ontrack = (event: any) => {
-      const stream = event.streams?.[0];
+      let stream = event.streams?.[0];
+      if (!stream && event.track) {
+        // The web and desktop apps answer our offer with tracks that name no stream
+        // (a=msid:- in their SDP), so react-native-webrtc hands us an empty
+        // event.streams. Dropping those tracks is why a laptop's camera and shared
+        // screen never appeared on the phone. Collect them into one stream per peer.
+        stream = looseRemoteStreamsRef.current.get(targetId);
+        if (!stream) {
+          stream = new MediaStream();
+          looseRemoteStreamsRef.current.set(targetId, stream);
+        }
+        if (!stream.getTracks().some((track: any) => track.id === event.track.id)) {
+          stream.addTrack(event.track);
+        }
+      }
       if (!stream) return;
       setParticipants((current) => {
         const exists = current.find((item) => item.connectionId === targetId);
@@ -586,7 +611,7 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user }: Mee
         setDeniedMessage('');
         setMeetingError('');
         setIsHost(Boolean(data.isHost));
-        if (data.policy) setMeetingPolicy({ allowScreenShare: Boolean(data.policy.allowScreenShare) });
+        if (data.policy) setMeetingPolicy(normalizeMeetingPolicy(data.policy));
         (data.participants || []).forEach((participant: Participant) => {
           upsertParticipant(participant);
           initiatePeerConnection(participant.connectionId, true).catch(() => undefined);
@@ -605,6 +630,7 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user }: Mee
         const id = data.participantConnectionId;
         peersRef.current.get(id)?.close?.();
         peersRef.current.delete(id);
+        looseRemoteStreamsRef.current.delete(id);
         participantUsersRef.current.delete(id);
         setParticipants((current) => current.filter((item) => item.connectionId !== id));
         setFocusedId((current) => (current === id ? null : current));
@@ -648,7 +674,7 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user }: Mee
       }
 
       if (data.type === 'meeting-policy') {
-        setMeetingPolicy({ allowScreenShare: Boolean(data.policy?.allowScreenShare) });
+        setMeetingPolicy(normalizeMeetingPolicy(data.policy));
         return;
       }
 
@@ -859,9 +885,12 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user }: Mee
   };
 
   // Host: change a meeting permission and broadcast it to everyone.
-  const updateMeetingPolicy = (next: { allowScreenShare: boolean }) => {
+  const updateMeetingPolicy = (change: Partial<MeetingPolicy>) => {
+    const next = { ...meetingPolicy, ...change };
     setMeetingPolicy(next);
     sendJson({ type: 'meeting-policy', meetingId: roomId, policy: next });
+    // The server admits everyone already waiting once joining is free.
+    if (next.allowJoinWithoutApproval) setPendingGuests([]);
   };
 
   const startRecording = () => {
@@ -1040,11 +1069,13 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user }: Mee
 
   // Spotlight: a screen sharer wins automatically (local first); otherwise a
   // tapped (pinned) tile. Tapping the spotlighted tile again unpins it.
+  // Other people's shared screens come first: your own share is only a "you're
+  // presenting" card here, so spotlighting it would bury the screen you came to see.
   const sharerIds = [
-    ...(isScreenSharing ? ['local'] : []),
     ...participants
       .filter((participant) => participant.mediaState?.isScreenSharing)
       .map((participant) => participant.connectionId),
+    ...(isScreenSharing ? ['local'] : []),
   ];
   const primaryId = sharerIds.length
     ? (focusedId && sharerIds.includes(focusedId) ? focusedId : sharerIds[0])
@@ -1067,9 +1098,11 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user }: Mee
       name={user?.name || t('You')}
       noStream={!localStreamUrl}
       onFlipCamera={flipCamera}
+      immersive={isImmersive}
       onFullscreen={() => setIsImmersive(true)}
       onPress={() => toggleFocus('local')}
       onRetryMedia={() => void requestMedia()}
+      onStopShare={() => void stopScreenShare()}
       screenSharing={isScreenSharing}
       showFullscreen={showFullscreen}
       small={small}
@@ -1085,12 +1118,14 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user }: Mee
       cameraOff={Boolean(participant.mediaState?.isCameraOff)}
       muted={Boolean(participant.mediaState?.isMuted)}
       name={participant.user?.name || t('Participant')}
+      immersive={isImmersive}
       onFullscreen={() => setIsImmersive(true)}
       onPress={() => toggleFocus(participant.connectionId)}
       screenSharing={Boolean(participant.mediaState?.isScreenSharing)}
       showFullscreen={showFullscreen}
       small={small}
       streamUrl={participant.stream?.toURL?.() || ''}
+      videoKey={(participant.stream?.getVideoTracks?.() || []).map((track: any) => track.id).join(',')}
       tileStyle={tileStyle}
     />
   );
@@ -1540,10 +1575,16 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user }: Mee
                 <View style={styles.settingsDivider} />
                 <Text style={[styles.settingsSectionTitle, textSize(15)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{t('Host controls')}</Text>
                 <SettingToggle
-                  title={t('Allow screen sharing')}
-                  hint={t('Participants can share without asking you first.')}
+                  title={t('Share screen without asking')}
+                  hint={t('Participants can share their screen without your permission.')}
                   value={meetingPolicy.allowScreenShare}
                   onChange={(v) => updateMeetingPolicy({ allowScreenShare: v })}
+                />
+                <SettingToggle
+                  title={t('Join without waiting')}
+                  hint={t('Anyone with the code or link joins straight away instead of waiting for you to let them in.')}
+                  value={meetingPolicy.allowJoinWithoutApproval}
+                  onChange={(v) => updateMeetingPolicy({ allowJoinWithoutApproval: v })}
                 />
               </>
             )}
@@ -1834,15 +1875,18 @@ function MeetingTile({
   muted,
   name,
   noStream,
+  immersive,
   onFlipCamera,
   onFullscreen,
   onPress,
   onRetryMedia,
+  onStopShare,
   screenSharing,
   showFullscreen,
   small,
   streamUrl,
   tileStyle,
+  videoKey,
   you,
 }: {
   cameraOff: boolean;
@@ -1850,26 +1894,58 @@ function MeetingTile({
   muted: boolean;
   name: string;
   noStream?: boolean;
+  /** The stage is in full-screen (immersive) mode. */
+  immersive?: boolean;
   onFlipCamera?: () => void;
   onFullscreen?: () => void;
   onPress?: () => void;
   onRetryMedia?: () => void;
+  onStopShare?: () => void;
   screenSharing?: boolean;
   showFullscreen?: boolean;
   small?: boolean;
   streamUrl: string;
   tileStyle?: ViewStyle;
+  /** Changes when the stream's video track changes, so the native view rebinds. */
+  videoKey?: string;
   you?: boolean;
 }) {
   const { type, textSize, maxFontSizeMultiplier } = useResponsive();
   const { t } = useTranslation();
   const displayName = you ? t('You') : name;
-  const showVideo = Boolean(streamUrl) && (!cameraOff || screenSharing);
+  // Your own screen share is never played back to you. Rendering the capture of
+  // this phone's screen on this phone's screen recurses into a hall of mirrors,
+  // worst of all in full screen, so you get a "you're presenting" card instead
+  // (what Meet and Zoom show). Everyone else still receives the real stream.
+  const presentingSelf = Boolean(you && screenSharing);
+  const showVideo = !presentingSelf && Boolean(streamUrl) && (!cameraOff || screenSharing);
   return (
     <Pressable style={[styles.tile, small && styles.tileSmall, tileStyle]} onPress={onPress}>
-      {showVideo ? (
+      {presentingSelf ? (
+        <View style={styles.tilePresenting}>
+          <Feather name="monitor" size={small ? 26 : 44} color="#FFB347" />
+          <Text style={[styles.tilePresentingTitle, type(small ? 11 : 15, small ? 15 / 11 : 21 / 15)]} maxFontSizeMultiplier={maxFontSizeMultiplier} numberOfLines={small ? 1 : 2}>
+            {small ? t('Presenting') : t("You're sharing your screen")}
+          </Text>
+          {!small && (
+            <Text style={[styles.tilePresentingText, type(12, 17 / 12)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+              {t('Everyone else in the meeting can see it.')}
+            </Text>
+          )}
+          {!small && onStopShare && (
+            <Pressable style={styles.stopShareButton} onPress={onStopShare} accessibilityRole="button">
+              <MaterialIcons name="stop-screen-share" size={16} color="#FFFFFF" />
+              <Text style={[styles.stopShareText, textSize(13)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{t('Stop sharing')}</Text>
+            </Pressable>
+          )}
+        </View>
+      ) : showVideo ? (
         <>
           <RTCView
+            // Remount when entering/leaving full screen: the native surface keeps the
+            // size it was created at, which left the picture in a corner of a black
+            // full-screen stage.
+            key={`${immersive ? 'rtc-immersive' : 'rtc-tile'}:${videoKey || ''}`}
             objectFit={screenSharing ? 'contain' : 'cover'}
             streamURL={streamUrl}
             style={styles.tileVideo}
@@ -1909,7 +1985,7 @@ function MeetingTile({
           <Feather name="refresh-cw" size={16} color="#111315" />
         </Pressable>
       )}
-      {showFullscreen && onFullscreen && (
+      {showFullscreen && onFullscreen && !immersive && !presentingSelf && (
         <Pressable style={styles.tileFullscreen} hitSlop={6} onPress={onFullscreen}>
           <Feather name="maximize-2" size={16} color="#111315" />
         </Pressable>
@@ -2778,6 +2854,36 @@ const styles = StyleSheet.create(monaFontStyles({
     flex: 1,
     gap: 16,
     justifyContent: 'center',
+  },
+  tilePresenting: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 10,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  tilePresentingTitle: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  tilePresentingText: {
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'center',
+  },
+  stopShareButton: {
+    alignItems: 'center',
+    backgroundColor: '#FF383C',
+    borderRadius: 20,
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  stopShareText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
   // Flip-camera affordance: same chip as tileFullscreen, opposite corner.
   tileFlip: {

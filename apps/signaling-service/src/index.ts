@@ -57,7 +57,17 @@ const meetingParticipants = new Map<string, { id?: string; name?: string; avatar
 const meetingMediaStates = new Map<string, { isMuted: boolean; isCameraOff: boolean; isScreenSharing: boolean }>();
 const meetingEmptyTimers = new Map<string, NodeJS.Timeout>();
 // Host-set per-meeting permissions (e.g. participants may share without asking).
-const meetingPolicies = new Map<string, { allowScreenShare: boolean }>();
+// Host-set participant permissions for a live meeting. Each switch removes one
+// "ask the host" step: allowScreenShare skips the share request, and
+// allowJoinWithoutApproval skips the waiting room. Remote control is NOT here on
+// purpose: it is approved by the owner of the PC being controlled, never the host.
+type MeetingPolicy = { allowScreenShare: boolean; allowJoinWithoutApproval: boolean };
+const DEFAULT_MEETING_POLICY: MeetingPolicy = { allowScreenShare: false, allowJoinWithoutApproval: false };
+const meetingPolicies = new Map<string, MeetingPolicy>();
+const normalizeMeetingPolicy = (raw: any): MeetingPolicy => ({
+  allowScreenShare: Boolean(raw?.allowScreenShare),
+  allowJoinWithoutApproval: Boolean(raw?.allowJoinWithoutApproval),
+});
 // meetingId -> host connectionId (the meeting creator, who admits guests).
 const meetingHosts = new Map<string, string>();
 // Everything needed to complete a join once the host admits the guest.
@@ -850,7 +860,7 @@ async function finalizeMeetingJoin(connectionId: string, meetingId: string, entr
     meetingId,
     participants,
     isHost: meetingHosts.get(meetingId) === connectionId,
-    policy: meetingPolicies.get(meetingId) || { allowScreenShare: false },
+    policy: meetingPolicies.get(meetingId) || DEFAULT_MEETING_POLICY,
     recording: meetingRecordings.get(meetingId) ? { byName: meetingRecordings.get(meetingId)!.byName, at: meetingRecordings.get(meetingId)!.at } : null,
     meeting: meeting || { id: meetingId, name: `Meeting ${meetingId.toUpperCase()}`, sessionCode: meetingId },
     iceServers: createMeetingIceServers(),
@@ -1752,6 +1762,24 @@ async function startServer() {
               console.warn('[Signaling] Meeting lookup failed:', err);
             }
 
+            // A support-session code is not a meeting. Treating it as an unregistered
+            // code below made the first signed-in arrival host of an empty ad-hoc room,
+            // so a phone that joined a session code sat alone in a 'meeting' while the
+            // session's creator kept waiting.
+            if (!meeting && /^\d+$/.test(meetingId)) {
+              const supportSession = await (prisma as any).remoteSession.findFirst({
+                where: { sessionCode: meetingId, type: 'REMOTE_CONTROL', joinLink: { not: null } },
+                select: { id: true }
+              }).catch(() => null);
+              if (supportSession) {
+                ws.send(JSON.stringify({
+                  type: 'meeting-error',
+                  error: 'This is a remote session code, not a meeting code. Enter it in the Connect tab (or Join session) instead.'
+                }));
+                break;
+              }
+            }
+
             // A meeting link keeps working after the call, like Google Meet:
             // "End for everyone" kicks the room out, and anyone who comes back
             // through the same link reopens it (finalizeMeetingJoin flips ENDED
@@ -1835,6 +1863,14 @@ async function startServer() {
                   }));
                 }
               }
+              break;
+            }
+
+            // The host let everyone in without approval: no waiting room. Only while
+            // a host has set the policy for this live meeting (it is dropped when the
+            // room empties), so a fresh meeting always starts with the lobby on.
+            if (meetingPolicies.get(meetingId)?.allowJoinWithoutApproval) {
+              await finalizeMeetingJoin(connectionId, meetingId, joinEntry);
               break;
             }
 
@@ -2178,8 +2214,22 @@ async function startServer() {
             // Host updates meeting permissions; broadcast to the whole room.
             const meetingId = normalizeMeetingId(data.meetingId);
             if (!meetingId || meetingHosts.get(meetingId) !== connectionId) break;
-            const policy = { allowScreenShare: Boolean(data.policy?.allowScreenShare) };
+            const policy = normalizeMeetingPolicy(data.policy);
             meetingPolicies.set(meetingId, policy);
+            // Turning "join without waiting" on lets in everyone already knocking,
+            // exactly as if the host had pressed Admit for each of them.
+            if (policy.allowJoinWithoutApproval) {
+              const waiting = meetingLobbies.get(meetingId);
+              if (waiting) {
+                meetingLobbies.delete(meetingId);
+                for (const [guestId, entry] of waiting) {
+                  const guestWs = localClients.get(guestId);
+                  if (guestWs && guestWs.readyState === WebSocket.OPEN) {
+                    await finalizeMeetingJoin(guestId, meetingId, entry);
+                  }
+                }
+              }
+            }
             const room = meetingRooms.get(meetingId);
             if (!room) break;
             const policyNotification = JSON.stringify({ type: 'meeting-policy', meetingId, policy });
@@ -2196,6 +2246,13 @@ async function startServer() {
             const currentMeetingId = connectionToMeeting.get(connectionId);
             const meetingId = normalizeMeetingId(data.meetingId);
             if (!currentMeetingId || meetingId !== currentMeetingId) break;
+
+            // Free sharing is on: answer for the host instead of interrupting them
+            // (covers clients that ask even though the policy already allows it).
+            if (meetingPolicies.get(currentMeetingId)?.allowScreenShare) {
+              ws.send(JSON.stringify({ type: 'meeting-share-response', meetingId: currentMeetingId, allowed: true }));
+              break;
+            }
 
             const hostConnId = meetingHosts.get(currentMeetingId);
             if (!hostConnId || hostConnId === connectionId) break;
