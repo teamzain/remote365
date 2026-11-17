@@ -178,6 +178,9 @@ export const SnowLanding: React.FC<SnowLandingProps> = ({
   // offers minus the footer.
   const scrollRef = useRef<HTMLDivElement>(null);
   const colRef = useRef<HTMLDivElement>(null);
+  // A hidden 100px box inside the zoomed column: how tall it reports itself tells
+  // us how this Chromium measures zoomed elements (see measure below).
+  const zoomProbeRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLElement>(null);
   const fitScaleRef = useRef(1);
   const scheduleFitRef = useRef<() => void>(() => {});
@@ -219,10 +222,18 @@ export const SnowLanding: React.FC<SnowLandingProps> = ({
       const text = fontScaleRef.current || 1;
       const rect = col.getBoundingClientRect();
       if (!rect.height || !rect.width) return;
-      // The column is zoomed by fit × text size; measure at text size 1 and
-      // find the fit that keeps the text-scaled column inside the window.
-      const naturalH = rect.height / (current * text);
-      const naturalW = rect.width / (current * text);
+      // The column is zoomed by fit × text size; find its natural (zoom 1) size
+      // and the fit that keeps the text-scaled column inside the window.
+      // Electron 28 (Chromium 120) reports a zoomed element's rect UNzoomed,
+      // while Chromium 128+ reports it zoomed. Dividing by the zoom assumed the
+      // latter, so on the desktop app every pass shrank the column again until
+      // it hit the minimum (the tiny landing after switching to Meeting, whose
+      // recent-meetings list makes the column taller than the window). The probe
+      // reads 100 when rects are unzoomed and 100 × zoom when they are zoomed.
+      const probeH = zoomProbeRef.current?.getBoundingClientRect().height || 0;
+      const unit = probeH > 0 ? probeH / 100 : current * text;
+      const naturalH = rect.height / unit;
+      const naturalW = rect.width / unit;
       const footerH = footerRef.current?.getBoundingClientRect().height || 0;
       const availH = wrap.clientHeight - footerH - 12;
       const availW = wrap.clientWidth - 16;
@@ -879,6 +890,11 @@ export const SnowLanding: React.FC<SnowLandingProps> = ({
             than the window scrolls (small laptops clipped it top and bottom). */}
         <div className="tv-guest-scroll" ref={scrollRef}>
           <div className="tv-guest-col" ref={colRef} style={{ zoom: fitScale * fontScale }}>
+            <div
+              ref={zoomProbeRef}
+              aria-hidden="true"
+              style={{ position: 'absolute', visibility: 'hidden', pointerEvents: 'none', width: 0, height: 100 }}
+            />
             <header className="tv-guest-head">
               <h1>Access And Support From Anywhere</h1>
             </header>
