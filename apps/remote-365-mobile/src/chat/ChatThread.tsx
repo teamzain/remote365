@@ -81,6 +81,8 @@ type ChatThreadProps = {
   onResolved?: () => void;
   onStartMeeting?: () => void;
   onJoinMeeting?: (code: string) => void;
+  /** Join a remote support session invite by its code (someone else's invite). */
+  onJoinSession?: (code: string) => void;
   onStartRemoteControl?: () => void;
   /** Whether this user has muted the conversation (from the conversation list). */
   initialMuted?: boolean;
@@ -134,6 +136,7 @@ export function ChatThread({
   onResolved,
   onStartMeeting,
   onJoinMeeting,
+  onJoinSession,
   onStartRemoteControl,
   initialMuted,
   devices,
@@ -783,6 +786,7 @@ export function ChatThread({
               onOpenImage={openImageViewer}
               onOpenDevice={onOpenDevice}
               onJoinMeeting={onJoinMeeting}
+              onJoinSession={onJoinSession}
               onRemoteSessionInfo={() => setRemoteInfoOpen(true)}
               onCopyCode={(code) => {
                 Clipboard.setStringAsync(code);
@@ -1219,6 +1223,7 @@ function MessageBubble({
   onReact,
   onOpenImage,
   onJoinMeeting,
+  onJoinSession,
   onRemoteSessionInfo,
   onCopyCode,
   onOpenDevice,
@@ -1232,6 +1237,7 @@ function MessageBubble({
   onReact?: (emoji: string) => void;
   onOpenImage?: (uri: string) => void;
   onJoinMeeting?: (code: string) => void;
+  onJoinSession?: (code: string) => void;
   onRemoteSessionInfo?: () => void;
   onCopyCode?: (code: string) => void;
   onOpenDevice?: (device: { name: string; accessKey: string }) => void;
@@ -1391,16 +1397,23 @@ function MessageBubble({
         </View>
       );
     }
+    // Someone else's live invite can be joined right here: the session shares
+    // its creator's computer and this phone views it. Your own invite, or an
+    // expired one, still opens the explanation.
+    const canJoinSession = !isMine && !inviteExpired && Boolean(code) && Boolean(onJoinSession);
     return (
       <View style={[styles.bubbleRow, isMine ? styles.bubbleRowMine : styles.bubbleRowTheirs]}>
-        <Pressable style={styles.inviteCard} onPress={() => onRemoteSessionInfo?.()}>
+        <Pressable
+          style={styles.inviteCard}
+          onPress={() => (canJoinSession ? onJoinSession?.(String(code)) : onRemoteSessionInfo?.())}
+        >
           <Feather name="monitor" size={18} color="#FF8A00" />
           <View style={styles.inviteBody}>
             <Text style={[styles.inviteText, textSize(13)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
               {t('Remote session invite')}
             </Text>
             <Text style={[styles.inviteJoin, textSize(11)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
-              {t('Tap for details')}
+              {canJoinSession ? t('Tap to join') : inviteExpired ? t('This invite has expired') : t('Tap for details')}
             </Text>
           </View>
         </Pressable>

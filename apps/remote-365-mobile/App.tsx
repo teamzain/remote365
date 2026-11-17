@@ -11,6 +11,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   AppState,
   BackHandler,
@@ -58,7 +59,7 @@ import { ServiceQueueScreen } from './src/connect/ServiceQueueScreen';
 import { formatAccessKey } from './src/lib/accessKey';
 import { monaFontStyles } from './src/lib/monaSans';
 import { RemoteControl } from './src/remote/RemoteControl';
-import { verifyDeviceAccess } from './src/remote/remoteApi';
+import { joinSessionByCode, verifyDeviceAccess } from './src/remote/remoteApi';
 import { AccountScreen as SettingsAccountScreen } from './src/settings/AccountScreen';
 import { BiometricScreen as SettingsBiometricScreen } from './src/settings/BiometricScreen';
 import { ChatSettingsScreen } from './src/settings/ChatSettingsScreen';
@@ -156,6 +157,8 @@ type ConversationItem = {
   otherEmail?: string;
   /** Set when the conversation's latest message is a joinable session invite. */
   inviteCode?: string;
+  /** That invite is for a video meeting (otherwise it is a remote support session). */
+  inviteIsMeeting?: boolean;
   /** This user muted notifications for the conversation. */
   muted?: boolean;
 };
@@ -352,6 +355,7 @@ function mapConversationItem(row: any, userId?: string): ConversationItem {
   const inviteCode = invite && !inviteExpired ? String(invite.sessionCode || invite.code || '') : '';
   return {
     inviteCode: inviteCode || undefined,
+    inviteIsMeeting: inviteCode ? invite?.sessionType === 'VIDEO_MEETING' : undefined,
     muted: Boolean(row.participants?.some((p: any) => p.userId === userId && p.muted)),
     id: String(row.id || ''),
     name: getConversationName(row, userId),
@@ -1188,6 +1192,7 @@ function ChatScreen({
   onTabPress,
   onChatPress,
   onAddContact,
+  onBack,
 }: {
   activeTab: MainTab;
   conversations: ConversationItem[];
@@ -1196,6 +1201,7 @@ function ChatScreen({
   onTabPress: (tab: MainTab) => void;
   onChatPress: (conversation: ConversationItem) => void;
   onAddContact: () => void;
+  onBack: () => void;
 }) {
   const styles = useAppStyles();
   const { t } = useTranslation();
@@ -1218,10 +1224,18 @@ function ChatScreen({
       <StatusBar style="dark" />
 
       <HeaderFrame style={styles.chatHeader}>
-        <View style={styles.chatHeaderTitleRow}>
+        {/* The arrow used to be drawn inside a plain View, so tapping it did
+            nothing. It goes back the same way the Android back gesture does. */}
+        <Pressable
+          style={styles.chatHeaderTitleRow}
+          onPress={onBack}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={t('Back')}
+        >
           <Feather name="arrow-left" size={20} color="#111315" />
           <Text style={[styles.chatTitle, type(16, 23 / 16)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{t('Chat')}</Text>
-        </View>
+        </Pressable>
         <View style={styles.chatActions}>
           <HeaderBell />
           <Pressable style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
@@ -1404,6 +1418,7 @@ function ChatThreadScreen({
   onBack,
   onResolved,
   onJoinMeeting,
+  onJoinSession,
   onOpenDevice,
 }: {
   apiBaseUrl: string;
@@ -1414,6 +1429,7 @@ function ChatThreadScreen({
   onBack: () => void;
   onResolved?: () => void;
   onJoinMeeting?: (code: string) => void;
+  onJoinSession?: (code: string) => void;
   onOpenDevice?: (device: { name: string; accessKey: string }) => void;
 }) {
   const styles = useAppStyles();
@@ -1455,6 +1471,7 @@ function ChatThreadScreen({
       onBack={onBack}
       onResolved={onResolved}
       onJoinMeeting={onJoinMeeting}
+      onJoinSession={onJoinSession}
     />
   );
 }
@@ -1468,6 +1485,7 @@ function MeetingScreen({
   onTabPress,
   token,
   user,
+  onResolveCode,
 }: {
   activeTab: MainTab;
   meetings: MeetingItem[];
@@ -1477,6 +1495,7 @@ function MeetingScreen({
   onTabPress: (tab: MainTab) => void;
   token: string | null;
   user: User | null;
+  onResolveCode?: (code: string, openMeeting: () => void) => void;
 }) {
   const styles = useAppStyles();
   const { t } = useTranslation();
@@ -1507,6 +1526,7 @@ function MeetingScreen({
           token={token}
           user={user}
           createRequestToken={createToken}
+          onResolveCode={onResolveCode}
         />
       </FadeInView>
 
@@ -2649,6 +2669,57 @@ function AppContent() {
     }
   };
 
+  // A code someone typed or was sent can be a support SESSION code, which looks
+  // exactly like a meeting code or a device ID. Ask the server first and only
+  // fall back (meeting / device connect) when no session has that code. Before
+  // this, a session code went straight to the meeting socket, which opened an
+  // empty meeting with this phone as host while the creator kept waiting.
+  const [codeChecking, setCodeChecking] = useState(false);
+  const openSessionCodeOr = async (
+    code: string,
+    fallback: () => void,
+    onError?: (message: string) => void,
+  ) => {
+    if (codeChecking) return;
+    setCodeChecking(true);
+    setRemoteError(null);
+    try {
+      const result = await joinSessionByCode(API_BASE_URL, authToken, code);
+      if (result.kind === 'viewer') {
+        setPreviewMeetingId(null);
+        setRemoteSession({ accessKey: result.hostAccessKey, token: result.token, deviceName: result.hostName, deviceType: null });
+        setScreen('remote-control');
+        return;
+      }
+      if (result.kind === 'share-required') {
+        Alert.alert(
+          t('Open this code on a computer'),
+          `${result.creatorName || t('The session creator')} ${t('will see the screen of whoever joins with this code. A phone cannot share its screen from this app, so enter the code in the Remote 365 desktop app on the computer you want to share.')}`,
+        );
+        return;
+      }
+      fallback();
+    } catch (err: any) {
+      // Never fall back to a meeting here: that is the empty-meeting bug again.
+      const message = err?.message || t('Could not open this session.');
+      if (onError) onError(message);
+      else Alert.alert(t('Could not join session'), message);
+    } finally {
+      setCodeChecking(false);
+    }
+  };
+
+  // For a code we KNOW is a support session (its invite said so): if the server
+  // has no live session for it, say so instead of opening a meeting.
+  const sessionCodeGone = () => Alert.alert(
+    t('Session not available'),
+    t('This session has ended or its code is no longer valid. Ask for a new code.'),
+  );
+  const joinInviteCode = (code: string, isMeeting?: boolean) => {
+    if (isMeeting) openMeetingPreview(code);
+    else void openSessionCodeOr(code, sessionCodeGone);
+  };
+
   const goToTab = (tab: MainTab) => {
     setScreen('connect');
     setActiveTab(tab);
@@ -3337,8 +3408,14 @@ function AppContent() {
         ) : screen === 'no-connect' ? (
           <NoConnectScreen
             onBack={() => setScreen('connect')}
-            onConnect={(accessKey) => startRemoteControl({ accessKey, name: `${t('Support ID')} ${accessKey}` } as DeviceItem)}
-            connecting={remoteConnecting}
+            // Same as the desktop Connect box: a session code opens that
+            // session; anything else is treated as a device ID.
+            onConnect={(accessKey) => openSessionCodeOr(
+              accessKey,
+              () => startRemoteControl({ accessKey, name: `${t('Support ID')} ${accessKey}` } as DeviceItem),
+              (message) => setRemoteError(message),
+            )}
+            connecting={remoteConnecting || codeChecking}
             error={remoteError}
           />
         ) : screen === 'sign-in' || screen === 'sign-up' ? (
@@ -3378,7 +3455,12 @@ function AppContent() {
                 code: conversation.inviteCode as string,
               }))}
             onBack={() => setScreen('connect')}
-            onJoin={(code) => openMeetingPreview(code)}
+            // The queue holds meeting AND remote-session invites; only a
+            // meeting invite may open the meeting preview.
+            onJoin={(code) => joinInviteCode(
+              code,
+              conversations.find((conversation) => conversation.inviteCode === code)?.inviteIsMeeting,
+            )}
             onOpenChat={(conversationId) => openConversationById(conversationId)}
             header={(content) => (
               <HeaderFrame style={styles.managedHeader}>
@@ -3417,6 +3499,7 @@ function AppContent() {
             onBack={() => setScreen('connect')}
             onResolved={() => loadAccountData()}
             onJoinMeeting={(code) => openMeetingPreview(code)}
+            onJoinSession={(code) => joinInviteCode(code, false)}
             onOpenDevice={(mention) =>
               startRemoteControl({
                 id: `mention-${mention.accessKey}`,
@@ -3458,6 +3541,7 @@ function AppContent() {
             }}
             onSettingsPress={openSettings}
             onTabPress={goToTab}
+            onBack={() => goToTab('connect')}
           />
         ) : activeTab === 'meeting' ? (
           <MeetingScreen
@@ -3469,6 +3553,7 @@ function AppContent() {
             onTabPress={goToTab}
             token={authToken}
             user={user}
+            onResolveCode={(code, openMeeting) => openSessionCodeOr(code, openMeeting)}
           />
         ) : activeTab === 'apps' ? (
           <AppsScreen activeTab={activeTab} onSettingsPress={openSettings} onTabPress={goToTab} />

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Feather } from '@expo/vector-icons';
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { SettingsHeader } from './SettingsScaffold';
@@ -101,7 +101,9 @@ export function UpgradePlanScreen({
       setMessage({ tone: 'err', text: translate('That plan cannot be purchased from the app.') });
       return;
     }
-    if (!play.available) {
+    // Only a missing Play Store blocks here. A dropped connection or a stale product
+    // list is retried inside buy(), which used to be skipped by an `available` check.
+    if (Platform.OS !== 'android') {
       setMessage({ tone: 'err', text: translate('Google Play is unavailable, so plans cannot be changed here.') });
       return;
     }

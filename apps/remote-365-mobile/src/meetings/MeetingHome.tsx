@@ -39,6 +39,11 @@ type MeetingHomeProps = {
   user: MeetingUser | null;
   /** Bump to open the create-meeting preview from outside (e.g. the nav-bar + button). */
   createRequestToken?: number;
+  /**
+   * Quick join hands the typed code here first. A remote-session code is opened
+   * as a session by the parent; openMeeting runs only for a real meeting code.
+   */
+  onResolveCode?: (code: string, openMeeting: () => void) => void;
 };
 
 // The Figma frame is drawn at 360pt and its dp values are used verbatim: spacing
@@ -70,6 +75,7 @@ export function MeetingHome({
   token,
   user,
   createRequestToken = 0,
+  onResolveCode,
 }: MeetingHomeProps) {
   const { type, textSize, control, scale, navClearance, maxFontSizeMultiplier } = useResponsive();
   const { t } = useTranslation();
@@ -132,10 +138,16 @@ export function MeetingHome({
     }
   };
 
-  const openJoinPreview = (value: string) => {
+  const openJoinPreview = (value: string, fromQuickJoin = false) => {
     const code = formatMeetingCode(extractMeetingCode(value));
     if (!code) return;
     setError('');
+    // A typed code can be a remote-session code; the recent-meetings list only
+    // holds meetings, so it skips the check.
+    if (fromQuickJoin && onResolveCode) {
+      onResolveCode(code, () => setPreview({ mode: 'join', code }));
+      return;
+    }
     setPreview({ mode: 'join', code });
   };
 
@@ -245,7 +257,7 @@ export function MeetingHome({
                     maxFontSizeMultiplier={maxFontSizeMultiplier}
                     autoCapitalize="characters"
                     onChangeText={setMeetingCode}
-                    onSubmitEditing={() => openJoinPreview(meetingCode)}
+                    onSubmitEditing={() => openJoinPreview(meetingCode, true)}
                     onFocus={() => { codeFocusedRef.current = true; setCodeFocused(true); }}
                     onBlur={() => { codeFocusedRef.current = false; setCodeFocused(false); }}
                     placeholder={t('e.g 123-456-789')}
@@ -255,7 +267,7 @@ export function MeetingHome({
                   />
                   <Pressable
                     style={[styles.joinButton, control(40), !canJoin && styles.joinButtonDisabled]}
-                    onPress={() => openJoinPreview(meetingCode)}
+                    onPress={() => openJoinPreview(meetingCode, true)}
                     disabled={!canJoin}
                   >
                     <Text
