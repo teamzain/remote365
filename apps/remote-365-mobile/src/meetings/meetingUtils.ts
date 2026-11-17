@@ -17,7 +17,56 @@ export type MeetingItem = {
   /** Set when the meeting was created by SOMEONE ELSE — i.e. you were invited to it. */
   createdById?: string;
   createdByName?: string;
+  /** Which of web's three kinds this is: 'instant' | 'later' | 'calendar'. */
+  variant?: string;
 };
+
+export type MeetingKind = 'instant' | 'later' | 'calendar';
+
+/** Same rule as web's Recent Meetings: the stored kind, else the link lifetime. */
+export function getMeetingKind(meeting: MeetingItem): MeetingKind {
+  const stored = String(meeting.variant || '').toLowerCase();
+  if (stored === 'instant' || stored === 'later' || stored === 'calendar') return stored;
+  const created = new Date(meeting.createdAt || Date.now()).getTime();
+  const expires = meeting.expiresAt ? new Date(meeting.expiresAt).getTime() : created + 30 * 60 * 1000;
+  return expires - created > 2 * 60 * 60 * 1000 ? 'later' : 'instant';
+}
+
+/** The web join link for a meeting on this app's server (same origin as the API). */
+export function buildMeetingWebLink(apiBaseUrl: string, code: string) {
+  const clean = String(code || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  return `${String(apiBaseUrl).replace(/\/+$/, '')}/meeting/${encodeURIComponent(clean)}`;
+}
+
+const toGoogleUtcStamp = (date: Date) => [
+  date.getUTCFullYear(),
+  String(date.getUTCMonth() + 1).padStart(2, '0'),
+  String(date.getUTCDate()).padStart(2, '0'),
+  'T',
+  String(date.getUTCHours()).padStart(2, '0'),
+  String(date.getUTCMinutes()).padStart(2, '0'),
+  String(date.getUTCSeconds()).padStart(2, '0'),
+  'Z',
+].join('');
+
+/**
+ * Google Calendar "event template" link, the same one web opens: a prefilled
+ * event in the user's own calendar with the meeting link, next full hour, 1 h.
+ */
+export function buildGoogleCalendarEventUrl(title: string, meetingLink: string, meetingCode: string) {
+  const start = new Date();
+  start.setMinutes(0, 0, 0);
+  start.setHours(start.getHours() + 1);
+  const end = new Date(start.getTime() + 60 * 60 * 1000);
+  const query = [
+    ['action', 'TEMPLATE'],
+    ['text', title],
+    ['dates', `${toGoogleUtcStamp(start)}/${toGoogleUtcStamp(end)}`],
+    ['details', `Join the Remote365 meeting: ${meetingLink}\nMeeting code: ${meetingCode}`],
+    ['location', meetingLink],
+  ].map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join('&');
+  return `https://calendar.google.com/calendar/render?${query}`;
+}
 
 export type MeetingMediaPrefs = {
   audioOn: boolean;
@@ -61,6 +110,9 @@ export function mapMeetingItem(row: any): MeetingItem {
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
     isExpired: Boolean(row.isExpired),
+    createdById: row.createdById ? String(row.createdById) : (row.createdBy?.id ? String(row.createdBy.id) : undefined),
+    createdByName: row.createdBy?.name || row.createdBy?.email || undefined,
+    variant: row.variant || undefined,
   };
 }
 

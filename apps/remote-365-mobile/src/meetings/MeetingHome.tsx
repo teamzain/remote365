@@ -3,9 +3,12 @@ import { Feather } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
+  Modal,
   Pressable,
   ScrollView,
   Share,
@@ -21,10 +24,14 @@ import { useResponsive } from '../lib/useResponsive';
 import { createMeeting, fetchMeetings } from './meetingApi';
 import { MeetingPreview } from './MeetingPreview';
 import {
+  buildGoogleCalendarEventUrl,
+  buildMeetingWebLink,
   extractMeetingCode,
   formatMeetingCode,
+  getMeetingKind,
   isMeetingJoinable,
   MeetingItem,
+  MeetingKind,
   MeetingUser,
 } from './meetingUtils';
 
@@ -111,9 +118,12 @@ export function MeetingHome({
   const [meetingCode, setMeetingCode] = useState('');
   const [preview, setPreview] = useState<PreviewTarget | null>(null);
 
-  // Nav-bar + button: same path as the "Start a new meeting" button below.
+  // New meeting opens the same three choices as web: instant, for later, or in
+  // Google Calendar. The nav-bar + button takes the same path.
+  const [showNewMenu, setShowNewMenu] = useState(false);
+  const [creatingKind, setCreatingKind] = useState<MeetingKind | null>(null);
   useEffect(() => {
-    if (createRequestToken > 0) setPreview({ mode: 'create' });
+    if (createRequestToken > 0) setShowNewMenu(true);
   }, [createRequestToken]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -168,7 +178,7 @@ export function MeetingHome({
     setBusy(true);
     setError('');
     try {
-      const meeting = await createMeeting(apiBaseUrl, token, `${user?.name || 'Remote 365'} meeting`);
+      const meeting = await createMeeting(apiBaseUrl, token, `${user?.name || 'Remote 365'} meeting`, 'instant');
       onMeetingsChange([meeting, ...meetings.filter((item) => item.id !== meeting.id)]);
       setPreview(null);
       onOpenMeeting(meeting.displayCode || meeting.sessionCode || meeting.id);
@@ -176,6 +186,40 @@ export function MeetingHome({
       setError(err.message || t('Could not create meeting.'));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // "For later" and "Google Calendar": create the link without joining it.
+  const createForLater = async (kind: 'later' | 'calendar') => {
+    setShowNewMenu(false);
+    if (!token) {
+      setError(t('Sign in to create a meeting.'));
+      return;
+    }
+    setCreatingKind(kind);
+    setError('');
+    try {
+      const meeting = await createMeeting(apiBaseUrl, token, `${user?.name || 'Remote 365'} meeting`, kind);
+      onMeetingsChange([meeting, ...meetings.filter((item) => item.id !== meeting.id)]);
+      const code = formatMeetingCode(meeting.displayCode || meeting.sessionCode || meeting.id);
+      const link = buildMeetingWebLink(apiBaseUrl, code);
+      if (kind === 'calendar') {
+        await Linking.openURL(buildGoogleCalendarEventUrl(meeting.name || 'Remote 365 meeting', link, code));
+        return;
+      }
+      Alert.alert(
+        t('Your meeting is ready'),
+        `${t('Share this code or link with the people you want to meet. It stays valid for later.')}\n\n${code}\n${link}`,
+        [
+          { text: t('Copy code'), onPress: () => { void copyCode(code); } },
+          { text: t('Share'), onPress: () => { void shareMeeting(meeting.name, code); } },
+          { text: t('Done'), style: 'cancel' },
+        ],
+      );
+    } catch (err: any) {
+      setError(err.message || t('Could not create meeting.'));
+    } finally {
+      setCreatingKind(null);
     }
   };
 
@@ -195,6 +239,7 @@ export function MeetingHome({
         message:
           `${t('Join my Remote 365 meeting')} "${name || 'Remote 365 meeting'}".\n` +
           `${t('Meeting code:')} ${formatMeetingCode(normalized)}\n` +
+          `${t('Join in your browser:')} ${buildMeetingWebLink(apiBaseUrl, normalized)}\n` +
           `${t('Open the Remote 365 app and enter the code, or tap:')} remote365://join?code=${encodeURIComponent(normalized)}`,
       });
     } catch { /* user dismissed the share sheet */ }
@@ -238,11 +283,11 @@ export function MeetingHome({
             <View style={[styles.actionBlock, { gap: scale(24) }]}>
               <View style={styles.copyBlock}>
                 <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[styles.sectionTitle, type(16, 22 / 16)]}>{t('Start a new meeting')}</Text>
-                <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[styles.bodyText, type(14, 20 / 14)]}>{t('Create an instant meeting')}</Text>
+                <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[styles.bodyText, type(14, 20 / 14)]}>{t('Instant, for later, or in Google Calendar')}</Text>
               </View>
-              <Pressable style={[styles.primaryButton, control(40)]} onPress={() => setPreview({ mode: 'create' })}>
+              <Pressable style={[styles.primaryButton, control(40)]} onPress={() => setShowNewMenu(true)} disabled={Boolean(creatingKind)}>
                 <ButtonGradient id="new-meeting" />
-                <Feather name="video" size={16} color="#FFFFFF" />
+                {creatingKind ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Feather name="video" size={16} color="#FFFFFF" />}
                 <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[styles.primaryButtonText, type(14, 20 / 14)]}>{t('New meeting')}</Text>
               </Pressable>
             </View>
@@ -302,6 +347,7 @@ export function MeetingHome({
                 meetings.slice(0, 8).map((meeting) => {
                   const code = formatMeetingCode(meeting.displayCode || meeting.sessionCode || meeting.id);
                   const joinable = isMeetingJoinable(meeting);
+                  const kind = getMeetingKind(meeting);
                   return (
                     <View key={meeting.id} style={styles.meetingRow}>
                       <Pressable
@@ -311,7 +357,16 @@ export function MeetingHome({
                       >
                         <Feather name="clock" size={18} color="#111315" />
                         <View style={styles.meetingCopy}>
-                          <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[styles.meetingName, type(14, 20 / 14)]} numberOfLines={1}>{meeting.name}</Text>
+                          <View style={styles.meetingTitleRow}>
+                            <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[styles.meetingName, styles.meetingNameFlex, type(14, 20 / 14)]} numberOfLines={1}>{meeting.name}</Text>
+                            <Text
+                              maxFontSizeMultiplier={maxFontSizeMultiplier}
+                              style={[styles.kindChip, KIND_CHIP_STYLES[kind], type(10, 14 / 10)]}
+                              numberOfLines={1}
+                            >
+                              {t(KIND_LABELS[kind])}
+                            </Text>
+                          </View>
                           {/* Meetings created by someone else are ones you were invited to. */}
                           {meeting.createdById && user?.id && meeting.createdById !== user.id ? (
                             <Text
@@ -349,6 +404,42 @@ export function MeetingHome({
       </ScrollView>
       </KeyboardAvoidingView>
 
+      <Modal visible={showNewMenu} transparent animationType="fade" onRequestClose={() => setShowNewMenu(false)}>
+        <Pressable style={styles.menuBackdrop} onPress={() => setShowNewMenu(false)}>
+          <Pressable style={[styles.menuSheet, { paddingBottom: Math.max(20, navClearance / 4) }]} onPress={() => undefined}>
+            <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[styles.menuTitle, type(16, 22 / 16)]}>{t('New meeting')}</Text>
+            {([
+              { kind: 'instant', icon: 'video', title: t('Start an instant meeting'), hint: t('Join now and invite people in.') },
+              { kind: 'later', icon: 'link-2', title: t('Create a meeting for later'), hint: t('Get a code and link to share. You join when it starts.') },
+              { kind: 'calendar', icon: 'calendar', title: t('Schedule in Google Calendar'), hint: t('Opens Google Calendar with the meeting link filled in.') },
+            ] as const).map((option) => (
+              <Pressable
+                key={option.kind}
+                style={styles.menuRow}
+                onPress={() => {
+                  if (option.kind === 'instant') {
+                    setShowNewMenu(false);
+                    setPreview({ mode: 'create' });
+                  } else {
+                    void createForLater(option.kind);
+                  }
+                }}
+              >
+                <View style={styles.menuIcon}>
+                  <Feather name={option.icon} size={18} color="#FF8A00" />
+                </View>
+                <View style={styles.menuCopy}>
+                  <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[styles.menuRowTitle, type(14, 20 / 14)]}>{option.title}</Text>
+                  <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[styles.menuRowHint, type(12, 17 / 12)]}>{option.hint}</Text>
+                </View>
+              </Pressable>
+            ))}
+            <Pressable style={styles.menuCancel} onPress={() => setShowNewMenu(false)}>
+              <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[styles.menuCancelText, type(14, 20 / 14)]}>{t('Cancel')}</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
       <MeetingPreview
         busy={busy}
         error={error}
@@ -363,7 +454,95 @@ export function MeetingHome({
 
 // Figma dp values verbatim. Type metrics live in the JSX via `type()` so the OS
 // font-size setting drives them; boxes that hold text get `control()` there too.
+const KIND_LABELS: Record<MeetingKind, string> = {
+  instant: 'Instant',
+  later: 'For later',
+  calendar: 'Google Calendar',
+};
+// Web's chip colours (green / amber / blue).
+const KIND_CHIP_STYLES: Record<MeetingKind, { backgroundColor: string; color: string }> = {
+  instant: { backgroundColor: '#ECFDF3', color: '#15803D' },
+  later: { backgroundColor: '#FFF4E5', color: '#B54708' },
+  calendar: { backgroundColor: '#EEF4FF', color: '#3B5BDB' },
+};
+
 const styles = StyleSheet.create(monaFontStyles({
+  meetingTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  meetingNameFlex: {
+    flexShrink: 1,
+  },
+  kindChip: {
+    borderRadius: 10,
+    flexShrink: 0,
+    fontWeight: '600',
+    overflow: 'hidden',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  menuBackdrop: {
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  menuSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    gap: 4,
+    paddingHorizontal: 16,
+    paddingTop: 18,
+  },
+  menuTitle: {
+    color: '#111315',
+    fontWeight: '600',
+    marginBottom: 6,
+    paddingHorizontal: 4,
+  },
+  menuRow: {
+    alignItems: 'center',
+    borderRadius: 12,
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 56,
+    paddingHorizontal: 4,
+    paddingVertical: 10,
+  },
+  menuIcon: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,138,0,0.12)',
+    borderRadius: 18,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  menuCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  menuRowTitle: {
+    color: '#111315',
+    fontWeight: '500',
+  },
+  menuRowHint: {
+    color: 'rgba(17,19,21,0.6)',
+  },
+  menuCancel: {
+    alignItems: 'center',
+    borderColor: 'rgba(26,29,33,0.3)',
+    borderRadius: 24,
+    borderWidth: 1,
+    justifyContent: 'center',
+    marginTop: 10,
+    minHeight: 44,
+  },
+  menuCancelText: {
+    color: '#111315',
+    fontWeight: '500',
+  },
   actionBlock: {
     gap: 24,
   },

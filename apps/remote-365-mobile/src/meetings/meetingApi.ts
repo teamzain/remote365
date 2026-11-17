@@ -1,4 +1,4 @@
-import { mapMeetingItem, MeetingItem } from './meetingUtils';
+import { mapMeetingItem, MeetingItem, MeetingKind } from './meetingUtils';
 
 export async function meetingFetch<T>(
   apiBaseUrl: string,
@@ -33,10 +33,16 @@ export async function fetchMeetings(apiBaseUrl: string, accessToken?: string | n
   return rows.map(mapMeetingItem);
 }
 
-export async function createMeeting(apiBaseUrl: string, accessToken: string, name: string): Promise<MeetingItem> {
+export async function createMeeting(
+  apiBaseUrl: string,
+  accessToken: string,
+  name: string,
+  kind: MeetingKind = 'instant',
+): Promise<MeetingItem> {
+  // Same body as web: 'variant' sets the link lifetime, 'kind' the stored label.
   const row = await meetingFetch<any>(apiBaseUrl, '/api/chat/meetings', {
     method: 'POST',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, kind, ...(kind === 'instant' ? {} : { variant: 'later' }) }),
   }, accessToken);
   return mapMeetingItem(row);
 }

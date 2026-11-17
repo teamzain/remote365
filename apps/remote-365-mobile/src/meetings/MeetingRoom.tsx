@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Animated,
+  Alert,
   Easing,
   Keyboard,
   KeyboardAvoidingView,
@@ -74,9 +75,11 @@ type MeetingRoomProps = {
   onLeave: () => void;
   token: string | null;
   user: MeetingUser | null;
+  /** Bumped by the parent on each Android back press while this screen is open. */
+  backRequestToken?: number;
 };
 
-export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user }: MeetingRoomProps) {
+export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backRequestToken = 0 }: MeetingRoomProps) {
   useKeepAwake();
   const insets = useSafeAreaInsets();
   const { type, textSize, control, cappedFontScale, maxFontSizeMultiplier, width: windowWidth } = useResponsive();
@@ -145,6 +148,31 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user }: Mee
   const [shareRequest, setShareRequest] = useState<{ id: string; name: string } | null>(null);
   const [showRecordingMenu, setShowRecordingMenu] = useState(false);
   const [showEndOptions, setShowEndOptions] = useState(false);
+
+  // Android back: close whatever is open first, and never drop the call silently.
+  // It used to unmount the meeting straight away, so a stray back swipe ended
+  // your call with no warning.
+  useEffect(() => {
+    if (!backRequestToken) return;
+    if (showEndOptions) { setShowEndOptions(false); return; }
+    if (showMore) { setShowMore(false); return; }
+    if (showChat) { setShowChat(false); return; }
+    if (showPeople) { setShowPeople(false); return; }
+    if (showSettings) { setShowSettings(false); return; }
+    if (isImmersive) { setIsImmersive(false); return; }
+    if (waitingForHost) { leave(); return; }
+    if (isHost) { setShowEndOptions(true); return; }
+    Alert.alert(
+      t('Leave meeting?'),
+      t('You will leave the call. It keeps going for everyone else.'),
+      [
+        { text: t('Stay'), style: 'cancel' },
+        { text: t('Leave'), style: 'destructive', onPress: () => leave() },
+      ],
+    );
+    // Only a new back press should act; the state above is read at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backRequestToken]);
   const [mirrorVideo, setMirrorVideo] = useState(true);
   const [noiseSuppression, setNoiseSuppression] = useState(true);
   const [focusedId, setFocusedId] = useState<string | null>(null);

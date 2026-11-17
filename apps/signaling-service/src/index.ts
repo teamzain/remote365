@@ -816,6 +816,35 @@ async function finalizeMeetingJoin(connectionId: string, meetingId: string, entr
       });
       await (prisma as any).remoteSession.update({ where: { id: meeting.id }, data: liveData });
       if (meeting.status !== 'IN_PROGRESS') void publishMeetingSync(meeting, 'started');
+    } else {
+      // Joined with the code or link, not invited: remember it, so the meeting
+      // shows in this person's Recent meetings like the ones they created or were
+      // invited to (the list only covers creator + collaborators, which left it
+      // empty for everyone who joins by code).
+      try {
+        const joiner = await (prisma as any).user.findUnique({
+          where: { id: decodedUserId },
+          select: { email: true, name: true }
+        });
+        if (joiner?.email) {
+          const now = new Date();
+          await (prisma as any).remoteSessionCollaborator.upsert({
+            where: { sessionId_email: { sessionId: meeting.id, email: joiner.email } },
+            update: { status: 'JOINED', joinedAt: now, userId: decodedUserId },
+            create: {
+              sessionId: meeting.id,
+              userId: decodedUserId,
+              email: joiner.email,
+              name: joiner.name || participantName || null,
+              status: 'JOINED',
+              joinedAt: now
+            }
+          });
+          void publishMeetingSync({ ...meeting, createdById: null, collaborators: [{ userId: decodedUserId }] }, 'joined');
+        }
+      } catch (err) {
+        console.warn('[Meeting] Could not record joiner for ' + meeting.sessionCode + ':', err);
+      }
     }
 
     if (isFirstRecordedJoin && meeting.conversationId) {

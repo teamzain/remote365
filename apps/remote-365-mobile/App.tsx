@@ -174,6 +174,10 @@ type MeetingItem = {
    *  an invited meeting was indistinguishable from one you created. */
   createdById?: string;
   createdByName?: string;
+  sessionCode?: string;
+  expiresAt?: string;
+  isExpired?: boolean;
+  variant?: string;
 };
 
 async function rawApiFetch<T>(
@@ -381,6 +385,11 @@ function mapMeetingItem(row: any): MeetingItem {
     createdAt: row.createdAt,
     createdById: row.createdById ? String(row.createdById) : (row.createdBy?.id ? String(row.createdBy.id) : undefined),
     createdByName: row.createdBy?.name || row.createdBy?.email || undefined,
+    // Without these the list could not tell expired links (or the kind) apart.
+    sessionCode: row.sessionCode,
+    expiresAt: row.expiresAt,
+    isExpired: Boolean(row.isExpired),
+    variant: row.variant || undefined,
   };
 }
 
@@ -2632,6 +2641,8 @@ function AppContent() {
     });
   };
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
+  // Bumped on Android back while in a meeting; MeetingRoom decides what it means.
+  const [meetingBackToken, setMeetingBackToken] = useState(0);
   const [previewMeetingId, setPreviewMeetingId] = useState<string | null>(null);
   const [activeConversation, setActiveConversation] = useState<ConversationItem | null>(null);
   // Remote-control session state.
@@ -2723,6 +2734,7 @@ function AppContent() {
   const goToTab = (tab: MainTab) => {
     setScreen('connect');
     setActiveTab(tab);
+    if (tab === 'meeting') void refreshMeetings();
   };
 
   const goBackOneScreen = () => {
@@ -2734,9 +2746,8 @@ function AppContent() {
       return true;
     }
     if (screen === 'meeting-room') {
-      setScreen('connect');
-      setActiveTab('meeting');
-      setActiveMeetingId(null);
+      // The meeting decides: close a panel, or ask before leaving the call.
+      setMeetingBackToken((n) => n + 1);
       return true;
     }
     if (screen === 'remote-control') {
@@ -3002,6 +3013,19 @@ function AppContent() {
 
   // Silent devices+groups refetch for realtime sync pushes — no spinner, and
   // chat/meeting state is left alone (web parity: fetchDevices(true)).
+  // Meetings list, kept live like web: refetched on a 'meetings' sync push (a
+  // meeting created, joined, started or ended anywhere on this account), on
+  // socket reconnect and when the Meeting tab opens.
+  const refreshMeetings = async (token = authToken) => {
+    if (!token) return;
+    try {
+      const rows = await apiFetch<any[]>('/api/chat/meetings', {}, token);
+      setMeetings((Array.isArray(rows) ? rows : []).map(mapMeetingItem));
+    } catch {
+      // Keep the last list.
+    }
+  };
+
   const refreshDevices = async (token = authToken) => {
     if (!token) return;
     try {
@@ -3043,6 +3067,7 @@ function AppContent() {
   // array don't re-send identical subscriptions.
   const subscribedKeysRef = useRef('');
   const deviceSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const meetingSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appSocketReadyRef = useRef(false);
 
   // App-level chat socket: keeps the user "online" whenever the app is open and
@@ -3130,8 +3155,14 @@ function AppContent() {
       // and the server-side watch set is empty again — resync both.
       subscribedKeysRef.current = '';
       refreshDevices();
+      void refreshMeetings();
     },
     onAccountSync: (scope) => {
+      if (scope === 'meetings') {
+        if (meetingSyncTimerRef.current) clearTimeout(meetingSyncTimerRef.current);
+        meetingSyncTimerRef.current = setTimeout(() => { void refreshMeetings(); }, 400);
+        return;
+      }
       if (scope !== 'devices') return;
       // Group/device mutations arrive in bursts (assign fires one per device);
       // trailing-debounce the refetch instead of refetching per event.
@@ -3310,6 +3341,7 @@ function AppContent() {
             }}
             token={authToken}
             user={user}
+            backRequestToken={meetingBackToken}
           />
         ) : screen === 'launching' ? (
           <LaunchingScreen onContinue={() => setScreen('connect')} />
