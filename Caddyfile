@@ -81,6 +81,12 @@
             reverse_proxy auth-service:3001
         }
 
+        # App Store billing (StoreKit /verify and the App Store Server
+        # Notifications push) also lives in auth-service's routes/billing.ts.
+        handle /api/billing/app-store* {
+            reverse_proxy auth-service:3001
+        }
+
         # Billing API
         handle /api/billing* {
             uri strip_prefix /api
