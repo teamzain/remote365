@@ -1,7 +1,16 @@
-# Devices tab
+# Devices tab: by name when Maestro can see it (it can on the Connect screen), else by position
 appId: ai.remote365.mobile
 ---
-- tapOn:
-    point: "32%,91%"
+- runFlow:
+    when:
+      visible: "Devices"
+    commands:
+      - tapOn: "Devices"
+- runFlow:
+    when:
+      notVisible: "Devices"
+    commands:
+      - tapOn:
+          point: "32%,91%"
 - waitForAnimationToEnd:
     timeout: 6000

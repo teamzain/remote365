@@ -14,6 +14,9 @@ on:
       app_url:
         description: 'EAS iOS simulator build artifact URL (.tar.gz)'
         required: true
+      devices:
+        description: 'Which simulators to capture (iphone, ipad or both)'
+        default: 'iphone ipad'
 
 permissions:
   contents: read
@@ -51,6 +54,8 @@ jobs:
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
 
       - name: Capture
+        env:
+          DEVICES: ${{ inputs.devices }}
         run: bash scripts/app-store-screenshots/capture.sh
 
       - name: Upload screenshots

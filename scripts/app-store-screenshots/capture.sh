@@ -70,7 +70,8 @@ shoot() {
   xcrun simctl shutdown "$udid" || true
 }
 
-shoot shot-iphone "iPhone 16 Pro Max" shots/iphone-6.9 iphone
-shoot shot-ipad "iPad Pro 13-inch (M4)" shots/ipad-13 ipad
+DEVICES="${DEVICES:-iphone ipad}"
+case " $DEVICES " in *" iphone "*) shoot shot-iphone "iPhone 16 Pro Max" shots/iphone-6.9 iphone ;; esac
+case " $DEVICES " in *" ipad "*) shoot shot-ipad "iPad Pro 13-inch (M4)" shots/ipad-13 ipad ;; esac
 
 for f in shots/*/*.png; do echo "$f $(sips -g pixelWidth -g pixelHeight "$f" | awk '/pixel/{printf "%s ", $2}')"; done

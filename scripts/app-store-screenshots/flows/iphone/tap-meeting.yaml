@@ -1,7 +1,16 @@
-# Meeting tab
+# Meeting tab: by name when Maestro can see it (it can on the Connect screen), else by position
 appId: ai.remote365.mobile
 ---
-- tapOn:
-    point: "67%,91%"
+- runFlow:
+    when:
+      visible: "Meeting"
+    commands:
+      - tapOn: "Meeting"
+- runFlow:
+    when:
+      notVisible: "Meeting"
+    commands:
+      - tapOn:
+          point: "67%,91%"
 - waitForAnimationToEnd:
     timeout: 6000
