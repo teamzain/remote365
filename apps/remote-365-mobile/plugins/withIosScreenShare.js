@@ -167,10 +167,12 @@ const withExtensionTarget = (config, { extensionName, appleTeamId, deploymentTar
 
     const target = project.addTarget(extensionName, 'app_extension', extensionName, extensionBundleId);
 
-    project.addBuildPhase([], 'PBXSourcesBuildPhase', 'Sources', target.uuid);
-    project.addBuildPhase([], 'PBXResourcesBuildPhase', 'Resources', target.uuid);
-    project.addBuildPhase([], 'PBXFrameworksBuildPhase', 'Frameworks', target.uuid);
-
+    // The group comes first: addPbxGroup creates the file references AND their
+    // PBXBuildFile entries, and addBuildPhase below reuses those entries by path.
+    // (The old order, an empty Sources phase followed by addSourceFile(), compiled
+    // nothing: addSourceFile() returns early for a file the project already has, so
+    // the appex shipped without an executable and App Store Connect rejected the
+    // upload with ITMS-90085 "No architectures in the binary".)
     const group = project.addPbxGroup(
       [...EXTENSION_SOURCES, 'Info.plist', `${extensionName}.entitlements`],
       extensionName,
@@ -185,9 +187,9 @@ const withExtensionTarget = (config, { extensionName, appleTeamId, deploymentTar
       }
     });
 
-    for (const file of EXTENSION_SOURCES) {
-      project.addSourceFile(file, { target: target.uuid }, group.uuid);
-    }
+    project.addBuildPhase(EXTENSION_SOURCES, 'PBXSourcesBuildPhase', 'Sources', target.uuid);
+    project.addBuildPhase([], 'PBXResourcesBuildPhase', 'Resources', target.uuid);
+    project.addBuildPhase([], 'PBXFrameworksBuildPhase', 'Frameworks', target.uuid);
 
     const configurations = project.pbxXCBuildConfigurationSection();
     for (const key of Object.keys(configurations)) {
