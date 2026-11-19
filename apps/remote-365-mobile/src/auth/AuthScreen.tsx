@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { MAX_FONT_SCALE } from '../lib/responsive';
 import { useResponsive } from '../lib/useResponsive';
 import { useTranslation } from '../lib/i18n';
@@ -105,6 +106,8 @@ export function AuthScreen({ initialMode, request, onAuthenticated, onOAuth, onB
   const [legal, setLegal] = useState<'privacy' | 'terms' | null>(null);
   const [kind, setKind] = useState<'personal' | 'business'>('personal');
   const [step, setStep] = useState(1);
+  // Sign in with Apple: iOS only, and only where the device supports it.
+  const [appleAvailable, setAppleAvailable] = useState(false);
   const { gutter, compact, stackActions, type, textSize, maxFontSizeMultiplier } = useResponsive();
   const { t } = useTranslation();
   const passwordRef = useRef<TextInput>(null);
@@ -145,6 +148,7 @@ export function AuthScreen({ initialMode, request, onAuthenticated, onOAuth, onB
 
   useEffect(() => { setError(initialError || ''); }, [initialError]);
   useEffect(() => { let active = true; AsyncStorage.getItem(REMEMBER_KEY).then(v => { if (active) setRemember(v !== 'false'); }).catch(() => {}); return () => { active = false; }; }, []);
+  useEffect(() => { if (Platform.OS !== 'ios') return; let active = true; AppleAuthentication.isAvailableAsync().then(v => { if (active) setAppleAvailable(v); }).catch(() => {}); return () => { active = false; }; }, []);
   useEffect(() => { if (!cooldown) return; const timer = setTimeout(() => setCooldown(v => v - 1), 1000); return () => clearTimeout(timer); }, [cooldown]);
   const changeMode = (next: typeof mode) => { setMode(next); setError(''); setInfo(''); setCode(''); };
   const post = (path: string, body: object) => request<any>(`/api/auth/${path}`, { method: 'POST', body: JSON.stringify(body) });
@@ -189,6 +193,24 @@ export function AuthScreen({ initialMode, request, onAuthenticated, onOAuth, onB
     if (mode === 'signup') { await sendCode(); return; }
     if (!/^\d{6}$/.test(code)) throw new Error(t('Enter the 6-digit verification code.'));
     await onAuthenticated(await post('register', { email: targetEmail, password, verificationCode: code, name: targetEmail.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), ...extras }), true);
+  });
+  // Apple shares the name only on the first authorization (never in the token),
+  // so it is sent alongside. The response is the same shape as a password login.
+  const signInWithApple = () => run(async () => {
+    let credential: AppleAuthentication.AppleAuthenticationCredential;
+    try {
+      credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [AppleAuthentication.AppleAuthenticationScope.FULL_NAME, AppleAuthentication.AppleAuthenticationScope.EMAIL],
+      });
+    } catch (err: any) {
+      if (err?.code === 'ERR_REQUEST_CANCELED') return;
+      throw err;
+    }
+    if (!credential.identityToken) throw new Error(t('Apple did not return a sign-in token. Please try again.'));
+    const fullName = [credential.fullName?.givenName, credential.fullName?.familyName].filter(Boolean).join(' ');
+    const result = await post('apple', { identityToken: credential.identityToken, fullName: fullName || undefined, accountType: mode === 'signup' ? kind : undefined });
+    if (result.twoFactorRequired) { setTempToken(result.tempToken); changeMode('2fa'); return; }
+    await onAuthenticated(result, remember);
   });
   const nextStep = () => {
     const invalid = Object.values(step === 1 ? validateCompanyStep(business) : validateAddressStep(business, states.length > 0))[0];
@@ -243,6 +265,14 @@ export function AuthScreen({ initialMode, request, onAuthenticated, onOAuth, onB
           {mode === 'verify' && <View style={s.row}><Pressable style={s.linkButton} disabled={busy} onPress={() => changeMode('signup')}><Text style={[s.link, textSize(13)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{t('Back')}</Text></Pressable><Pressable style={s.linkButton} disabled={busy || cooldown > 0} onPress={() => run(sendCode)}><Text style={[s.link, textSize(13)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{cooldown ? `${t('Resend Code In')} ${cooldown}s` : t('Resend Code')}</Text></Pressable></View>}
           {(mode === 'login' || mode === 'signup') ? <>
             <View style={s.row}><View style={s.line} /><Text style={[s.subtitle, textSize(13)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{t('Or')}</Text><View style={s.line} /></View>
+            {appleAvailable && <View pointerEvents={busy ? 'none' : 'auto'} style={busy && s.disabled}>
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={mode === 'signup' ? AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP : AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                cornerRadius={4}
+                style={s.apple}
+                onPress={signInWithApple} />
+            </View>}
             {(['google', 'microsoft'] as const).map(provider => <Pressable key={provider} disabled={busy} style={s.google} onPress={() => run(() => onOAuth(provider, remember, mode === 'signup' && kind === 'business'))}>
               {provider === 'google' ? <Svg width={20} height={20} viewBox="0 0 24 24">
                 <Path d="M22.56 12.25c0-.73-.06-1.42-.19-2.09H12v3.96h5.92c-.26 1.28-1.04 2.37-2.21 3.1v2.58h3.57c2.08-1.92 3.28-4.74 3.28-7.55z" fill="#4285F4" />
@@ -281,6 +311,7 @@ const s = StyleSheet.create({
   link: { color: '#d97000', fontFamily: 'MonaSans-SemiBold' }, linkButton: { minHeight: 44, justifyContent: 'center' },
   button: { backgroundColor: '#FF9B23', borderRadius: 4, minHeight: 44, alignItems: 'center', justifyContent: 'center' }, buttonText: { color: '#111315', fontFamily: 'MonaSans-Medium' }, disabled: { opacity: 0.5 },
   google: { borderWidth: 1, borderColor: '#babcbd', borderRadius: 4, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 }, googleMark: { color: '#4285F4', fontSize: 22, fontWeight: '700' },
+  apple: { width: '100%', height: 44 },
   line: { height: 1, backgroundColor: '#d8d9da', flex: 1 }, segment: { flex: 1, minHeight: 52, padding: 8, borderRadius: 4, borderWidth: 1, borderColor: '#babcbd', justifyContent: 'center' }, selected: { backgroundColor: '#111315' }, white: { color: '#fff' },
   error: { color: '#b42318' }, info: { color: '#27724a' }, terms: { color: '#737579', textAlign: 'center' },
 });

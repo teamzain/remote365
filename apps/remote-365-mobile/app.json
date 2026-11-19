@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Remote 365 Mobile",
+    "name": "Remote365",
     "slug": "remote-365-mobile",
     "owner": "zainuul",
     "version": "1.0.0",
@@ -14,14 +14,15 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.remote365.mobile",
+      "bundleIdentifier": "ai.remote365.mobile",
       "infoPlist": {
-        "NSCameraUsageDescription": "Allow Remote 365 to use the camera during meetings.",
-        "NSMicrophoneUsageDescription": "Allow Remote 365 to use the microphone during meetings.",
+        "NSCameraUsageDescription": "Allow Remote365 to use the camera during meetings.",
+        "NSMicrophoneUsageDescription": "Allow Remote365 to use the microphone during meetings.",
         "ITSAppUsesNonExemptEncryption": false
       },
       "bitcode": false,
-      "buildNumber": "2"
+      "buildNumber": "1",
+      "usesAppleSignIn": true
     },
     "android": {
       "package": "com.remote365.mobile",
@@ -75,12 +76,13 @@
         }
       ],
       "expo-iap",
+      "expo-apple-authentication",
       [
         "./plugins/withIosScreenShare.js",
         {
-          "appleTeamId": "TG52K552J4",
+          "appleTeamId": "8UP23W8RPW",
           "extensionName": "BroadcastExtension",
-          "appGroup": "group.com.remote365.mobile.broadcast"
+          "appGroup": "group.ai.remote365.mobile.broadcast"
         }
       ]
     ],
@@ -93,10 +95,10 @@
               "appExtensions": [
                 {
                   "targetName": "BroadcastExtension",
-                  "bundleIdentifier": "com.remote365.mobile.BroadcastExtension",
+                  "bundleIdentifier": "ai.remote365.mobile.BroadcastExtension",
                   "entitlements": {
                     "com.apple.security.application-groups": [
-                      "group.com.remote365.mobile.broadcast"
+                      "group.ai.remote365.mobile.broadcast"
                     ]
                   }
                 }

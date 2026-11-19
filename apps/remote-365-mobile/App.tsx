@@ -3394,6 +3394,7 @@ function AppContent() {
             onBack={() => setScreen('settings')}
             apiBaseUrl={API_BASE_URL}
             authToken={authToken}
+            userId={user?.id}
             onViewPrivacy={() => setScreen('privacy-policy')}
           />
         ) : screen === 'account' ? (

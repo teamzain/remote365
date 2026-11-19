@@ -106,3 +106,28 @@ export async function verifyPlayPurchase(
     return { success: false, error: 'Network error while confirming your purchase.' };
   }
 }
+
+/** Send a StoreKit 2 transaction (its JWS) to the server, which verifies it with Apple's certificates. */
+export async function verifyAppStorePurchase(
+  apiBaseUrl: string,
+  token: string | null,
+  signedTransaction: string,
+): Promise<{ success: true; plan: 'SOLO' | 'PRO' | 'BUSINESS' } | { success: false; error?: string; permanent?: boolean }> {
+  try {
+    const res = await fetch(`${apiBaseUrl}/api/billing/app-store/verify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ signedTransaction }),
+    });
+    const text = await res.text();
+    const data = text ? JSON.parse(text) : {};
+    // 4xx is a final answer about this transaction; 5xx/network is worth retrying later.
+    if (!res.ok) return { success: false, error: data?.error || 'Could not verify the purchase.', permanent: res.status >= 400 && res.status < 500 };
+    return { success: true, plan: data.plan };
+  } catch {
+    return { success: false, error: 'Network error while confirming your purchase.' };
+  }
+}

@@ -9,7 +9,22 @@ import { useResponsive } from '../lib/useResponsive';
 import { useTranslation } from '../lib/i18n';
 import { monaFontStyles } from '../lib/monaSans';
 import { usePlayBilling } from './usePlayBilling';
-import { isPurchasable } from './playProducts';
+import { useAppStoreBilling, type StoreBillingState } from './useAppStoreBilling';
+import { APPLE_STANDARD_EULA_URL } from './appStoreProducts';
+import { isPurchasable, type PurchasablePlanId } from './playProducts';
+
+const IS_IOS = Platform.OS === 'ios';
+
+/**
+ * The store for this platform: StoreKit on iOS, Play Billing on Android. Chosen once at
+ * module load (the platform never changes at runtime), so the hook order is stable.
+ */
+const useStoreBilling: (
+  apiBaseUrl: string,
+  authToken: string | null,
+  onEntitled: (plan: PurchasablePlanId) => void,
+  userId?: string | null,
+) => StoreBillingState = IS_IOS ? useAppStoreBilling : usePlayBilling;
 
 type Period = 'monthly' | 'yearly';
 const YEARLY_DISCOUNT = 0.25; // 25% off when billed yearly
@@ -17,15 +32,20 @@ const YEARLY_DISCOUNT = 0.25; // 25% off when billed yearly
 /**
  * Price to render.
  *
- * `playPrice` wins whenever Play has an offer for this plan: Play sets prices per country
- * and may change them, so showing the catalogue number instead of what Play will actually
- * charge is both wrong for the user and a Play policy rejection. The catalogue figures
- * below remain the fallback for iOS and for a device with no Play Store.
+ * `storePrice` wins whenever the store has a product for this plan: Play and the App Store
+ * set prices per country and may change them, so showing the catalogue number instead of
+ * what the store will actually charge is both wrong for the user and a store rejection.
+ * On iOS the catalogue is never shown for a paid plan; Apple's price, with its period, or
+ * nothing. The catalogue figures remain the fallback on a device with no Play Store.
  */
-function priceFor(plan: Plan, period: Period, t: (s: string) => string, playPrice?: string): string {
+function priceFor(plan: Plan, period: Period, t: (s: string) => string, storePrice?: string, storeLoading = false): string {
   if (typeof plan.price !== 'number') return t('Custom');
   if (plan.price === 0) return t('Free');
-  if (playPrice) return playPrice;
+  if (IS_IOS) {
+    if (storePrice) return `${storePrice} / ${period === 'monthly' ? t('month') : t('year')}`;
+    return storeLoading ? '…' : t('Not available in the App Store yet');
+  }
+  if (storePrice) return storePrice;
   if (period === 'monthly') return `$${plan.price}/mo`;
   const yearly = Math.round(plan.price * 12 * (1 - YEARLY_DISCOUNT));
   return `$${yearly}/yr`;
@@ -39,11 +59,14 @@ function seatsLabel(plan: Plan, t: (s: string) => string): string {
 export function UpgradePlanScreen({
   apiBaseUrl,
   authToken,
+  userId,
   onBack,
   onViewPrivacy,
 }: {
   apiBaseUrl: string;
   authToken: string | null;
+  /** Tags App Store purchases with the buyer so the server can refuse them for anyone else. */
+  userId?: string | null;
   onBack: () => void;
   onViewPrivacy?: () => void;
 }) {
@@ -56,12 +79,12 @@ export function UpgradePlanScreen({
   const { gutter, type, textSize, maxFontSizeMultiplier } = useResponsive();
   const { t: translate } = useTranslation();
 
-  const play = usePlayBilling(apiBaseUrl, authToken, (planId) => {
+  const play = useStoreBilling(apiBaseUrl, authToken, (planId) => {
     setCurrentPlan(planId);
     setMessage({ tone: 'ok', text: `${translate("You're now on the")} ${planId.charAt(0) + planId.slice(1).toLowerCase()} ${translate('plan.')}` });
-  });
+  }, userId);
 
-  /** Play's localised price for a plan, or undefined when Play has no offer for it. */
+  /** The store's localised price for a plan, or undefined when the store has no product for it. */
   const playPriceFor = (plan: Plan): string | undefined =>
     play.available && isPurchasable(plan.id) ? play.prices[`${plan.id}:${period}`]?.displayPrice : undefined;
 
@@ -94,17 +117,18 @@ export function UpgradePlanScreen({
       void Linking.openURL('mailto:sales@remote365.ai?subject=Enterprise%20plan%20enquiry');
       return;
     }
-    // Paid plans go through Google Play Billing. There is deliberately no fallback to the
-    // old changePlan() call: that endpoint granted a paid plan with no payment, and
-    // taking payment for in-app digital goods outside Play Billing is a policy violation.
+    // Paid plans go through the platform store (Play Billing / App Store). There is
+    // deliberately no fallback to the old changePlan() call: that endpoint granted a paid
+    // plan with no payment, and selling in-app digital goods outside the store is a
+    // policy violation on both stores.
     if (!isPurchasable(plan.id)) {
       setMessage({ tone: 'err', text: translate('That plan cannot be purchased from the app.') });
       return;
     }
-    // Only a missing Play Store blocks here. A dropped connection or a stale product
+    // Only an unsupported platform blocks here. A dropped connection or a stale product
     // list is retried inside buy(), which used to be skipped by an `available` check.
-    if (Platform.OS !== 'android') {
-      setMessage({ tone: 'err', text: translate('Google Play is unavailable, so plans cannot be changed here.') });
+    if (Platform.OS !== 'android' && Platform.OS !== 'ios') {
+      setMessage({ tone: 'err', text: translate('In-app purchases are not available on this device.') });
       return;
     }
     setMessage(null);
@@ -134,7 +158,7 @@ export function UpgradePlanScreen({
                   <Text style={[styles.planTitle, type(14, 20 / 14)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{detailPlan.name} {translate('Plan')}</Text>
                   <View style={styles.detailBody}>
                     <Text style={[styles.planUser, type(12, 17 / 12)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{seatsLabel(detailPlan, translate)}</Text>
-                    <Text style={[styles.planPrice, type(16, 23 / 16)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{priceFor(detailPlan, period, translate, playPriceFor(detailPlan))}</Text>
+                    <Text style={[styles.planPrice, type(16, 23 / 16)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{priceFor(detailPlan, period, translate, playPriceFor(detailPlan), play.loading)}</Text>
                     <Text style={[styles.planDescription, type(10, 14 / 10)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{detailPlan.description}</Text>
                     {detailPlan.features.map((f) => (
                       <View key={f} style={styles.detailFeatureRow}>
@@ -204,7 +228,7 @@ export function UpgradePlanScreen({
                         </View>
                         <View style={styles.planDetails}>
                           <Text style={[styles.planUser, type(12, 17 / 12)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{seatsLabel(plan, translate)}</Text>
-                          <Text style={[styles.planPrice, type(16, 23 / 16)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{priceFor(plan, period, translate, playPriceFor(plan))}</Text>
+                          <Text style={[styles.planPrice, type(16, 23 / 16)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{priceFor(plan, period, translate, playPriceFor(plan), play.loading)}</Text>
                           <Text style={[styles.planDescription, type(10, 14 / 10)]} maxFontSizeMultiplier={maxFontSizeMultiplier} numberOfLines={2}>{plan.description}</Text>
                         </View>
                       </View>
@@ -230,6 +254,25 @@ export function UpgradePlanScreen({
       </ScrollView>
 
       <View style={styles.footer}>
+        {IS_IOS ? (
+          <>
+            {/* App Store Review 3.1.2: auto-renewal terms, restore, and Terms of Use (EULA) on the paywall. */}
+            <Text style={[styles.footerSub, type(9, 12 / 9)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+              {translate('Payment is charged to your Apple Account when you confirm the purchase. The subscription renews automatically at the same price and period unless you cancel it at least 24 hours before the current period ends. Manage or cancel it in your Apple Account settings.')}
+            </Text>
+            <View style={styles.footerLinks}>
+              <Pressable disabled={play.restoring} onPress={() => { setMessage(null); void play.restore?.(); }}>
+                <Text style={[styles.footerMain, type(11, 15 / 11)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{play.restoring ? translate('Restoring…') : translate('Restore Purchases')}</Text>
+              </Pressable>
+              <Pressable onPress={() => { void play.manage?.(); }}>
+                <Text style={[styles.footerMain, type(11, 15 / 11)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{translate('Manage Subscription')}</Text>
+              </Pressable>
+              <Pressable onPress={() => { void Linking.openURL(APPLE_STANDARD_EULA_URL); }}>
+                <Text style={[styles.footerMain, type(11, 15 / 11)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{translate('Terms of Use (EULA)')}</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : null}
         <Pressable onPress={onViewPrivacy}>
           <Text style={[styles.footerMain, type(11, 15 / 11)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{translate('Privacy Policy')}</Text>
         </Pressable>
@@ -386,6 +429,7 @@ const styles = StyleSheet.create(monaFontStyles({
     paddingVertical: 12,
     width: '100%'
   },
-  footerMain: { color: 'rgba(26, 29, 33, 0.6)', textAlign: 'center', textDecorationLine: 'underline' },
+  footerMain: { color: 'rgba(26, 29, 33, 0.6)', textAlign: 'center', textDecorationLine: 'underline', paddingVertical: 4 },
+  footerLinks: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', columnGap: 16 },
   footerSub: { color: 'rgba(26, 29, 33, 0.5)', textAlign: 'center' },
 }));
