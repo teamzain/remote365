@@ -88,8 +88,8 @@ const conversations = [
 
 const meetings = [
   { id: 'm1', name: 'Daily IT stand-up', sessionCode: '482 913 557', displayCode: '482 913 557', status: 'ACTIVE', variant: 'instant', createdAt: iso(10 * MIN), expiresAt: new Date(now + 2 * HOUR).toISOString(), createdBy: { id: user.id, name: user.name } },
-  { id: 'm2', name: 'Laptop rollout review', sessionCode: '730 118 264', displayCode: '730 118 264', status: 'SCHEDULED', variant: 'later', createdAt: iso(2 * HOUR), expiresAt: new Date(now + DAY).toISOString(), createdBy: { id: 'u-priya', name: 'Priya Shah' } },
-  { id: 'm3', name: 'Quarterly security check', sessionCode: '915 640 382', displayCode: '915 640 382', status: 'SCHEDULED', variant: 'calendar', createdAt: iso(DAY), expiresAt: new Date(now + 3 * DAY).toISOString(), createdBy: { id: user.id, name: user.name } },
+  { id: 'm2', name: 'Laptop rollout review', sessionCode: '730 118 264', displayCode: '730 118 264', status: 'ACTIVE', variant: 'later', createdAt: iso(2 * HOUR), expiresAt: new Date(now + DAY).toISOString(), createdBy: { id: 'u-priya', name: 'Priya Shah' } },
+  { id: 'm3', name: 'Quarterly security check', sessionCode: '915 640 382', displayCode: '915 640 382', status: 'ACTIVE', variant: 'calendar', createdAt: iso(DAY), expiresAt: new Date(now + 3 * DAY).toISOString(), createdBy: { id: user.id, name: user.name } },
 ];
 
 let plans = null;

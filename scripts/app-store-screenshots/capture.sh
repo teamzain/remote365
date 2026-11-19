@@ -20,6 +20,19 @@ run() { # udid flow-file
   maestro --device "$1" test "$2" || echo "flow failed: $2"
 }
 
+# Tap, then confirm the screen changed; a tap right after a new Maestro session is
+# sometimes dropped, so retry up to twice when the screenshot is byte-identical.
+tap() { # udid flow-file
+  local udid="$1" flow="$2" i
+  xcrun simctl io "$udid" screenshot /tmp/before.png >/dev/null 2>&1
+  for i in 1 2 3; do
+    run "$udid" "$flow"; sleep 3
+    xcrun simctl io "$udid" screenshot /tmp/after.png >/dev/null 2>&1
+    cmp -s /tmp/before.png /tmp/after.png || return 0
+    echo "screen unchanged after $flow (try $i)"
+  done
+}
+
 shoot() {
   local name="$1" type="$2" out="$3" dev="$4"
   local udid
@@ -44,14 +57,14 @@ shoot() {
 
   for target in chat:04-chat meeting:03-meeting devices:01-devices; do
     run "$udid" "$FLOWS/launch.yaml"; sleep 3
-    run "$udid" "$FLOWS/$dev/tap-${target%%:*}.yaml"; sleep 3
+    tap "$udid" "$FLOWS/$dev/tap-${target%%:*}.yaml"
     xcrun simctl io "$udid" screenshot "$out/${target##*:}.png"
   done
 
   run "$udid" "$FLOWS/launch.yaml"; sleep 3
-  run "$udid" "$FLOWS/$dev/tap-settings.yaml"; sleep 3
+  tap "$udid" "$FLOWS/$dev/tap-settings.yaml"
   xcrun simctl io "$udid" screenshot "$out/x-settings.png"
-  run "$udid" "$FLOWS/$dev/tap-upgrade.yaml"; sleep 4
+  tap "$udid" "$FLOWS/$dev/tap-upgrade.yaml"; sleep 1
   xcrun simctl io "$udid" screenshot "$out/x-upgrade.png"
 
   xcrun simctl shutdown "$udid" || true

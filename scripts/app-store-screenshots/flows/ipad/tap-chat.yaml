@@ -1,7 +1,16 @@
-# Chat tab
+# Chat tab: by name when Maestro can see it (it can on the Connect screen), else by position
 appId: ai.remote365.mobile
 ---
-- tapOn:
-    point: "35%,94%"
+- runFlow:
+    when:
+      visible: "Chat"
+    commands:
+      - tapOn: "Chat"
+- runFlow:
+    when:
+      notVisible: "Chat"
+    commands:
+      - tapOn:
+          point: "35%,96%"
 - waitForAnimationToEnd:
     timeout: 6000
