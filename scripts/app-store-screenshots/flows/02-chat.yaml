@@ -1,0 +1,5 @@
+appId: ai.remote365.mobile
+---
+- tapOn: "Chat"
+- waitForAnimationToEnd:
+    timeout: 5000

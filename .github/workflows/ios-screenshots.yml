@@ -1,0 +1,64 @@
+# App Store screenshots of the iOS app, captured on macOS simulators.
+#
+# Manual only. Input: the artifact URL of an EAS build made with the
+# "ios-screenshots" profile (apps/remote-365-mobile/eas.json), a Release
+# simulator build that talks to http://localhost:4000. The job runs
+# scripts/app-store-screenshots/mock-api.mjs there, so the images show a
+# fictional company and no real account, customer or password is involved.
+# Output: the "app-store-screenshots" artifact (iPhone 6.9" and iPad 13" PNGs).
+name: iOS App Store screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_url:
+        description: 'EAS iOS simulator build artifact URL (.tar.gz)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+
+      - name: Start the demo API
+        run: |
+          nohup node scripts/app-store-screenshots/mock-api.mjs > mock.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:4000/api/auth/me >/dev/null && break; sleep 1; done
+          curl -sf localhost:4000/api/auth/me
+
+      - name: Download the simulator build
+        env:
+          APP_URL: ${{ inputs.app_url }}
+        run: |
+          curl -sSL -o app.tar.gz "$APP_URL"
+          mkdir -p app && tar -xzf app.tar.gz -C app
+          find app -maxdepth 3
+
+      - name: Install Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Capture
+        run: bash scripts/app-store-screenshots/capture.sh
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-store-screenshots
+          path: |
+            shots/
+            mock.log
+          if-no-files-found: warn

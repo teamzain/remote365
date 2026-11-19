@@ -1,0 +1,8 @@
+appId: ai.remote365.mobile
+---
+- tapOn: "Settings"
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn: "Upgrade Remote 365"
+- waitForAnimationToEnd:
+    timeout: 8000

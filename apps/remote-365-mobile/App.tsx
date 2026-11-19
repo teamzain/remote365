@@ -562,7 +562,7 @@ function TopBar({ onSettingsPress }: { onSettingsPress: () => void }) {
       </View>
       <View style={styles.topActions}>
         <HeaderBell />
-        <Pressable style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Settings" style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
           <Feather name="settings" size={20} color="#111315" />
         </Pressable>
       </View>
@@ -659,13 +659,13 @@ function DevicesScreen({
         <Text style={[styles.devicesTitle, type(16, 23 / 16)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{t('Devices')}</Text>
         <View style={styles.devicesActions}>
           <HeaderBell />
-          <Pressable style={styles.iconButton} hitSlop={10} onPress={() => setTourReplay((n) => n + 1)}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Help" style={styles.iconButton} hitSlop={10} onPress={() => setTourReplay((n) => n + 1)}>
             <Feather name="help-circle" size={20} color="#111315" />
           </Pressable>
-          <Pressable style={styles.iconButton} hitSlop={10} onPress={() => setShowSearch((open) => !open)}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Search" style={styles.iconButton} hitSlop={10} onPress={() => setShowSearch((open) => !open)}>
             <Feather name="search" size={20} color="#111315" />
           </Pressable>
-          <Pressable style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Settings" style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
             <Feather name="settings" size={20} color="#111315" />
           </Pressable>
         </View>
@@ -823,10 +823,10 @@ function MonitoringOverviewScreen({
         </Pressable>
         <View style={styles.monitorActions}>
           <HeaderBell />
-          <Pressable style={styles.iconButton} hitSlop={10} onPress={() => setShowHelp(true)}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Help" style={styles.iconButton} hitSlop={10} onPress={() => setShowHelp(true)}>
             <Feather name="help-circle" size={20} color={showHelp ? '#FF8A00' : '#111315'} />
           </Pressable>
-          <Pressable style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Settings" style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
             <Feather name="settings" size={20} color="#111315" />
           </Pressable>
         </View>
@@ -1025,17 +1025,17 @@ function ManagedDevicesScreen({
         </Pressable>
         <View style={styles.managedActions}>
           <HeaderBell />
-          <Pressable style={styles.iconButton} hitSlop={10} onPress={() => { setShowSearch((open) => !open); setQuery(''); }}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Search" style={styles.iconButton} hitSlop={10} onPress={() => { setShowSearch((open) => !open); setQuery(''); }}>
             <Feather name="search" size={20} color={showSearch ? '#FF8A00' : '#111315'} />
           </Pressable>
           {/* While refreshing, the icon itself becomes the spinner — the list stays
               on screen instead of being replaced, so the page never "blanks out". */}
-          <Pressable style={styles.iconButton} hitSlop={10} onPress={onRefresh} disabled={loading}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Refresh" style={styles.iconButton} hitSlop={10} onPress={onRefresh} disabled={loading}>
             {loading
               ? <ActivityIndicator size="small" color="#FF8A00" />
               : <Feather name="refresh-cw" size={19} color="#111315" />}
           </Pressable>
-          <Pressable style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Settings" style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
             <Feather name="settings" size={20} color="#111315" />
           </Pressable>
         </View>
@@ -1247,7 +1247,7 @@ function ChatScreen({
         </Pressable>
         <View style={styles.chatActions}>
           <HeaderBell />
-          <Pressable style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Settings" style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
             <Feather name="settings" size={20} color="#111315" />
           </Pressable>
         </View>
@@ -1520,7 +1520,7 @@ function MeetingScreen({
         <Text style={[styles.meetingTitle, type(16, 23 / 16)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{t('Meeting')}</Text>
         <View style={styles.meetingActions}>
           <HeaderBell />
-          <Pressable style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Settings" style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
             <Feather name="settings" size={20} color="#111315" />
           </Pressable>
         </View>
@@ -1578,7 +1578,7 @@ function AppsScreen({
         <Text style={[styles.appsTitle, type(16, 23 / 16)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{t('Apps')}</Text>
         <View style={styles.appsActions}>
           <HeaderBell />
-          <Pressable style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Settings" style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
             <Feather name="settings" size={20} color="#111315" />
           </Pressable>
         </View>
@@ -1757,7 +1757,7 @@ function LoginRequiredScreen({
 
       <HeaderFrame style={styles.loginHeader}>
         <Text style={[styles.loginHeaderTitle, type(16, 23 / 16)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{title}</Text>
-        <Pressable style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Settings" style={styles.iconButton} hitSlop={10} onPress={onSettingsPress}>
           <Feather name="settings" size={20} color="#111315" />
         </Pressable>
       </HeaderFrame>
@@ -3500,7 +3500,7 @@ function AppContent() {
                 {content}
                 <View style={styles.managedActions}>
                   <HeaderBell />
-                  <Pressable style={styles.iconButton} hitSlop={10} onPress={openSettings}>
+                  <Pressable accessibilityRole="button" accessibilityLabel="Settings" style={styles.iconButton} hitSlop={10} onPress={openSettings}>
                     <Feather name="settings" size={20} color="#111315" />
                   </Pressable>
                 </View>

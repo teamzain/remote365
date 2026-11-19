@@ -52,6 +52,16 @@
       "ios": {
         "simulator": false
       }
+    },
+    "ios-screenshots": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "http://localhost:4000"
+      },
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Release"
+      }
     }
   },
   "submit": {
