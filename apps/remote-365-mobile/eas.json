@@ -40,6 +40,18 @@
       "ios": {
         "simulator": false
       }
+    },
+    "ios-production": {
+      "extends": "production",
+      "distribution": "store",
+      "environment": "production",
+      "credentialsSource": "local",
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://remote365.ai"
+      },
+      "ios": {
+        "simulator": false
+      }
     }
   },
   "submit": {
@@ -49,6 +61,14 @@
         "ascApiKeyPath": "./credentials/ios/AuthKey_AN4Z39TU7U.p8",
         "ascApiKeyId": "AN4Z39TU7U",
         "ascApiKeyIssuerId": "5814c691-0fc0-4848-9f39-38ad4f3eb843"
+      }
+    },
+    "ios-production": {
+      "ios": {
+        "ascAppId": "6836702539",
+        "ascApiKeyPath": "./credentials/ios/AuthKey_NF6MLBQ67T.p8",
+        "ascApiKeyId": "NF6MLBQ67T",
+        "ascApiKeyIssuerId": "02279965-0ca0-4403-9ed0-65c2bbaa05be"
       }
     }
   }
