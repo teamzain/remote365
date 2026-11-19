@@ -41,10 +41,12 @@ EAS_NO_VCS=1 EAS_PROJECT_ROOT='D:\Work\remote365' eas submit --platform ios --pr
 | Restore / EULA / auto-renew text | **Done** — on the Upgrade screen (iOS) | `UpgradePlanScreen.tsx` |
 | Privacy policy | **Updated** — Apple/Microsoft sign-in, store payments, push token, session data, in-app deletion | `apps/web/src/components/site/legal/PrivacyPolicy.tsx` |
 | Account deletion inside the app | **Already shipped** | `src/settings/AccountScreen.tsx` |
-| Review account | **Production account script ready** — `node scripts/prepare-apple-review-account-prod.cjs --create` (one-year trial, so reviewers can test buying a plan) | [review-notes.md](review-notes.md) |
-| Screenshots | **Ready** (composed from Android captures); replace with real iOS captures from TestFlight when possible | `screenshots/out/` |
-| Description, keywords, category, age rating | **Ready to paste** — add "Apple" to the sign-in sentence, and the Terms of Use link (subscriptions) | [listing.md](listing.md) |
-| App Privacy answers | **Ready** — add "Purchases" (Purchase History, linked, app functionality) now that StoreKit ships | [app-privacy.md](app-privacy.md) |
+| Review account | **Created on production** 19 Nov (one-year trial); App Review section filled (contact, username, notes) — **the password field is empty**: paste it from `credentials/apple-review-account-prod.json` | [review-notes.md](review-notes.md) |
+| Screenshots | Captured from the iOS app on macOS simulators with a fictional demo company (workflow `ios-screenshots.yml`, mock API in `scripts/app-store-screenshots/`). The old composed set in `screenshots/out/` shows PUREVOIP customer data: never upload it | App Store Connect |
+| Description, keywords, category, age rating | **Entered** in App Store Connect via the API (version 1.0.0, Business/Productivity, 4+, EULA link in the description) | [listing.md](listing.md) |
+| App Privacy answers | **Published** 19 Nov: 11 data types incl. Purchase History, all App Functionality, linked, no tracking | [app-privacy.md](app-privacy.md) |
+| Price and availability | **Set**: Free, 174 territories (China mainland off: it needs an ICP filing), new territories automatic | App Store Connect |
+| Build for review | **Build 4 attached** to version 1.0.0; also in TestFlight (internal group "Remote365 Internal") | App Store Connect |
 
 ## Notes
 
