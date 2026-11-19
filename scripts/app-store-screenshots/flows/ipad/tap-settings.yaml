@@ -1,6 +1,7 @@
+# Settings gear (Connect header)
 appId: ai.remote365.mobile
 ---
 - tapOn:
-    point: "13%,92%"
+    point: "97%,5%"
 - waitForAnimationToEnd:
     timeout: 6000

@@ -1,6 +1,7 @@
+# Devices tab
 appId: ai.remote365.mobile
 ---
 - tapOn:
-    point: "41%,95%"
+    point: "32%,91%"
 - waitForAnimationToEnd:
     timeout: 6000

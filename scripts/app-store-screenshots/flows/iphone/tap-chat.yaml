@@ -1,6 +1,7 @@
+# Chat tab
 appId: ai.remote365.mobile
 ---
 - tapOn:
-    point: "30%,27%"
+    point: "15%,91%"
 - waitForAnimationToEnd:
     timeout: 6000

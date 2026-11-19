@@ -1,6 +1,7 @@
+# Meeting tab
 appId: ai.remote365.mobile
 ---
 - tapOn:
-    point: "57%,92%"
+    point: "67%,91%"
 - waitForAnimationToEnd:
     timeout: 6000

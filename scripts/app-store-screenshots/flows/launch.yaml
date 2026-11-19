@@ -1,4 +1,4 @@
-# Launch signed in (seeded session) and settle on the Connect tab.
+# Fresh launch, signed in (seeded session), on the Connect tab.
 appId: ai.remote365.mobile
 ---
 - launchApp:

@@ -2,7 +2,11 @@
 # Captures App Store screenshots of the iOS simulator build on a macOS runner.
 # Expects: ./app (unpacked EAS simulator build), mock-api.mjs already listening on
 # localhost:4000, and `maestro` on PATH. Writes PNGs to ./shots/<device>/.
-set -euo pipefail
+#
+# Maestro cannot read text deep in the React Native tree on iOS, so screens are reached
+# with taps at measured positions. Every screen starts from a fresh launch on the
+# Connect tab, whose tab bar layout is the one the positions were measured on.
+set -uo pipefail
 
 APP=$(find app -maxdepth 4 -name "*.app" -type d | head -1)
 [ -n "$APP" ] || { echo "no .app found"; find app -maxdepth 4; exit 1; }
@@ -10,12 +14,14 @@ echo "app: $APP"
 
 RUNTIME=$(xcrun simctl list runtimes ios -j | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const r=JSON.parse(d).runtimes.filter(x=>x.isAvailable&&x.platform==='iOS').sort((a,b)=>a.version.localeCompare(b.version,undefined,{numeric:true}));console.log(r[r.length-1].identifier)})")
 echo "runtime: $RUNTIME"
-xcrun simctl list devicetypes | grep -E "iPhone 1[6-9] Pro Max|iPad Pro 13" || true
+FLOWS=scripts/app-store-screenshots/flows
 
-FLOWS="01-launch 02-chat 03-meeting 04-devices 05-settings 06-upgrade"
+run() { # udid flow-file
+  maestro --device "$1" test "$2" || echo "flow failed: $2"
+}
 
 shoot() {
-  local name="$1" type="$2" out="$3" flowdir="$4"
+  local name="$1" type="$2" out="$3" dev="$4"
   local udid
   udid=$(xcrun simctl create "$name" "$type" "$RUNTIME")
   echo "== $name ($type) $udid"
@@ -31,17 +37,23 @@ shoot() {
   dir="$data/Library/Application Support/ai.remote365.mobile/RCTAsyncLocalStorage_V1"
   mkdir -p "$dir"
   node scripts/app-store-screenshots/seed-manifest.mjs > "$dir/manifest.json"
-
   mkdir -p "$out"
-  for f in $FLOWS; do
-    if maestro --device "$udid" test "scripts/app-store-screenshots/flows/$flowdir/$f.yaml"; then
-      sleep 2
-      xcrun simctl io "$udid" screenshot "$out/$f.png"
-    else
-      echo "flow $f failed on $name"
-      xcrun simctl io "$udid" screenshot "$out/FAILED-$f.png" || true
-    fi
+
+  run "$udid" "$FLOWS/launch.yaml"; sleep 3
+  xcrun simctl io "$udid" screenshot "$out/02-connect.png"
+
+  for target in chat:04-chat meeting:03-meeting devices:01-devices; do
+    run "$udid" "$FLOWS/launch.yaml"; sleep 3
+    run "$udid" "$FLOWS/$dev/tap-${target%%:*}.yaml"; sleep 3
+    xcrun simctl io "$udid" screenshot "$out/${target##*:}.png"
   done
+
+  run "$udid" "$FLOWS/launch.yaml"; sleep 3
+  run "$udid" "$FLOWS/$dev/tap-settings.yaml"; sleep 3
+  xcrun simctl io "$udid" screenshot "$out/x-settings.png"
+  run "$udid" "$FLOWS/$dev/tap-upgrade.yaml"; sleep 4
+  xcrun simctl io "$udid" screenshot "$out/x-upgrade.png"
+
   xcrun simctl shutdown "$udid" || true
 }
 

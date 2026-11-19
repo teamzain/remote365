@@ -1,6 +1,7 @@
+# Upgrade Remote 365 row in Settings
 appId: ai.remote365.mobile
 ---
 - tapOn:
-    point: "28%,92%"
+    point: "50%,17%"
 - waitForAnimationToEnd:
     timeout: 6000
