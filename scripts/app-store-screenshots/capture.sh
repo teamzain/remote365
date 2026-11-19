@@ -12,10 +12,10 @@ RUNTIME=$(xcrun simctl list runtimes ios -j | node -e "let d='';process.stdin.on
 echo "runtime: $RUNTIME"
 xcrun simctl list devicetypes | grep -E "iPhone 1[6-9] Pro Max|iPad Pro 13" || true
 
-FLOWS="01-launch 02-chat 03-meeting 04-devices 05-upgrade"
+FLOWS="01-launch 02-chat 03-meeting 04-devices 05-settings 06-upgrade"
 
 shoot() {
-  local name="$1" type="$2" out="$3"
+  local name="$1" type="$2" out="$3" flowdir="$4"
   local udid
   udid=$(xcrun simctl create "$name" "$type" "$RUNTIME")
   echo "== $name ($type) $udid"
@@ -34,7 +34,7 @@ shoot() {
 
   mkdir -p "$out"
   for f in $FLOWS; do
-    if maestro --device "$udid" test "scripts/app-store-screenshots/flows/$f.yaml"; then
+    if maestro --device "$udid" test "scripts/app-store-screenshots/flows/$flowdir/$f.yaml"; then
       sleep 2
       xcrun simctl io "$udid" screenshot "$out/$f.png"
     else
@@ -45,7 +45,7 @@ shoot() {
   xcrun simctl shutdown "$udid" || true
 }
 
-shoot shot-iphone "iPhone 16 Pro Max" shots/iphone-6.9
-shoot shot-ipad "iPad Pro 13-inch (M4)" shots/ipad-13
+shoot shot-iphone "iPhone 16 Pro Max" shots/iphone-6.9 iphone
+shoot shot-ipad "iPad Pro 13-inch (M4)" shots/ipad-13 ipad
 
 for f in shots/*/*.png; do echo "$f $(sips -g pixelWidth -g pixelHeight "$f" | awk '/pixel/{printf "%s ", $2}')"; done

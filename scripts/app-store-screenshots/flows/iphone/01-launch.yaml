@@ -1,0 +1,16 @@
+# Launch signed in (seeded session) and settle on the Connect tab.
+appId: ai.remote365.mobile
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - tapOn: "Allow"
+- extendedWaitUntil:
+    visible: "Chat"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 5000
