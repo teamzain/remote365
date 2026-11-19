@@ -12,7 +12,9 @@ import {
 } from '../utils/authSessions';
 import { TOTP, NobleCryptoPlugin, ScureBase32Plugin } from 'otplib';
 import * as QRCode from 'qrcode';
-import { twoFactorGate, TWO_FACTOR_SETUP_MESSAGE } from '../utils/twoFactorGate';
+import { twoFactorGate, TWO_FACTOR_SETUP_MESSAGE, TWO_FACTOR_SETUP_MOBILE_MESSAGE } from '../utils/twoFactorGate';
+import { verifyAppleIdentityToken, isTrueClaim, AppleIdentityClaims } from '../utils/appleIdentity';
+import { findOrCreateOauthUser } from '../utils/oauthAccount';
 
 const totp = new TOTP({
   crypto: new NobleCryptoPlugin(),
@@ -27,7 +29,7 @@ const FREE_MAIL_DOMAINS = new Set([
   'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.uk', 'yahoo.co.in', 'ymail.com', 'rocketmail.com',
   'hotmail.com', 'hotmail.co.uk', 'outlook.com', 'outlook.co.uk', 'live.com', 'live.co.uk', 'msn.com',
   'icloud.com', 'me.com', 'mac.com', 'aol.com', 'protonmail.com', 'proton.me', 'pm.me', 'gmx.com', 'gmx.de', 'gmx.net',
-  'mail.com', 'yandex.com', 'yandex.ru', 'zoho.com', 'zohomail.com', 'inbox.com', 'fastmail.com', 'hey.com', 'tutanota.com', 'tuta.io',
+  'privaterelay.appleid.com', 'mail.com', 'yandex.com', 'yandex.ru', 'zoho.com', 'zohomail.com', 'inbox.com', 'fastmail.com', 'hey.com', 'tutanota.com', 'tuta.io',
 ]);
 export const isFreeMailDomain = (email: string) => {
   const domain = String(email || '').trim().toLowerCase().split('@')[1] || '';
@@ -516,6 +518,59 @@ export default async function authRoutes(fastify: FastifyInstance) {
     } catch (err: any) {
       console.error('[Auth] Google token verification failed:', err.message);
       return reply.code(401).send({ error: 'Google authentication failed' });
+    }
+  });
+
+  // Sign in with Apple (iOS app). The app sends the identity token from the
+  // native Apple sheet. Apple only shares the user's name on the very first
+  // authorization, and never inside the token, so the app forwards it as
+  // fullName. The response matches /login: tokens, or a 2FA step.
+  fastify.post('/apple', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { identityToken, fullName, accountType } = (request.body || {}) as any;
+    if (!identityToken || typeof identityToken !== 'string') {
+      return reply.code(400).send({ error: 'Apple identity token required' });
+    }
+
+    let claims: AppleIdentityClaims;
+    try {
+      claims = await verifyAppleIdentityToken(identityToken);
+    } catch (err: any) {
+      console.error('[Auth] Apple token verification failed:', err.message);
+      return reply.code(401).send({ error: 'Apple authentication failed' });
+    }
+
+    const email = String(claims.email || '').trim().toLowerCase();
+    if (!email) {
+      return reply.code(400).send({ error: 'Apple did not share an email address. Remove Remote365 in Settings > Apple Account > Sign in with Apple, then sign in again.' });
+    }
+    const isBusiness = accountType === 'business';
+    if (isBusiness && (isFreeMailDomain(email) || isTrueClaim(claims.is_private_email))) {
+      return reply.code(400).send({ error: 'Business accounts need a company email address. Personal providers and Hide My Email addresses are not accepted.' });
+    }
+
+    try {
+      const name = typeof fullName === 'string' && fullName.trim() ? fullName.trim().slice(0, 120) : null;
+      const user = await findOrCreateOauthUser({ email, name }, isBusiness);
+
+      const appleBlock = await getAccountBlock(user);
+      if (appleBlock) {
+        return reply.code(403).send(appleBlock);
+      }
+
+      const appleGate = await twoFactorGate(user);
+      if (appleGate?.kind === 'verify') {
+        return reply.send({ twoFactorRequired: true, tempToken: appleGate.tempToken });
+      }
+      if (appleGate?.kind === 'setup') {
+        await recordLogin({ userId: user.id, email: user.email, ip: requestIp(request), userAgent: (request.headers['user-agent'] as string) || null, result: 'TWO_FACTOR_SETUP' });
+        return reply.code(403).send({ error: TWO_FACTOR_SETUP_MOBILE_MESSAGE, twoFactorSetupRequired: true, tempToken: appleGate.tempToken });
+      }
+
+      await recordLogin({ userId: user.id, email: user.email, ip: requestIp(request), userAgent: (request.headers['user-agent'] as string) || null, result: 'SUCCESS' });
+      return reply.send(await issueTokensForRequest(user, request));
+    } catch (err: any) {
+      console.error('[Auth] Apple sign-in failed:', err.message);
+      return reply.code(500).send({ error: 'Apple sign-in failed. Please try again.' });
     }
   });
 

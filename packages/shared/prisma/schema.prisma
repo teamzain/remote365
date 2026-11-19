@@ -212,6 +212,13 @@ model Subscription {
   // it at the old one, so a chain of tokens maps to a single paying user over time.
   googlePlayPurchaseToken String?         @unique
   googlePlayProductId     String?
+  // App Store (iOS) subscription identity. originalTransactionId stays the same across
+  // renewals and upgrades within the subscription group, so it is the one stable key for
+  // a paying user; unique so one purchase can never entitle two accounts. Environment is
+  // "Production" or "Sandbox" (TestFlight and App Review buy in the sandbox for free).
+  appStoreOriginalTransactionId String?   @unique
+  appStoreProductId             String?
+  appStoreEnvironment           String?
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
   user                 User               @relation(fields: [userId], references: [id])
@@ -221,6 +228,7 @@ enum BillingPlatform {
   MANUAL
   STRIPE
   GOOGLE_PLAY
+  APP_STORE
 }
 
 model PlanLimit {

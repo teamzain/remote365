@@ -57,6 +57,8 @@ const SECTIONS: LegalSection[] = [
           'Device names and tags',
           'Session timestamps',
           'Connection logs',
+          'A push notification token, stored while notifications are enabled and removed when you sign out or turn them off',
+          'The IP address and device or browser of each signed-in session, so you can review and revoke sessions under Trusted devices',
         ],
       },
       { sub: '2.3 Session Information' },
@@ -74,6 +76,7 @@ const SECTIONS: LegalSection[] = [
       { text: 'Remote365 does not actively monitor or view the contents of your remote sessions.' },
       { sub: '2.4 Payment Information' },
       { text: 'Payments are processed securely through trusted third-party payment providers. Remote365 does not store complete credit card information on our servers.' },
+      { text: 'Subscriptions bought in our mobile apps are processed by Apple (App Store) or Google (Google Play). We receive only the details needed to confirm the subscription, such as the product, its renewal date and a transaction identifier, never your payment card.' },
       { sub: '2.5 Support & Communication Data' },
       { text: 'If you contact support or communicate with us, we may collect:' },
       {
@@ -154,6 +157,7 @@ const SECTIONS: LegalSection[] = [
           'Withdraw consent where applicable',
         ],
       },
+      { text: 'You can delete your account at any time in the Remote365 app under Settings → Account → Delete Account. Deletion removes your account, your devices, your sessions and your chat history.' },
     ],
   },
   {
@@ -165,8 +169,8 @@ const SECTIONS: LegalSection[] = [
       { text: 'Remote365 may integrate with third-party services including:' },
       {
         list: [
-          'Google authentication',
-          'Payment providers',
+          'Sign-in with Google, Microsoft or Apple (Sign in with Apple may share a private relay email address instead of your real one)',
+          'Payment providers, including the Apple App Store and Google Play for in-app subscriptions',
           'Analytics tools',
         ],
       },
@@ -194,7 +198,7 @@ const PrivacyPolicy: React.FC = () => (
   <LegalPage
     title="Remote365: Privacy Policy"
     intro="At Remote365, your privacy and security are fundamental to everything we build. This Privacy Policy explains how we collect, use, store, and protect your information when you use our remote access platform and related services."
-    effectiveDate="May 23, 2026"
+    effectiveDate="November 19, 2026"
     sections={SECTIONS}
   />
 )

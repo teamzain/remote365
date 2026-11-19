@@ -3,10 +3,10 @@ import { randomBytes } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import path from 'path';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { prisma, redisPublisher, recordLogin, getPlanLimits, getTrialDays, trialDurationMs } from '@remotelink/shared';
+import { redisPublisher, recordLogin, getPlanLimits } from '@remotelink/shared';
 import { issueTokens } from '../utils/token-utils';
 import { saveAuthSession, enforceMaxSessions } from '../utils/authSessions';
-import { sendWelcomeEmail } from '../utils/welcomeEmail';
+import { findOrCreateOauthUser } from '../utils/oauthAccount';
 import { isFreeMailDomain } from './auth';
 import { getPublicWebUrl } from '../utils/publicUrls';
 import { twoFactorGate, TWO_FACTOR_SETUP_MOBILE_MESSAGE } from '../utils/twoFactorGate';
@@ -384,75 +384,7 @@ async function finishOauthSignIn(
     // Desktop / mobile: hand the message to the app through the deep link so it shows on the sign-up screen.
     return reply.type('text/html').send(renderDesktopLaunchPage(`remote365://auth/callback?error=${encodeURIComponent(message)}`, platform === 'mobile' ? 'Remote 365 mobile app' : undefined));
   }
-    // Search for user or create one
-    let user = await prisma.user.findUnique({ where: { email: profile.email } });
-
-    if (!user) {
-      // SaaS onboarding: create an organization with the Google user as its owner.
-      const result = await prisma.$transaction(async (tx: any) => {
-        const orgSlug = profile.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.random().toString(36).substring(2, 5);
-        const org = await tx.organization.create({
-          data: {
-            name: profile.name ? `${profile.name}'s Workspace` : `${profile.email.split('@')[0]}'s Workspace`,
-            slug: orgSlug,
-            ...(isBusiness ? { accountType: 'BUSINESS', companyEmail: profile.email } : {}),
-          }
-        });
-
-        return await tx.user.create({
-          data: {
-            email: profile.email,
-            name: profile.name || profile.email.split('@')[0],
-            role: 'OWNER',
-            organizationId: org.id,
-            allowedDeviceIds: ['__all__']
-          }
-        });
-      });
-
-      user = result;
-
-      // Create initial subscription (trial length from the merged catalog)
-      try {
-        await prisma.subscription.create({
-          data: {
-            userId: user!.id,
-            plan: 'TRIAL',
-            status: 'ACTIVE',
-            currentPeriodEnd: new Date(Date.now() + trialDurationMs(await getTrialDays()))
-          },
-        });
-      } catch { }
-      sendWelcomeEmail(user!).catch(() => {});
-    } else {
-      // If user already exists but doesn't have an org, create one and make them the owner.
-      if (!user.organizationId) {
-        user = await prisma.$transaction(async (tx: any) => {
-          const orgSlug = user!.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.random().toString(36).substring(2, 5);
-          const org = await tx.organization.create({
-            data: {
-              name: user!.name ? `${user!.name}'s Workspace` : `${user!.email.split('@')[0]}'s Workspace`,
-              slug: orgSlug
-            }
-          });
-
-          return await tx.user.update({
-            where: { id: user!.id },
-            data: {
-              role: 'OWNER',
-              organizationId: org.id,
-              allowedDeviceIds: ['__all__']
-            }
-          });
-        });
-      } else if (!user.name && profile.name) {
-        // Normal name backfill
-        user = await prisma.user.update({
-          where: { id: user.id },
-          data: { name: profile.name },
-        });
-      }
-    }
+    const user = await findOrCreateOauthUser(profile, isBusiness);
 
     // ── 2FA Check ──
     // verify: the account has 2FA, enter the code. setup: the org requires

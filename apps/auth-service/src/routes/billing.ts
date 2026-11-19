@@ -10,6 +10,13 @@ import {
   type PubSubEnvelope,
 } from '../utils/googlePlayBilling';
 import {
+  PLAN_BY_APP_STORE_PRODUCT,
+  appStoreGrantsAccess,
+  verifyAppStoreNotification,
+  verifyAppStoreRenewalInfo,
+  verifyAppStoreTransaction,
+} from '../utils/appStoreBilling';
+import {
   hasPermission, prisma, verifyToken, PLAN_CATALOG,
   getActivePlanCatalog, findMergedPlan, effectivePlanId, BUILTIN_PLAN_IDS, MergedPlan,
   publishBillingSync, userHasPermission, getTrialDays, trialDurationMs,
@@ -393,6 +400,170 @@ export default async function billingRoutes(fastify: FastifyInstance) {
       // A genuine transient failure (Google unreachable, database down) SHOULD be retried,
       // so this is the one path that deliberately returns non-2xx.
       request.log.error({ err }, '[play-billing] RTDN reconcile failed');
+      return reply.code(500).send({ error: 'Reconcile failed' });
+    }
+  });
+
+  // POST /api/billing/app-store/verify — turn a StoreKit 2 transaction into entitlement.
+  //
+  // The app sends the transaction's JWS exactly as StoreKit gave it. What the user gets
+  // (product, expiry, revocation) is read from the verified JWS, never from the request.
+  // The app finishes the StoreKit transaction only after this succeeds; an unfinished one
+  // is redelivered on the next launch, so a server outage delays entitlement, it does not
+  // lose a purchase.
+  fastify.post('/app-store/verify', async (request: FastifyRequest, reply: FastifyReply) => {
+    const authHeader = request.headers.authorization;
+    if (!authHeader) return reply.code(401).send({ error: 'Unauthorized' });
+
+    const token = authHeader.split(' ')[1];
+    const decoded = verifyToken(token);
+    if (!decoded?.userId) return reply.code(401).send({ error: 'Invalid token' });
+    if (decoded.role !== 'OWNER') {
+      return reply.code(403).send({ error: 'Only organization owners can manage subscriptions' });
+    }
+
+    const { signedTransaction } = (request.body || {}) as { signedTransaction?: string };
+    if (!signedTransaction || typeof signedTransaction !== 'string') {
+      return reply.code(400).send({ error: 'signedTransaction is required' });
+    }
+
+    let tx;
+    try {
+      tx = await verifyAppStoreTransaction(signedTransaction);
+    } catch (err: any) {
+      request.log.warn({ err: err?.message || err }, '[app-store] transaction failed verification');
+      return reply.code(400).send({ error: 'That purchase could not be verified.' });
+    }
+
+    const planId = tx.productId ? PLAN_BY_APP_STORE_PRODUCT[tx.productId] : undefined;
+    if (!planId || !tx.originalTransactionId) {
+      request.log.error({ productId: tx.productId }, '[app-store] unmapped product');
+      return reply.code(400).send({ error: 'That product is not sold by this application.' });
+    }
+    if (!appStoreGrantsAccess(tx)) {
+      return reply.code(409).send({ error: 'That subscription is not active.' });
+    }
+    // The app tags each purchase with the buyer's user id (appAccountToken). A tagged
+    // transaction can only ever entitle that user.
+    if (tx.appAccountToken && tx.appAccountToken.toLowerCase() !== String(decoded.userId).toLowerCase()) {
+      return reply.code(409).send({ error: 'That purchase belongs to another account.' });
+    }
+
+    // Replay guard: one App Store subscription can never move between accounts.
+    const existing = await (prisma as any).subscription.findUnique({
+      where: { appStoreOriginalTransactionId: tx.originalTransactionId },
+      select: { userId: true },
+    });
+    if (existing && existing.userId !== decoded.userId) {
+      return reply.code(409).send({ error: 'That purchase is already linked to another account.' });
+    }
+
+    const targetPlan = await findMergedPlan(planId);
+    if (!targetPlan) {
+      request.log.error({ planId }, '[app-store] plan missing from catalog');
+      return reply.code(500).send({ error: 'That plan is not available.' });
+    }
+
+    const sub = await applyPlanChange(decoded.userId, targetPlan);
+    await (prisma as any).subscription.update({
+      where: { userId: decoded.userId },
+      data: {
+        platform: 'APP_STORE',
+        appStoreOriginalTransactionId: tx.originalTransactionId,
+        appStoreProductId: tx.productId,
+        appStoreEnvironment: tx.environment,
+        currentPeriodEnd: new Date(tx.expiresDate!),
+        cancelAtPeriodEnd: false,
+      },
+    });
+
+    await publishBillingSync(decoded.userId);
+    return reply.send({ success: true, plan: effectivePlanId(sub) });
+  });
+
+  // POST /api/billing/app-store/notifications — App Store Server Notifications V2.
+  //
+  // Renewals, upgrades, auto-renew changes, expiries, refunds and revocations arrive
+  // here (set as the Production and Sandbox URL in App Store Connect). Like the Play
+  // handler, every type converges on the state in the signed transaction rather than
+  // acting on the event name, so redelivered or out-of-order notifications are harmless.
+  // Apple retries any non-2xx, so only a genuine transient failure returns one.
+  fastify.post('/app-store/notifications', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { signedPayload } = (request.body || {}) as { signedPayload?: string };
+    if (!signedPayload || typeof signedPayload !== 'string') {
+      return reply.code(400).send({ error: 'signedPayload is required' });
+    }
+
+    let notification;
+    try {
+      notification = await verifyAppStoreNotification(signedPayload);
+    } catch (err: any) {
+      request.log.warn({ err: err?.message || err }, '[app-store] notification failed verification');
+      return reply.code(403).send({ error: 'Forbidden' });
+    }
+
+    if (notification.notificationType === 'TEST') {
+      request.log.info('[app-store] received TEST notification');
+      return reply.code(200).send({ ok: true, test: true });
+    }
+
+    const signedTx = notification.data?.signedTransactionInfo;
+    if (!signedTx) return reply.code(200).send({ ok: true, ignored: 'no transaction' });
+
+    try {
+      const tx = await verifyAppStoreTransaction(signedTx);
+      if (!tx.originalTransactionId) return reply.code(200).send({ ok: true, ignored: 'no original transaction id' });
+
+      const sub = await (prisma as any).subscription.findUnique({
+        where: { appStoreOriginalTransactionId: tx.originalTransactionId },
+        select: { userId: true },
+      });
+      // A purchase the app never reported (or one made against another environment).
+      if (!sub) return reply.code(200).send({ ok: true, matched: false });
+
+      if (!appStoreGrantsAccess(tx)) {
+        await (prisma as any).subscription.update({
+          where: { userId: sub.userId },
+          data: {
+            plan: 'TRIAL',
+            customPlanKey: null,
+            status: 'CANCELLED',
+            cancelAtPeriodEnd: true,
+            currentPeriodEnd: tx.revocationDate ? new Date(tx.revocationDate) : new Date(tx.expiresDate ?? Date.now()),
+            paidSince: null,
+          },
+        });
+        await publishBillingSync(sub.userId);
+        return reply.code(200).send({ ok: true, matched: true, active: false });
+      }
+
+      let autoRenewOff = false;
+      const signedRenewal = notification.data?.signedRenewalInfo;
+      if (signedRenewal) {
+        try {
+          const renewal = await verifyAppStoreRenewalInfo(signedRenewal);
+          autoRenewOff = renewal.autoRenewStatus === 0;
+        } catch { }
+      }
+
+      const planId = tx.productId ? PLAN_BY_APP_STORE_PRODUCT[tx.productId] : undefined;
+      const targetPlan = planId ? await findMergedPlan(planId) : null;
+      if (targetPlan) await applyPlanChange(sub.userId, targetPlan);
+      await (prisma as any).subscription.update({
+        where: { userId: sub.userId },
+        data: {
+          platform: 'APP_STORE',
+          appStoreProductId: tx.productId,
+          appStoreEnvironment: tx.environment,
+          currentPeriodEnd: new Date(tx.expiresDate!),
+          cancelAtPeriodEnd: autoRenewOff,
+          status: 'ACTIVE',
+        },
+      });
+      await publishBillingSync(sub.userId);
+      return reply.code(200).send({ ok: true, matched: true, active: true });
+    } catch (err: any) {
+      request.log.error({ err }, '[app-store] notification reconcile failed');
       return reply.code(500).send({ error: 'Reconcile failed' });
     }
   });
