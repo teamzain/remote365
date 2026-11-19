@@ -102,13 +102,12 @@ class SampleUploader {
         let scaleFactor = 1.0
         let width = CVPixelBufferGetWidth(imageBuffer) / Int(scaleFactor)
         let height = CVPixelBufferGetHeight(imageBuffer) / Int(scaleFactor)
-        // Annotated rather than inferred: CMGetAttachment is generic over its return type
-        // and cannot resolve it from a trailing member lookup alone.
-        let orientationValue: NSNumber? = CMGetAttachment(
+        // CMGetAttachment returns CFTypeRef? (it is not generic), so cast the result.
+        let orientationValue = CMGetAttachment(
             buffer,
             key: RPVideoSampleOrientationKey as CFString,
             attachmentModeOut: nil
-        )
+        ) as? NSNumber
         let orientation = orientationValue?.uintValue ?? 0
 
         let scaleTransform = CGAffineTransform(scaleX: CGFloat(1.0 / scaleFactor), y: CGFloat(1.0 / scaleFactor))
