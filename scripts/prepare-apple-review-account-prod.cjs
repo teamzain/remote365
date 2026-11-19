@@ -18,7 +18,8 @@ const prelude = `
 const { PrismaClient, Prisma } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const prisma = new PrismaClient();
-if (process.env.DOMAIN !== ${JSON.stringify(domain)}) throw new Error('Not the expected production domain');
+// The prod container reports its IP as DOMAIN; accept that or the site name, never preprod.
+if (![${JSON.stringify(domain)}, '159.65.84.190'].includes(process.env.DOMAIN)) throw new Error('Not the expected production domain');
 const dbHost = new URL(process.env.DATABASE_URL).hostname;
 if (dbHost !== 'postgres') throw new Error('Unexpected database host');
 `;
