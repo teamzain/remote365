@@ -148,6 +148,24 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
   // so a guest never sees a flash of the empty meeting grid while media and
   // the join round-trip settle.
   const [hasEnteredMeeting, setHasEnteredMeeting] = useState(false);
+  // Mirror for the socket handlers, which close over stale state.
+  const hasEnteredMeetingRef = useRef(false);
+  useEffect(() => { hasEnteredMeetingRef.current = hasEnteredMeeting; }, [hasEnteredMeeting]);
+  // A join normally completes within a second or two. Until it has clearly taken longer,
+  // the cover stays plain, so a normal start goes from the preview straight into the
+  // meeting with no "Joining…" card flashing up in between.
+  const [joinSlow, setJoinSlow] = useState(false);
+  useEffect(() => {
+    if (hasEnteredMeeting || waitingForHost) { setJoinSlow(false); return; }
+    const timer = window.setTimeout(() => setJoinSlow(true), 3000);
+    return () => window.clearTimeout(timer);
+  }, [hasEnteredMeeting, waitingForHost]);
+  // True when the join failed outright (bad code, no connection), as opposed to the host
+  // declining: the cover then says "Couldn't join" rather than "Not admitted".
+  const [joinFailed, setJoinFailed] = useState(false);
+  // Lets the socket handlers see a reason that is already on the cover (the host said no).
+  const deniedMessageRef = useRef<string | null>(null);
+  useEffect(() => { deniedMessageRef.current = deniedMessage; }, [deniedMessage]);
   const [showInvitePanel, setShowInvitePanel] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteCopied, setInviteCopied] = useState<'link' | 'code' | null>(null);
@@ -281,6 +299,9 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
   }, []);
 
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  // Peers we made the first offer to. Only that side restarts a failed connection, so the
+  // two ends never send restart offers at each other at the same moment.
+  const offererRef = useRef<Set<string>>(new Set());
   const pendingIceCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const participantUsersRef = useRef<Map<string, { id: string; name: string; avatar?: string }>>(new Map());
   const iceServersRef = useRef<RTCIceServer[]>([{ urls: 'stun:stun.l.google.com:19302' }]);
@@ -303,14 +324,29 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
     meetingSocket.onopen = () => {
       console.info(`[Meeting] Signaling connected for room ${roomId || '(pending)'}`);
     };
+    let disposed = false;
+    // Before entry the room is hidden behind the cover, so the inline error text is
+    // invisible there: put the reason on the cover instead of leaving it on "Joining…".
+    const failBeforeEntry = (message: string) => {
+      if (disposed || hasEnteredMeetingRef.current || deniedMessageRef.current) return;
+      setJoinFailed(true);
+      setWaitingForHost(true);
+      setDeniedMessage(message);
+    };
     meetingSocket.onerror = () => {
-      setMeetingError('Meeting connection failed. Please check your internet connection.');
+      if (disposed) return;
+      const message = 'Meeting connection failed. Please check your internet connection.';
+      setMeetingError(message);
+      failBeforeEntry(message);
     };
     meetingSocket.onclose = () => {
       setWs((current) => current === meetingSocket ? null : current);
+      // Also covers a guest whose connection drops while waiting in the lobby.
+      failBeforeEntry('The meeting connection was closed. Please try again.');
     };
 
     return () => {
+      disposed = true;
       hasJoinedRef.current = false;
       meetingSocket.close();
     };
@@ -452,14 +488,29 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
     const hasMic = devices.some((device) => device.kind === 'audioinput');
 
     if (hasCamera || hasMic) {
-      return navigator.mediaDevices.getUserMedia({
-        video: hasCamera ? (preferredCamId ? { deviceId: { ideal: preferredCamId } } : true) : false,
-        audio: hasMic ? {
-          ...(preferredMicId ? { deviceId: { ideal: preferredMicId } } : {}),
-          noiseSuppression: isNoiseSuppressionEnabled(),
-          echoCancellation: true,
-        } : false
-      });
+      const videoConstraints = hasCamera ? (preferredCamId ? { deviceId: { ideal: preferredCamId } } : true) : false;
+      const audioConstraints = hasMic ? {
+        ...(preferredMicId ? { deviceId: { ideal: preferredMicId } } : {}),
+        noiseSuppression: isNoiseSuppressionEnabled(),
+        echoCancellation: true,
+      } : false;
+      try {
+        return await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: audioConstraints });
+      } catch (err) {
+        // One request for both is all-or-nothing: a camera that is busy in another app, or
+        // blocked while the mic is allowed, used to leave the user with no microphone
+        // either. Fall back to each kind on its own before giving up.
+        if (!hasCamera || !hasMic) throw err;
+        try {
+          return await navigator.mediaDevices.getUserMedia({ video: false, audio: audioConstraints });
+        } catch {
+          try {
+            return await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+          } catch {
+            throw err;
+          }
+        }
+      }
     }
 
     const attempts: MediaStreamConstraints[] = [
@@ -543,6 +594,23 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
     if (!sidebarLocalVideoRef.current) return;
     sidebarLocalVideoRef.current.srcObject = localStreamRef.current ?? null;
   }, [isScreenSharing, localStream]);
+
+  // The grid and the spotlight layouts are different subtrees, so switching between them
+  // (someone else starts or stops sharing, a tile is pinned) mounts fresh <video>
+  // elements that the two effects above never see. Re-attach after every render; it is
+  // a no-op when the element already has the right stream.
+  useEffect(() => {
+    const primary = localVideoRef.current;
+    if (primary) {
+      const wanted = isScreenSharing && screenStreamRef.current ? screenStreamRef.current : (localStreamRef.current ?? null);
+      if (primary.srcObject !== wanted) primary.srcObject = wanted;
+    }
+    const sidebar = sidebarLocalVideoRef.current;
+    if (sidebar) {
+      const wanted = localStreamRef.current ?? null;
+      if (sidebar.srcObject !== wanted) sidebar.srcObject = wanted;
+    }
+  });
 
   useEffect(() => {
     async function joinMeeting() {
@@ -727,8 +795,23 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
           setMeetingPolicy(normalizeMeetingPolicy(data.policy));
           break;
 
+        case 'meeting-host-changed':
+          // The host left and the server handed us the seat (or the meeting's creator
+          // came back and took it again). Host controls follow isHost.
+          setIsHost(Boolean(data.isHost));
+          if (data.policy) setMeetingPolicy(normalizeMeetingPolicy(data.policy));
+          if (data.isHost) setNoticeToast('The host left. You are now the host of this meeting.');
+          else setPendingGuests([]);
+          break;
+
         case 'meeting-error':
           setMeetingError(data.error || 'Could not join this meeting.');
+          // The inline text sits under the cover until we are in, so surface it there.
+          if (!hasEnteredMeetingRef.current) {
+            setJoinFailed(true);
+            setWaitingForHost(true);
+            setDeniedMessage(data.error || 'Could not join this meeting.');
+          }
           break;
 
         case 'meeting-participant-joined':
@@ -831,8 +914,12 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed') {
-        pc.restartIce?.();
+      if (pc.connectionState !== 'failed') return;
+      // restartIce() only marks the NEXT offer as a restart; without sending one the
+      // connection stayed dead after a network change.
+      pc.restartIce?.();
+      if (offererRef.current.has(targetId) && pc.signalingState === 'stable') {
+        void renegotiatePeer(targetId, pc).catch((err) => console.warn('[Meeting] ICE restart failed:', err));
       }
     };
 
@@ -844,6 +931,7 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
     const pc = createPeerConnection(targetId);
 
     if (isOffer) {
+      offererRef.current.add(targetId);
       await attachOutgoingTracks(pc, true);
       await renegotiatePeer(targetId, pc).catch((err) => console.warn('[Meeting] Offer failed:', err));
     }
@@ -1314,7 +1402,10 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
   };
 
   const handleLeave = () => {
-    ws?.send(JSON.stringify({ type: 'meeting-leave', meetingId: roomId }));
+    // send() throws on a socket that is still connecting, which used to swallow the click.
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'meeting-leave', meetingId: roomId }));
+    }
     onLeave();
   };
 
@@ -1360,11 +1451,14 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
   return (
     <div className="fixed inset-0 z-[200] bg-[#1A1D21] flex flex-col font-['Mona_Sans',system-ui,sans-serif] text-white animate-in fade-in duration-500">
 
-      {/* Full-screen cover until we're actually in: "Joining…" from the very
-          first frame, then the waiting room if the host must admit us. A
-          guest never sees the empty meeting grid underneath. */}
+      {/* Full-screen cover until we're actually in, so a guest never sees the empty
+          meeting grid underneath. It is opaque from the first frame and stays plain
+          while the join is quick; "Joining…" appears only if the join drags on, and
+          the waiting room if the host must admit us. */}
       {(waitingForHost || !hasEnteredMeeting) && (
-        <div className="absolute inset-0 z-[130] flex flex-col items-center justify-center gap-6 bg-[#1A1D21] px-6 text-center animate-in fade-in duration-200">
+        <div className="absolute inset-0 z-[130] flex flex-col items-center justify-center bg-[#1A1D21] px-6 text-center">
+          {(waitingForHost || deniedMessage || joinSlow) && (
+          <div className="flex flex-col items-center gap-6 animate-in fade-in duration-300">
           <img src={logo} alt="Remote365" className="h-12 w-12 rounded-full object-contain" />
           {!waitingForHost && !deniedMessage ? (
             <>
@@ -1393,7 +1487,7 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
                 <X size={30} className="text-[#FF383C]" />
               </div>
               <div className="flex flex-col gap-2">
-                <h2 className="text-[20px] font-semibold leading-7 text-white">Not Admitted</h2>
+                <h2 className="text-[20px] font-semibold leading-7 text-white">{joinFailed ? "Couldn't Join" : 'Not Admitted'}</h2>
                 <p className="max-w-[380px] text-[14px] leading-5 text-white/70">{deniedMessage}</p>
               </div>
               <button
@@ -1424,6 +1518,8 @@ export const SnowMeeting: React.FC<SnowMeetingProps> = ({ meetingId, onLeave, cl
                 Cancel
               </button>
             </>
+          )}
+          </div>
           )}
         </div>
       )}

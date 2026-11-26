@@ -23,6 +23,13 @@ import CoreImage
 import VideoToolbox
 
 private let kMaxReadLength = 10 * 1024
+/// At most ~15 frames a second reach the encoder.
+private let kMinFrameInterval: TimeInterval = 1.0 / 15.0
+/// Frames are halved in each dimension before encoding (an iPhone screen is ~1200x2600
+/// pixels; a full-size JPEG of each frame is too much for the extension's memory limit).
+private let kScaleFactor = 2.0
+/// JPEG quality. Text stays sharp at this level at a fraction of the size of 1.0.
+private let kJpegQuality = 0.8
 
 class SampleUploader {
     private static var imageContext = CIContext(options: nil)
@@ -33,6 +40,7 @@ class SampleUploader {
 
     private var dataToSend: Data?
     private var byteIndex = 0
+    private var lastFrameTime: TimeInterval = 0
     private let serialQueue = DispatchQueue(label: "ai.remote365.broadcast.uploader")
 
     init(connection: SocketConnection) {
@@ -46,11 +54,26 @@ class SampleUploader {
         // socket on a busy device, and queueing would add unbounded latency — a stale
         // frame is worse than a skipped one for a live share.
         guard isReady else { return false }
-        isReady = false
 
-        dataToSend = prepare(sample: buffer)
-        byteIndex = 0
-        serialQueue.async { self.sendDataChunk() }
+        // ReplayKit delivers up to 60 frames a second. Encoding every one of them as JPEG
+        // would exhaust the extension's ~50 MB limit, so cap the rate.
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastFrameTime >= kMinFrameInterval else { return false }
+        lastFrameTime = now
+
+        isReady = false
+        // A failed encode writes nothing, so no "space available" event would ever make the
+        // uploader ready again: hand the turn back here.
+        guard let data = prepare(sample: buffer) else {
+            isReady = true
+            return false
+        }
+
+        serialQueue.async {
+            self.dataToSend = data
+            self.byteIndex = 0
+            self.sendDataChunk()
+        }
         return true
     }
 
@@ -60,11 +83,20 @@ class SampleUploader {
         connection.didOpen = { [weak self] in
             self?.isReady = true
         }
-        connection.didClose = { [weak self] _ in
-            self?.isReady = false
+        // A frame is hundreds of kilobytes and one write takes ~10 KB, so the rest of the
+        // frame goes out here, one chunk per "space available" event. The uploader is ready
+        // for the next frame only once nothing is left to send.
+        // (didClose belongs to SampleHandler, which ends the broadcast; do not set it here.)
+        connection.streamHasSpaceAvailable = { [weak self] in
+            self?.serialQueue.async {
+                guard let self = self else { return }
+                self.isReady = !self.sendDataChunk()
+            }
         }
     }
 
+    /// Writes the next chunk of the frame in flight. Returns false when there is nothing
+    /// (left) to send, true while a frame is still going out.
     @discardableResult
     private func sendDataChunk() -> Bool {
         guard let data = dataToSend else { return false }
@@ -81,9 +113,10 @@ class SampleUploader {
             byteIndex += length
             bytesLeft -= length
             if bytesLeft == 0 {
+                // Done. The next "space available" event finds nothing to send and marks
+                // the uploader ready.
                 dataToSend = nil
                 byteIndex = 0
-                isReady = true
             }
         } else {
             NSLog("[Remote365Broadcast] writeBufferToStream failure")
@@ -99,7 +132,7 @@ class SampleUploader {
 
         CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
 
-        let scaleFactor = 1.0
+        let scaleFactor = kScaleFactor
         let width = CVPixelBufferGetWidth(imageBuffer) / Int(scaleFactor)
         let height = CVPixelBufferGetHeight(imageBuffer) / Int(scaleFactor)
         // CMGetAttachment returns CFTypeRef? (it is not generic), so cast the result.
@@ -137,7 +170,7 @@ class SampleUploader {
         return SampleUploader.imageContext.jpegRepresentation(
             of: image,
             colorSpace: colorSpace,
-            options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 1.0]
+            options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): kJpegQuality]
         )
     }
 }

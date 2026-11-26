@@ -165,6 +165,12 @@ const withExtensionTarget = (config, { extensionName, appleTeamId, deploymentTar
     if (!appBundleId) throw new Error('[withIosScreenShare] ios.bundleIdentifier is required');
     const extensionBundleId = `${appBundleId}.${extensionName}`;
 
+    // The Expo template has neither section, and addTarget only records the app target's
+    // dependency on the extension when both exist.
+    const objects = project.hash.project.objects;
+    objects.PBXTargetDependency = objects.PBXTargetDependency || {};
+    objects.PBXContainerItemProxy = objects.PBXContainerItemProxy || {};
+
     const target = project.addTarget(extensionName, 'app_extension', extensionName, extensionBundleId);
 
     // The group comes first: addPbxGroup creates the file references AND their

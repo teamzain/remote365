@@ -18,7 +18,10 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Allow Remote365 to use the camera during meetings.",
         "NSMicrophoneUsageDescription": "Allow Remote365 to use the microphone during meetings.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": [
+          "audio"
+        ]
       },
       "bitcode": false,
       "buildNumber": "4",

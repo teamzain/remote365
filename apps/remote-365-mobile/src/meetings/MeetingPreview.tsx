@@ -108,7 +108,6 @@ export function MeetingPreview({
       AsyncStorage.setItem(MEETING_PREF_KEYS.audio, String(audioOn)).catch(() => undefined),
       AsyncStorage.setItem(MEETING_PREF_KEYS.video, String(videoOn)).catch(() => undefined),
     ]);
-    stopStream();
     onConfirm({ audioOn, videoOn });
   };
 
@@ -134,11 +133,11 @@ export function MeetingPreview({
             )}
 
             <View style={styles.previewControls}>
-              <Pressable style={[styles.previewControlButton, control(54)]} onPress={toggleAudio}>
+              <Pressable style={[styles.previewControlButton, control(54)]} onPress={toggleAudio} disabled={busy}>
                 <Feather name={audioOn ? 'mic' : 'mic-off'} size={20} color={audioOn ? '#111315' : '#D92D20'} />
                 <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[styles.previewControlText, type(10, 14 / 10)]}>{t('Audio')}</Text>
               </Pressable>
-              <Pressable style={[styles.previewControlButton, control(54)]} onPress={toggleVideo}>
+              <Pressable style={[styles.previewControlButton, control(54)]} onPress={toggleVideo} disabled={busy}>
                 <Feather name={videoOn ? 'video' : 'video-off'} size={20} color={videoOn ? '#111315' : '#D92D20'} />
                 <Text maxFontSizeMultiplier={maxFontSizeMultiplier} style={[styles.previewControlText, type(10, 14 / 10)]}>{t('Video')}</Text>
               </Pressable>

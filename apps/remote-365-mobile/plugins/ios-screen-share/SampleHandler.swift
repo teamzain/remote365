@@ -81,16 +81,15 @@ class SampleHandler: RPBroadcastSampleHandler {
 
     private func setupConnection() {
         clientConnection?.didClose = { [weak self] error in
-            NSLog("[Remote365Broadcast] client connection closed")
-            if let error = error {
-                self?.finishBroadcastWithError(error)
-            } else {
-                self?.finishBroadcastWithError(NSError(
-                    domain: "ai.remote365.broadcast",
-                    code: 0,
-                    userInfo: [NSLocalizedDescriptionKey: "Screen sharing ended."]
-                ))
-            }
+            // The app stopped sharing, left the meeting or was closed. iOS only lets an
+            // extension end a broadcast "with an error", and shows its text to the user, so
+            // always use plain words: a raw socket error would read "Broken pipe".
+            NSLog("[Remote365Broadcast] client connection closed: %@", error?.localizedDescription ?? "ended by the app")
+            self?.finishBroadcastWithError(NSError(
+                domain: "ai.remote365.broadcast",
+                code: 0,
+                userInfo: [NSLocalizedDescriptionKey: "Screen sharing ended."]
+            ))
         }
     }
 }

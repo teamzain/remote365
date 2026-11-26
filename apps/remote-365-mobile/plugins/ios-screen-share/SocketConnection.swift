@@ -24,10 +24,14 @@ class SocketConnection: NSObject {
     private var streamQueue = DispatchQueue(label: "ai.remote365.broadcast.socket")
     private var networkThread: Thread?
 
-    /// Called when either stream errors or closes, so the handler can finish the broadcast.
+    /// Called once when either stream errors or the app closes its end, so the handler can
+    /// finish the broadcast.
     var didClose: ((Error?) -> Void)?
-    /// Raised when the socket can accept more bytes — the uploader waits on this for backpressure.
+    /// Raised once, when the output stream has opened.
     var didOpen: (() -> Void)?
+    /// Raised every time the socket can accept more bytes. The uploader sends the next
+    /// chunk of the frame in flight from here; a frame is far larger than one write.
+    var streamHasSpaceAvailable: (() -> Void)?
 
     init?(filePath path: String) {
         filePath = path
@@ -142,17 +146,42 @@ extension SocketConnection: StreamDelegate {
         switch eventCode {
         case .openCompleted:
             NSLog("[Remote365Broadcast] stream open")
+            if aStream == outputStream {
+                didOpen?()
+            }
+        case .hasBytesAvailable:
+            // The app never sends data. A zero-length read at the end of the stream is how
+            // a closed peer shows up here: the app stopped sharing or was killed.
+            if aStream == inputStream {
+                var byte: UInt8 = 0
+                let read = inputStream?.read(&byte, maxLength: 1) ?? 0
+                if read == 0 && aStream.streamStatus == .atEnd {
+                    NSLog("[Remote365Broadcast] app closed the connection")
+                    finish(with: nil)
+                }
+            }
         case .hasSpaceAvailable:
-            didOpen?()
+            if aStream == outputStream {
+                streamHasSpaceAvailable?()
+            }
         case .errorOccurred:
             NSLog("[Remote365Broadcast] stream error: %@", aStream.streamError?.localizedDescription ?? "unknown")
-            didClose?(aStream.streamError)
+            finish(with: aStream.streamError)
         case .endEncountered:
             // The app closed its end — the session finished or the app was killed.
             NSLog("[Remote365Broadcast] stream ended")
-            didClose?(nil)
+            finish(with: nil)
         default:
             break
         }
+    }
+
+    /// Tears the socket down, then reports the close exactly once. `close()` clears the
+    /// stream delegates, so no later event can report it again.
+    private func finish(with error: Error?) {
+        let callback = didClose
+        didClose = nil
+        close()
+        callback?(error)
     }
 }

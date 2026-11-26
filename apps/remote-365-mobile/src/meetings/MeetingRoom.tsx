@@ -12,6 +12,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Modal,
+  NativeModules,
   Platform,
   Pressable,
   ScrollView,
@@ -102,6 +103,13 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
   const mountedRef = useRef(true);
   // iOS only: the RPSystemBroadcastPickerView we programmatically tap to start a broadcast.
   const screenPickerRef = useRef<any>(null);
+  // Chat message ids already shown, so a repeat or our own echo is not counted as unread.
+  const seenChatIdsRef = useRef(new Set<string>());
+  // Peers we made the first offer to. Only that side restarts a failed connection, so the
+  // two ends never send restart offers at each other at the same moment.
+  const offererRef = useRef(new Set<string>());
+  // iOS only: timer that ends a share whose broadcast the user never actually started.
+  const iosShareWatchRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Names learned from join/participant events, used to backfill placeholder
   // entries that an early peer track creates before the identity arrives.
   const participantUsersRef = useRef<Map<string, Participant['user']>>(new Map());
@@ -126,11 +134,17 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
   const [isCameraOff, setIsCameraOff] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [awaitingShareApproval, setAwaitingShareApproval] = useState(false);
+  // Mirror for the socket handler: is a share request of ours still open?
+  const awaitingShareRef = useRef(false);
   const [mediaReady, setMediaReady] = useState(false);
   const [meetingError, setMeetingError] = useState('');
   // Waiting room: held until the host admits us; carries a message on decline.
   const [waitingForHost, setWaitingForHost] = useState(false);
   const [deniedMessage, setDeniedMessage] = useState('');
+  // The join failed outright (bad or expired code, no connection) rather than the host
+  // saying no. Without this the room stayed on screen looking live.
+  const [joinFailed, setJoinFailed] = useState(false);
+  const hasEnteredRef = useRef(false);
   const [isHost, setIsHost] = useState(false);
   // Host-set meeting permissions, mirrored to every participant.
   // Host-set participant permissions (see signaling MeetingPolicy).
@@ -152,8 +166,12 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
   // Android back: close whatever is open first, and never drop the call silently.
   // It used to unmount the meeting straight away, so a stray back swipe ended
   // your call with no warning.
+  const handledBackRef = useRef(backRequestToken);
   useEffect(() => {
-    if (!backRequestToken) return;
+    // Only a press made while THIS room is on screen counts; the counter lives in the app
+    // and keeps the value from earlier meetings.
+    if (backRequestToken === handledBackRef.current) return;
+    handledBackRef.current = backRequestToken;
     if (showEndOptions) { setShowEndOptions(false); return; }
     if (showMore) { setShowMore(false); return; }
     if (showChat) { setShowChat(false); return; }
@@ -213,6 +231,7 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
   const closeConnection = () => {
     peersRef.current.forEach((pc) => pc.close?.());
     peersRef.current.clear();
+    offererRef.current.clear();
     pendingIceRef.current.clear();
     wsRef.current?.close();
     wsRef.current = null;
@@ -227,6 +246,8 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
     localStreamRef.current = null;
     screenStreamRef.current?.getTracks?.().forEach((track: any) => track.stop());
     screenStreamRef.current = null;
+    if (iosShareWatchRef.current) clearInterval(iosShareWatchRef.current);
+    iosShareWatchRef.current = null;
   };
 
   useEffect(() => {
@@ -320,9 +341,17 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const addLocalTracks = (pc: any) => {
+  // fillMissingKinds: also ask to RECEIVE the kinds we are not sending. Only when this side
+  // is about to make the offer (or the remote offer is already applied); a transceiver
+  // added before a remote offer arrives cannot be matched to it and would be left over.
+  const addLocalTracks = (pc: any, fillMissingKinds = true) => {
     const stream = localStreamRef.current;
-    if (!stream) {
+    // While this phone is presenting, someone who joins must be sent the screen, not the
+    // camera: replaceVideoTrackEverywhere only reaches peers that existed when the share
+    // started, so newcomers used to see the presenter's camera under a "sharing" label.
+    const screenStream = screenStreamRef.current;
+    const screenTrack = screenStream?.getVideoTracks?.()[0] || null;
+    if (!stream && !screenTrack) {
       try {
         pc.addTransceiver?.('audio', { direction: 'recvonly' });
         pc.addTransceiver?.('video', { direction: 'recvonly' });
@@ -331,7 +360,13 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
       }
       return;
     }
-    stream.getTracks().forEach((track: any) => {
+    const outgoing: Array<{ track: any; stream: any }> = [];
+    (stream?.getTracks?.() || []).forEach((track: any) => {
+      if (track.kind === 'video' && screenTrack) return;
+      outgoing.push({ track, stream });
+    });
+    if (screenTrack) outgoing.push({ track: screenTrack, stream: screenStream });
+    outgoing.forEach(({ track, stream }) => {
       const exists = pc.getSenders?.().some((sender: any) => sender.track?.id === track.id);
       if (exists) return;
       // If a transceiver of this kind already exists (created recvonly before
@@ -349,6 +384,16 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
         pc.addTrack(track, stream);
       }
     });
+    // Whatever we are not sending, still ask to receive. With only the mic (or only the
+    // camera) permitted, the offer used to carry one kind and nothing of the other kind
+    // ever arrived. A no-op when answering: the remote offer created both already.
+    if (!fillMissingKinds) return;
+    for (const kind of ['audio', 'video']) {
+      const present = (pc.getTransceivers?.() || []).some((item: any) =>
+        item.receiver?.track?.kind === kind || item.sender?.track?.kind === kind);
+      if (present) continue;
+      try { pc.addTransceiver?.(kind, { direction: 'recvonly' }); } catch { /* optional on old builds */ }
+    }
   };
 
   const renegotiatePeer = async (targetId: string, pc: any) => {
@@ -447,15 +492,21 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed') pc.restartIce?.();
+      if (pc.connectionState !== 'failed') return;
+      pc.restartIce?.();
+      if (offererRef.current.has(targetId) && pc.signalingState === 'stable') {
+        void renegotiatePeer(targetId, pc);
+      }
     };
 
     return pc;
   };
 
   const initiatePeerConnection = async (targetId: string, shouldOffer: boolean) => {
+    if (shouldOffer && peersRef.current.has(targetId)) return;
+    if (shouldOffer) offererRef.current.add(targetId);
     const pc = createPeerConnection(targetId);
-    addLocalTracks(pc);
+    addLocalTracks(pc, shouldOffer);
     if (!shouldOffer) return;
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -516,7 +567,67 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
     sendJson({ type: 'meeting-share-response', meetingId: roomId, targetConnectionId: requesterConnectionId, allowed });
   };
 
+  const clearIosShareWatch = () => {
+    if (iosShareWatchRef.current) clearInterval(iosShareWatchRef.current);
+    iosShareWatchRef.current = null;
+  };
+
+  // iOS hands back a "live" screen track before the user has started the broadcast, and
+  // says nothing if they close the system sheet instead. Peers then see a share that
+  // never shows a picture. Watch whether any frames are actually being sent; if none
+  // are after half a minute, end the share.
+  const watchIosBroadcastStart = (screenTrack: any) => {
+    clearIosShareWatch();
+    const startedAt = Date.now();
+    let baseline: number | null = null;
+    iosShareWatchRef.current = setInterval(() => {
+      void (async () => {
+        if (screenStreamRef.current?.getVideoTracks?.()[0] !== screenTrack) {
+          clearIosShareWatch();
+          return;
+        }
+        let frames: number | null = null;
+        for (const pc of peersRef.current.values()) {
+          const sender = (pc.getSenders?.() || []).find((item: any) => item.track?.id === screenTrack.id);
+          if (!sender?.getStats) continue;
+          try {
+            const report: any = await sender.getStats();
+            report?.forEach?.((stat: any) => {
+              if (stat?.type !== 'outbound-rtp') return;
+              if ((stat.kind || stat.mediaType) !== 'video') return;
+              const count = Number(stat.framesEncoded ?? stat.framesSent ?? 0);
+              frames = Math.max(frames ?? 0, count);
+            });
+          } catch {
+            // Stats are best effort.
+          }
+        }
+        const elapsed = Date.now() - startedAt;
+        if (frames == null) {
+          // Nobody else is in the meeting (or stats are unavailable), so there is nothing
+          // to measure. Stop watching after a while and leave the share as it is.
+          if (elapsed > 60000) clearIosShareWatch();
+          return;
+        }
+        if (baseline == null) {
+          baseline = frames;
+          return;
+        }
+        if (frames > baseline) {
+          clearIosShareWatch();
+          return;
+        }
+        if (elapsed > 30000) {
+          clearIosShareWatch();
+          setNoticeToast(t('Screen sharing did not start.'));
+          void stopScreenShare();
+        }
+      })();
+    }, 2000);
+  };
+
   const stopScreenShare = async () => {
+    clearIosShareWatch();
     screenStreamRef.current?.getTracks?.().forEach((track: any) => track.stop());
     screenStreamRef.current = null;
     setScreenStreamUrl('');
@@ -534,22 +645,27 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
       // ONLY the user can start it — via the system picker. getDisplayMedia() alone
       // resolves with a track that never receives a frame, which is exactly how screen
       // share used to fail here: silently, with no error to catch.
+      // getDisplayMedia comes FIRST: it is what makes the app listen on the shared socket,
+      // and the extension gives up at once if nobody is listening when the broadcast starts.
+      const displayStream: any = await mediaDevices.getDisplayMedia();
       if (Platform.OS === 'ios') {
-        const picker = screenPickerRef.current;
-        if (picker) {
-          const handle = findNodeHandle(picker);
-          if (handle != null) {
-            UIManager.dispatchViewManagerCommand(
-              handle,
-              // The manager exports `show`; look it up rather than hardcoding an index,
-              // whose ordering is not guaranteed across library versions.
-              (UIManager as any).getViewManagerConfig?.('ScreenCapturePickerView')?.Commands?.show ?? 'show',
-              [handle],
-            );
-          }
+        // "Tap" the hidden system picker. The native `show` takes exactly ONE argument, the
+        // view tag. The old dispatchViewManagerCommand(handle, 'show', [handle]) passed two
+        // (React Native prepends the tag itself), which never opened the picker and raised
+        // an out-of-range exception in release builds.
+        const tag = findNodeHandle(screenPickerRef.current);
+        const manager = (NativeModules as any).ScreenCapturePickerViewManager;
+        if (tag == null) {
+          displayStream.getTracks?.().forEach((track: any) => track.stop());
+          throw new Error(t('Could not open the screen sharing picker.'));
+        }
+        if (manager?.show) {
+          manager.show(tag);
+        } else {
+          // The native side prepends the tag, so the argument list must stay empty.
+          UIManager.dispatchViewManagerCommand(tag, 'show' as any, []);
         }
       }
-      const displayStream: any = await mediaDevices.getDisplayMedia();
       const screenTrack = displayStream.getVideoTracks()[0];
       if (!screenTrack) throw new Error(t('No screen video track was returned.'));
       screenStreamRef.current = displayStream;
@@ -564,6 +680,7 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
       } catch {
         /* older builds without track events */
       }
+      if (Platform.OS === 'ios') watchIosBroadcastStart(screenTrack);
     } catch (err: any) {
       // A permission-dialog dismissal is not an error worth surfacing.
       if (err?.name !== 'NotAllowedError' && err?.message !== 'Permission denied') {
@@ -579,16 +696,16 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
       void stopScreenShare();
       return;
     }
-    // Android: MediaProjection's mandatory consent dialog. iOS: ReplayKit
-    // in-app capture via the same getDisplayMedia path (shares what this app
-    // shows while foregrounded; system-wide sharing needs a broadcast
-    // upload extension — a native add-on for a future build).
+    // Android: MediaProjection's mandatory consent dialog. iOS: the system "Start
+    // Broadcast" sheet, which runs our Broadcast Upload Extension and shares the
+    // whole screen, other apps included.
     if (isHost || meetingPolicy.allowScreenShare) {
       void startScreenShare();
       return;
     }
     // Participants without free-share permission must ask the host first; the
     // native OS dialog only appears once the host approves.
+    awaitingShareRef.current = true;
     setAwaitingShareApproval(true);
     sendJson({ type: 'meeting-share-request', meetingId: roomId });
   };
@@ -610,7 +727,16 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
       }));
     };
 
-    ws.onerror = () => setMeetingError(t('Meeting connection failed.'));
+    const failBeforeEntry = (message: string) => {
+      if (hasEnteredRef.current || wsRef.current !== ws) return;
+      setJoinFailed(true);
+      setWaitingForHost(true);
+      setDeniedMessage(message);
+    };
+    ws.onerror = () => {
+      setMeetingError(t('Meeting connection failed.'));
+      failBeforeEntry(t('Meeting connection failed.'));
+    };
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'ping') {
@@ -619,6 +745,7 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
       }
 
       if (data.type === 'meeting-waiting') {
+        setJoinFailed(false);
         setWaitingForHost(true);
         setDeniedMessage('');
         setMeetingError('');
@@ -626,6 +753,7 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
       }
 
       if (data.type === 'meeting-denied') {
+        setJoinFailed(false);
         setWaitingForHost(true);
         setDeniedMessage(data.error || t('The host declined your request to join.'));
         return;
@@ -635,6 +763,8 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
         if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
           iceServersRef.current = data.iceServers;
         }
+        hasEnteredRef.current = true;
+        setJoinFailed(false);
         setWaitingForHost(false);
         setDeniedMessage('');
         setMeetingError('');
@@ -658,6 +788,7 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
         const id = data.participantConnectionId;
         peersRef.current.get(id)?.close?.();
         peersRef.current.delete(id);
+        offererRef.current.delete(id);
         looseRemoteStreamsRef.current.delete(id);
         participantUsersRef.current.delete(id);
         setParticipants((current) => current.filter((item) => item.connectionId !== id));
@@ -706,6 +837,16 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
         return;
       }
 
+      if (data.type === 'meeting-host-changed') {
+        // The host left and the server handed us the seat (or the meeting's creator
+        // came back and took it again). Host controls follow isHost.
+        setIsHost(Boolean(data.isHost));
+        if (data.policy) setMeetingPolicy(normalizeMeetingPolicy(data.policy));
+        if (data.isHost) setNoticeToast(t('The host left. You are now the host of this meeting.'));
+        else setPendingGuests([]);
+        return;
+      }
+
       if (data.type === 'meeting-share-request') {
         // Host: a participant is asking permission to share their screen. Shown
         // as a custom in-app dialog (never an OS Alert).
@@ -715,7 +856,11 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
 
       if (data.type === 'meeting-share-response') {
         // The host answered our screen-share request.
+        const stillWanted = awaitingShareRef.current;
+        awaitingShareRef.current = false;
         setAwaitingShareApproval(false);
+        // Cancelled in the meantime: do nothing, whatever the answer was.
+        if (!stillWanted) return;
         if (data.allowed) {
           void startScreenShare();
         } else {
@@ -741,12 +886,14 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
       }
 
       if (data.type === 'meeting-chat' && data.message) {
-        let isNew = false;
-        setChatMessages((current) => {
-          if (current.some((message) => message.id === data.message.id)) return current;
-          isNew = true;
-          return [...current, data.message];
-        });
+        const chatId = String(data.message.id);
+        const isNew = !seenChatIdsRef.current.has(chatId);
+        if (isNew) {
+          seenChatIdsRef.current.add(chatId);
+          setChatMessages((current) => (
+            current.some((message) => message.id === data.message.id) ? current : [...current, data.message]
+          ));
+        }
         const fromSomeoneElse = data.message.senderConnectionId !== 'local';
         // A real message from that sender means they've stopped typing.
         if (fromSomeoneElse) {
@@ -797,6 +944,7 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
 
       if (data.type === 'meeting-error') {
         setMeetingError(data.error || t('Could not join this meeting.'));
+        failBeforeEntry(data.error || t('Could not join this meeting.'));
       }
     };
 
@@ -960,6 +1108,8 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
     lastTypingSentRef.current = 0;
     sendMeetingTyping(false);
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    // The server echoes our own message back; it must not count as new.
+    seenChatIdsRef.current.add(id);
     sendJson({ type: 'meeting-chat', meetingId: roomId, id, message: text });
     setChatMessages((current) => [...current, {
       id,
@@ -1124,7 +1274,7 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
       mirror={mirrorVideo}
       muted={isMuted}
       name={user?.name || t('You')}
-      noStream={!localStreamUrl}
+      noStream={mediaReady && !localStreamUrl}
       onFlipCamera={flipCamera}
       immersive={isImmersive}
       onFullscreen={() => setIsImmersive(true)}
@@ -1220,7 +1370,7 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
         {deniedMessage ? (
           <>
             <Feather name="x-circle" size={48} color="#FF383C" />
-            <Text style={[styles.waitingTitle, textSize(18)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{t('Not admitted')}</Text>
+            <Text style={[styles.waitingTitle, textSize(18)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{joinFailed ? t("Couldn't join") : t('Not admitted')}</Text>
             <Text style={[styles.waitingSubtitle, type(14, 20 / 14)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{deniedMessage}</Text>
           </>
         ) : (
@@ -1712,7 +1862,7 @@ export function MeetingRoom({ apiBaseUrl, meetingId, onLeave, token, user, backR
           <ResponsivePanel style={styles.approvalCard}>
             <Text style={[styles.approvalTitle, textSize(18)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{t('Screen sharing')}</Text>
             <Text style={[styles.approvalText, type(14, 20 / 14)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{t('Waiting for the host to allow you to share your screen...')}</Text>
-            <Pressable style={styles.approvalCancel} onPress={() => setAwaitingShareApproval(false)}>
+            <Pressable style={styles.approvalCancel} onPress={() => { awaitingShareRef.current = false; setAwaitingShareApproval(false); }}>
               <Text style={[styles.approvalCancelText, textSize(14)]} maxFontSizeMultiplier={maxFontSizeMultiplier}>{t('Cancel')}</Text>
             </Pressable>
           </ResponsivePanel>

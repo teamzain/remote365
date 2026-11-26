@@ -752,6 +752,44 @@ const removeFromMeetingLobby = (connectionId: string, notifyHost = true) => {
 // Place a participant into the live meeting room: register them, tell existing
 // participants, run the DB/status bookkeeping, and reply with meeting-joined.
 // Shared by the host (immediate) and guest (post-admit) paths.
+/** The meeting this connection has actually been let into (not merely waiting for). */
+function meetingRoomOf(connectionId: string): string | undefined {
+  const meetingId = connectionToMeeting.get(connectionId);
+  return meetingId && meetingRooms.get(meetingId)?.has(connectionId) ? meetingId : undefined;
+}
+
+/**
+ * The host left but others remain: hand the host seat to the longest-present participant,
+ * so someone can still admit people, approve screen shares and end the meeting. The
+ * meeting's creator takes the seat back when they rejoin.
+ */
+function promoteMeetingHost(meetingId: string, room: Set<string>) {
+  for (const candidateId of room) {
+    const candidateWs = localClients.get(candidateId);
+    if (!candidateWs || candidateWs.readyState !== WebSocket.OPEN) continue;
+    meetingHosts.set(meetingId, candidateId);
+    candidateWs.send(JSON.stringify({
+      type: 'meeting-host-changed',
+      meetingId,
+      isHost: true,
+      policy: meetingPolicies.get(meetingId) || DEFAULT_MEETING_POLICY
+    }));
+    const lobby = meetingLobbies.get(meetingId);
+    if (lobby) {
+      for (const [guestId, guestEntry] of lobby) {
+        candidateWs.send(JSON.stringify({
+          type: 'meeting-knock',
+          meetingId,
+          guestId,
+          guestName: guestEntry.participantName
+        }));
+      }
+    }
+    console.log(`[Meeting] Host left ${meetingId}; ${candidateId} is now the host.`);
+    return;
+  }
+}
+
 async function finalizeMeetingJoin(connectionId: string, meetingId: string, entry: MeetingLobbyEntry) {
   const ws = localClients.get(connectionId);
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -791,88 +829,9 @@ async function finalizeMeetingJoin(connectionId: string, meetingId: string, entr
   room.add(connectionId);
   connectionToMeeting.set(connectionId, meetingId);
 
-  if (meeting && decodedUserId) {
-    const collaborator = meeting.collaborators?.find((item: any) => item.userId === participantUserId);
-    const isCreator = participantUserId === meeting.createdById;
-    const isFirstRecordedJoin = isCreator
-      ? meeting.status === 'ACTIVE'
-      : Boolean(collaborator && !collaborator.joinedAt);
-
-    // A join (re)opens the meeting: ENDED rows come back as IN_PROGRESS with
-    // a fresh start time and no end time, so the link behaves like a room.
-    const reopening = meeting.status === 'ENDED';
-    const liveData = {
-      status: 'IN_PROGRESS',
-      startedAt: reopening ? new Date() : (meeting.startedAt || new Date()),
-      ...(reopening ? { endedAt: null } : {})
-    };
-    if (isCreator) {
-      await (prisma as any).remoteSession.update({ where: { id: meeting.id }, data: liveData });
-      if (meeting.status !== 'IN_PROGRESS') void publishMeetingSync(meeting, 'started');
-    } else if (collaborator) {
-      await (prisma as any).remoteSessionCollaborator.update({
-        where: { id: collaborator.id },
-        data: { status: 'JOINED', joinedAt: collaborator.joinedAt || new Date() }
-      });
-      await (prisma as any).remoteSession.update({ where: { id: meeting.id }, data: liveData });
-      if (meeting.status !== 'IN_PROGRESS') void publishMeetingSync(meeting, 'started');
-    } else {
-      // Joined with the code or link, not invited: remember it, so the meeting
-      // shows in this person's Recent meetings like the ones they created or were
-      // invited to (the list only covers creator + collaborators, which left it
-      // empty for everyone who joins by code).
-      try {
-        const joiner = await (prisma as any).user.findUnique({
-          where: { id: decodedUserId },
-          select: { email: true, name: true }
-        });
-        if (joiner?.email) {
-          const now = new Date();
-          await (prisma as any).remoteSessionCollaborator.upsert({
-            where: { sessionId_email: { sessionId: meeting.id, email: joiner.email } },
-            update: { status: 'JOINED', joinedAt: now, userId: decodedUserId },
-            create: {
-              sessionId: meeting.id,
-              userId: decodedUserId,
-              email: joiner.email,
-              name: joiner.name || participantName || null,
-              status: 'JOINED',
-              joinedAt: now
-            }
-          });
-          void publishMeetingSync({ ...meeting, createdById: null, collaborators: [{ userId: decodedUserId }] }, 'joined');
-        }
-      } catch (err) {
-        console.warn('[Meeting] Could not record joiner for ' + meeting.sessionCode + ':', err);
-      }
-    }
-
-    if (isFirstRecordedJoin && meeting.conversationId) {
-      await publishStructuredChatMessage(meeting.conversationId, participantUserId, {
-        kind: 'meeting-status',
-        remoteSessionId: meeting.id,
-        sessionCode: meeting.sessionCode,
-        status: 'IN_PROGRESS',
-        event: 'JOINED',
-        participantName,
-        text: `${participantName} has joined the meeting.`,
-        createdAt: new Date().toISOString()
-      });
-      if (!isCreator && !creatorWasPresent) {
-        await publishStructuredChatMessage(meeting.conversationId, participantUserId, {
-          kind: 'meeting-status',
-          remoteSessionId: meeting.id,
-          sessionCode: meeting.sessionCode,
-          status: 'WAITING',
-          event: 'WAITING',
-          participantName,
-          text: "I've joined, waiting for you.",
-          createdAt: new Date().toISOString()
-        });
-      }
-    }
-  }
-
+  // Tell the joiner they are in first. Nothing below may delay or prevent this: the
+  // bookkeeping awaits several queries, and a join handled during that wait used to reach
+  // this client before its own meeting-joined (both ends then offered to each other).
   const participants = [];
   for (const pId of room) {
     if (pId !== connectionId) {
@@ -895,6 +854,93 @@ async function finalizeMeetingJoin(connectionId: string, meetingId: string, entr
     iceServers: createMeetingIceServers(),
     sfu: createLiveKitJoinConfig(meetingId, participantUserId, participantUser.name)
   }));
+
+  // Records only: status, collaborator timestamps and the chat card.
+  try {
+    if (meeting && decodedUserId) {
+      const collaborator = meeting.collaborators?.find((item: any) => item.userId === participantUserId);
+      const isCreator = participantUserId === meeting.createdById;
+      const isFirstRecordedJoin = isCreator
+        ? meeting.status === 'ACTIVE'
+        : Boolean(collaborator && !collaborator.joinedAt);
+
+      // A join (re)opens the meeting: ENDED rows come back as IN_PROGRESS with
+      // a fresh start time and no end time, so the link behaves like a room.
+      const reopening = meeting.status === 'ENDED';
+      const liveData = {
+        status: 'IN_PROGRESS',
+        startedAt: reopening ? new Date() : (meeting.startedAt || new Date()),
+        ...(reopening ? { endedAt: null } : {})
+      };
+      if (isCreator) {
+        await (prisma as any).remoteSession.update({ where: { id: meeting.id }, data: liveData });
+        if (meeting.status !== 'IN_PROGRESS') void publishMeetingSync(meeting, 'started');
+      } else if (collaborator) {
+        await (prisma as any).remoteSessionCollaborator.update({
+          where: { id: collaborator.id },
+          data: { status: 'JOINED', joinedAt: collaborator.joinedAt || new Date() }
+        });
+        await (prisma as any).remoteSession.update({ where: { id: meeting.id }, data: liveData });
+        if (meeting.status !== 'IN_PROGRESS') void publishMeetingSync(meeting, 'started');
+      } else {
+        // Joined with the code or link, not invited: remember it, so the meeting
+        // shows in this person's Recent meetings like the ones they created or were
+        // invited to (the list only covers creator + collaborators, which left it
+        // empty for everyone who joins by code).
+        try {
+          const joiner = await (prisma as any).user.findUnique({
+            where: { id: decodedUserId },
+            select: { email: true, name: true }
+          });
+          if (joiner?.email) {
+            const now = new Date();
+            await (prisma as any).remoteSessionCollaborator.upsert({
+              where: { sessionId_email: { sessionId: meeting.id, email: joiner.email } },
+              update: { status: 'JOINED', joinedAt: now, userId: decodedUserId },
+              create: {
+                sessionId: meeting.id,
+                userId: decodedUserId,
+                email: joiner.email,
+                name: joiner.name || participantName || null,
+                status: 'JOINED',
+                joinedAt: now
+              }
+            });
+            void publishMeetingSync({ ...meeting, createdById: null, collaborators: [{ userId: decodedUserId }] }, 'joined');
+          }
+        } catch (err) {
+          console.warn('[Meeting] Could not record joiner for ' + meeting.sessionCode + ':', err);
+        }
+      }
+
+      if (isFirstRecordedJoin && meeting.conversationId) {
+        await publishStructuredChatMessage(meeting.conversationId, participantUserId, {
+          kind: 'meeting-status',
+          remoteSessionId: meeting.id,
+          sessionCode: meeting.sessionCode,
+          status: 'IN_PROGRESS',
+          event: 'JOINED',
+          participantName,
+          text: `${participantName} has joined the meeting.`,
+          createdAt: new Date().toISOString()
+        });
+        if (!isCreator && !creatorWasPresent) {
+          await publishStructuredChatMessage(meeting.conversationId, participantUserId, {
+            kind: 'meeting-status',
+            remoteSessionId: meeting.id,
+            sessionCode: meeting.sessionCode,
+            status: 'WAITING',
+            event: 'WAITING',
+            participantName,
+            text: "I've joined, waiting for you.",
+            createdAt: new Date().toISOString()
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[Meeting] Join bookkeeping failed for ${meetingId}:`, err);
+  }
 }
 
 // Who is recording each meeting. Authoritative here (single signaling node);
@@ -930,8 +976,10 @@ const leaveMeetingRoom = (connectionId: string) => {
   const meetingId = connectionToMeeting.get(connectionId);
   if (!meetingId) return;
 
-  // If the host leaves, drop the pointer so the creator reclaims it on rejoin.
-  if (meetingHosts.get(meetingId) === connectionId) meetingHosts.delete(meetingId);
+  // If the host leaves, drop the pointer. Someone still in the room takes the seat below;
+  // the creator reclaims it on rejoin.
+  const wasHost = meetingHosts.get(meetingId) === connectionId;
+  if (wasHost) meetingHosts.delete(meetingId);
 
   const room = meetingRooms.get(meetingId);
   if (room) {
@@ -1025,6 +1073,7 @@ const leaveMeetingRoom = (connectionId: string) => {
           pWs.send(leaveNotification);
         }
       }
+      if (wasHost) promoteMeetingHost(meetingId, room);
     }
   }
 
@@ -1878,6 +1927,12 @@ async function startServer() {
             const isHost = isCreator || (!meeting && !hostConnId && roomEmpty && Boolean(decoded?.userId)) || claimsHost;
 
             if (isHost) {
+              if (hostConnId && hostConnId !== connectionId) {
+                const previousHostWs = localClients.get(hostConnId);
+                if (previousHostWs && previousHostWs.readyState === WebSocket.OPEN) {
+                  previousHostWs.send(JSON.stringify({ type: 'meeting-host-changed', meetingId, isHost: false }));
+                }
+              }
               meetingHosts.set(meetingId, connectionId);
               await finalizeMeetingJoin(connectionId, meetingId, joinEntry);
               // Surface anyone who was already waiting before the host arrived.
@@ -2029,7 +2084,7 @@ async function startServer() {
           }
 
           case 'meeting-chat': {
-            const currentMeetingId = connectionToMeeting.get(connectionId);
+            const currentMeetingId = meetingRoomOf(connectionId);
             const meetingId = normalizeMeetingId(data.meetingId);
             const message = String(data.message || '').trim();
             if (!currentMeetingId || meetingId !== currentMeetingId || !message) break;
@@ -2059,7 +2114,7 @@ async function startServer() {
           }
 
           case 'meeting-typing': {
-            const currentMeetingId = connectionToMeeting.get(connectionId);
+            const currentMeetingId = meetingRoomOf(connectionId);
             const meetingId = normalizeMeetingId(data.meetingId);
             if (!currentMeetingId || meetingId !== currentMeetingId) break;
 
@@ -2086,7 +2141,7 @@ async function startServer() {
           }
 
           case 'meeting-control-request': {
-            const currentMeetingId = connectionToMeeting.get(connectionId);
+            const currentMeetingId = meetingRoomOf(connectionId);
             const meetingId = normalizeMeetingId(data.meetingId);
             const targetConnectionId = data.targetConnectionId;
             if (!currentMeetingId || meetingId !== currentMeetingId || !targetConnectionId) break;
@@ -2108,7 +2163,7 @@ async function startServer() {
           }
 
           case 'meeting-control-response': {
-            const currentMeetingId = connectionToMeeting.get(connectionId);
+            const currentMeetingId = meetingRoomOf(connectionId);
             const meetingId = normalizeMeetingId(data.meetingId);
             const targetConnectionId = data.targetConnectionId;
             if (!currentMeetingId || meetingId !== currentMeetingId || !targetConnectionId) break;
@@ -2272,7 +2327,7 @@ async function startServer() {
 
           case 'meeting-share-request': {
             // A participant asks the meeting host for permission to share their screen.
-            const currentMeetingId = connectionToMeeting.get(connectionId);
+            const currentMeetingId = meetingRoomOf(connectionId);
             const meetingId = normalizeMeetingId(data.meetingId);
             if (!currentMeetingId || meetingId !== currentMeetingId) break;
 
@@ -2284,9 +2339,14 @@ async function startServer() {
             }
 
             const hostConnId = meetingHosts.get(currentMeetingId);
-            if (!hostConnId || hostConnId === connectionId) break;
+            if (hostConnId === connectionId) break;
 
-            const hostWs = localClients.get(hostConnId);
+            const hostWs = hostConnId ? localClients.get(hostConnId) : undefined;
+            if (!hostWs || hostWs.readyState !== WebSocket.OPEN) {
+              // Nobody can answer: say no now rather than leaving the requester waiting.
+              ws.send(JSON.stringify({ type: 'meeting-share-response', meetingId: currentMeetingId, allowed: false, reason: 'no-host' }));
+              break;
+            }
             if (hostWs && hostWs.readyState === WebSocket.OPEN) {
               hostWs.send(JSON.stringify({
                 type: 'meeting-share-request',
@@ -2300,7 +2360,7 @@ async function startServer() {
 
           case 'meeting-share-response': {
             // Only the host can grant or deny screen sharing.
-            const currentMeetingId = connectionToMeeting.get(connectionId);
+            const currentMeetingId = meetingRoomOf(connectionId);
             const meetingId = normalizeMeetingId(data.meetingId);
             const targetConnectionId = String(data.targetConnectionId || '');
             if (!currentMeetingId || meetingId !== currentMeetingId) break;
@@ -2324,7 +2384,7 @@ async function startServer() {
             const { targetConnectionId, signal, meetingId } = data;
             if (!targetConnectionId || !signal) break;
 
-            const currentMeetingId = connectionToMeeting.get(connectionId);
+            const currentMeetingId = meetingRoomOf(connectionId);
             if (!currentMeetingId || normalizeMeetingId(meetingId) !== currentMeetingId) break;
 
             const room = meetingRooms.get(currentMeetingId);
