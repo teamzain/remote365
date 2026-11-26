@@ -21,6 +21,15 @@
     @preprod host pp.remote365.ai
     header @preprod X-Robots-Tag "noindex, nofollow"
 
+    # Never let /index reach Next.js. Next keeps the home page under the cache
+    # key "/index", but routes a request for /index to the app's catch-all page,
+    # which answers 404. When that request lands while the home page is due for
+    # its 5-minute regeneration, the 404 is written into the home page's slot
+    # and "/" returns "Page not found" until the web container is recreated
+    # (prod's home page was down this way from 20 to 26 Nov 2026).
+    @homeAlias path /index
+    redir @homeAlias / 301
+
     # Universal API handling
     handle /api/* {
         # Auth & Admin Services
